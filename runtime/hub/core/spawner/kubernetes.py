@@ -97,6 +97,9 @@ class RemoteLabKubeSpawner(KubeSpawner):
     ALLOWED_GIT_PROVIDERS: set[str] = set()
     MAX_CLONE_TIMEOUT: int = 0
     GIT_INIT_CONTAINER_IMAGE: str = ""
+    GITHUB_APP_NAME: str = ""
+    DEFAULT_ACCESS_TOKEN: bool = False
+    DEFAULT_ACCESS_TOKEN_SECRET: str = "jupyterhub-git-default-token"
 
     @classmethod
     def configure_from_config(cls, config: HubConfig) -> None:
@@ -137,6 +140,8 @@ class RemoteLabKubeSpawner(KubeSpawner):
         cls.GIT_INIT_CONTAINER_IMAGE = git_config.initContainerImage
         cls.ALLOWED_GIT_PROVIDERS = set(git_config.allowedProviders)
         cls.MAX_CLONE_TIMEOUT = git_config.maxCloneTimeout
+        cls.GITHUB_APP_NAME = git_config.githubAppName
+        cls.DEFAULT_ACCESS_TOKEN = bool(git_config.defaultAccessToken)
 
     async def get_user_teams(self) -> list[str]:
         """
@@ -348,11 +353,6 @@ class RemoteLabKubeSpawner(KubeSpawner):
             repo_url = ""
 
         try:
-            access_token = formdata.get("access_token", [""])[0].strip()
-        except Exception:
-            access_token = ""
-
-        try:
             repo_branch = formdata.get("repo_branch", [""])[0].strip()
         except Exception:
             repo_branch = ""
@@ -361,8 +361,6 @@ class RemoteLabKubeSpawner(KubeSpawner):
             options["repo_url"] = repo_url
         if repo_branch:
             options["repo_branch"] = repo_branch
-        if access_token:
-            options["access_token"] = access_token
 
         return options
 
@@ -441,6 +439,54 @@ class RemoteLabKubeSpawner(KubeSpawner):
                 return vm["mountPath"]
         return "/home/jovyan"
 
+    def _create_git_token_secret(self, access_token: str) -> str:
+        """Create a K8s Secret containing the git access token.
+
+        The Secret is bound to the user pod via ownerReferences so it
+        is automatically garbage-collected when the pod is deleted.
+        """
+        import secrets as _secrets
+
+        from kubernetes import client as k8s_client
+
+        safe_username = re.sub(r"[^a-z0-9-]", "-", self.user.name.lower())[:40]
+        suffix = _secrets.token_hex(3)
+        secret_name = f"git-token-{safe_username}-{suffix}"
+
+        secret = k8s_client.V1Secret(
+            metadata=k8s_client.V1ObjectMeta(
+                name=secret_name,
+                namespace=self.namespace,
+                labels={
+                    "component": "git-token",
+                    "heritage": "jupyterhub",
+                    "app.kubernetes.io/managed-by": "jupyterhub",
+                    "hub.jupyter.org/username": safe_username,
+                },
+            ),
+            string_data={"token": access_token},
+            type="Opaque",
+        )
+
+        self.api.create_namespaced_secret(self.namespace, secret)
+        self.log.info(f"Created git token secret {secret_name} for user {self.user.name}")
+        return secret_name
+
+    def _cleanup_git_token_secrets(self) -> None:
+        """Clean up any leftover git token secrets for this user."""
+        try:
+            safe_username = re.sub(r"[^a-z0-9-]", "-", self.user.name.lower())[:40]
+            label_selector = f"component=git-token,hub.jupyter.org/username={safe_username}"
+            secrets = self.api.list_namespaced_secret(self.namespace, label_selector=label_selector)
+            for secret in secrets.items:
+                try:
+                    self.api.delete_namespaced_secret(secret.metadata.name, self.namespace)
+                    self.log.info(f"Cleaned up git token secret {secret.metadata.name}")
+                except Exception:
+                    pass
+        except Exception as e:
+            self.log.warning(f"Failed to cleanup git token secrets: {e}")
+
     def _build_git_init_container(
         self,
         repo_url: str,
@@ -448,6 +494,7 @@ class RemoteLabKubeSpawner(KubeSpawner):
         home_volume_name: str,
         home_mount_path: str,
         repo_branch: str = "",
+        access_token: str = "",
     ) -> dict:
         """
         Build an init container spec that clones a repository into the home mount path.
@@ -473,6 +520,32 @@ class RemoteLabKubeSpawner(KubeSpawner):
         ]
         if repo_branch:
             env.append({"name": "BRANCH", "value": repo_branch})
+
+        if access_token:
+            secret_name = self._create_git_token_secret(access_token)
+            env.append(
+                {
+                    "name": "GIT_ACCESS_TOKEN",
+                    "valueFrom": {
+                        "secretKeyRef": {
+                            "name": secret_name,
+                            "key": "token",
+                        }
+                    },
+                }
+            )
+        elif self.DEFAULT_ACCESS_TOKEN:
+            env.append(
+                {
+                    "name": "GIT_ACCESS_TOKEN",
+                    "valueFrom": {
+                        "secretKeyRef": {
+                            "name": self.DEFAULT_ACCESS_TOKEN_SECRET,
+                            "key": "token",
+                        }
+                    },
+                }
+            )
 
         return {
             "name": "init-clone-repo",
@@ -692,6 +765,15 @@ class RemoteLabKubeSpawner(KubeSpawner):
             repo_url = ""
             repo_branch = ""
 
+        # Token fallback: OAuth token (GitHub App) > default token secret
+        access_token = ""
+        try:
+            auth_state = await self.user.get_auth_state()
+            if auth_state and auth_state.get("access_token") and self.GITHUB_APP_NAME:
+                access_token = auth_state["access_token"]
+        except Exception:
+            pass
+
         # Check if the selected resource permits git cloning
         resource_type = self.user_options.get("resource_type", "")
         resource_metadata = self._hub_config.get_resource_metadata(resource_type) if self._hub_config else None
@@ -727,7 +809,7 @@ class RemoteLabKubeSpawner(KubeSpawner):
                     home_volume_name = f"volume-{safe_username}"
                     home_mount_path = self._get_home_mount_path(home_volume_name)
                     init_container = self._build_git_init_container(
-                        sanitized_url, repo_name, home_volume_name, home_mount_path, repo_branch
+                        sanitized_url, repo_name, home_volume_name, home_mount_path, repo_branch, access_token
                     )
                     self.init_containers = [init_container] + list(self.init_containers or [])
 
@@ -817,6 +899,9 @@ class RemoteLabKubeSpawner(KubeSpawner):
 
     async def stop(self, now=False):
         """Stop the container and record quota usage."""
+        # Clean up any leftover git token secrets
+        self._cleanup_git_token_secrets()
+
         if self.quota_enabled and hasattr(self, "usage_session_id") and self.usage_session_id:
             session_id = self.usage_session_id
             username = self.user.name

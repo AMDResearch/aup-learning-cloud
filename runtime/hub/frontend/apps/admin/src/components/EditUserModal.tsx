@@ -21,6 +21,7 @@ import { useState, useEffect } from 'react';
 import { Modal, Button, Badge, Alert, Form, InputGroup } from 'react-bootstrap';
 import type { User, Group } from '@auplc/shared';
 import * as api from '@auplc/shared';
+import { isGitHubUser as isGitHubUsername } from '@auplc/shared';
 
 interface Props {
   show: boolean;
@@ -103,7 +104,7 @@ export function EditUserModal({ show, user, onHide, onUpdate }: Props) {
     return new Date(dateStr).toLocaleString();
   };
 
-  const isGitHubUser = user.name.startsWith('github:');
+  const isGitHubUser = isGitHubUsername(user.name);
 
   return (
     <Modal show={show} onHide={onHide} size="lg">

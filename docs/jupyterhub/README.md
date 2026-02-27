@@ -214,23 +214,60 @@ hub:
         </div>
 ```
 
-### GitHub OAuth
+### GitHub Authentication
+
+GitHub authentication uses a [GitHub App](https://docs.github.com/en/apps) for login and optional private repository access.
 
 ```yaml
+custom:
+  gitClone:
+    githubAppName: "your-app-slug"  # Enables private repo access & repo picker
+
 hub:
   config:
     GitHubOAuthenticator:
       oauth_callback_url: "https://<Your.domain>/hub/github/oauth_callback"
-      client_id: "YOUR_CLIENT_ID"
-      client_secret: "YOUR_CLIENT_SECRET"
+      client_id: "<GitHub App Client ID>"
+      client_secret: "<GitHub App Client Secret>"
       allowed_organizations:
         - YOUR-ORG-NAME
-      scope:
-        - read:user
-        - read:org
+      scope: []  # GitHub App uses App-level permissions, not OAuth scopes
 ```
 
 See [How_to_Setup_GitHub_OAuth.md](./How_to_Setup_GitHub_OAuth.md) for setup instructions.
+
+### Git Repository Cloning
+
+Resources with `allowGitClone: true` show a Git URL input on the spawn page. Users can clone a repository at container startup.
+
+```yaml
+custom:
+  gitClone:
+    allowedProviders:
+      - github.com
+      - gitlab.com
+    maxCloneTimeout: 300
+```
+
+#### Private Repository Access
+
+Two independent mechanisms (can be used together):
+
+**1. GitHub App** — for GitHub OAuth users
+
+Set `githubAppName` (see above). Users authorize per-repo read-only access via the GitHub App UI. A repo picker appears on the spawn page showing authorized repositories.
+
+**2. Default Access Token** — for all users including auto-login
+
+```yaml
+custom:
+  gitClone:
+    defaultAccessToken: "ghp_xxxx"  # Bot/service account PAT
+```
+
+Admin-configured PAT applied transparently to all users. Helm auto-creates a K8s Secret. Useful for classroom / single-node setups where everyone needs access to the same private repos without GitHub login.
+
+Token priority: OAuth token (GitHub App) > defaultAccessToken > none (public only)
 
 ---
 

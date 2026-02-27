@@ -140,6 +140,10 @@ class CustomFirstUseAuthenticator(FirstUseAuthenticator):
         if not username or not password:
             return None
 
+        if ":" in username:
+            self.log.warning("Rejected username containing ':': %s", username)
+            return None
+
         # Check if user exists in JupyterHub
         if not self._user_exists(username):
             self.log.warning(f"User {username} not found in JupyterHub database")

@@ -107,8 +107,13 @@ SOFTWARE.
     margin-bottom: 20px;
     border: 1px solid #e0e0e0;
     border-radius: 12px;
-    overflow: hidden;
+    overflow: visible;
     box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+
+.collapsed .resource-category,
+.resource-category.collapsed {
+    overflow: hidden;
 }
 
 .resource-category-header {
@@ -145,7 +150,7 @@ SOFTWARE.
 
 .collapsible-content {
     max-height: 2000px;
-    overflow: hidden;
+    overflow: visible;
     transition: max-height 0.3s ease-out, padding 0.3s ease-out;
     background: #ffffff;
     padding: 20px;
@@ -154,6 +159,7 @@ SOFTWARE.
 .collapsed .collapsible-content {
     max-height: 0;
     padding: 0 20px;
+    overflow: hidden;
 }
 
 .resource-container {
@@ -519,3 +525,183 @@ SOFTWARE.
 .repo-url-hint:hover .repo-url-tooltip {
     display: block;
 }
+
+/* ========== Repo Picker (GitHub App) ========== */
+
+.repo-picker {
+    margin-bottom: 14px;
+    position: relative;
+}
+
+.repo-picker h6 {
+    color: #2e3440;
+    font-size: 1rem;
+    margin-bottom: 10px;
+    font-weight: 600;
+}
+
+.repo-picker-trigger {
+    display: flex;
+    align-items: center;
+    padding: 9px 12px;
+    border: 1px solid #e5e9f0;
+    border-radius: 8px;
+    cursor: pointer;
+    background: #f8f9fc;
+    transition: border-color 0.2s, border-radius 0.15s;
+}
+
+.repo-picker-trigger:hover { border-color: #2c3e50; }
+
+.repo-picker-trigger.open {
+    border-color: #2c3e50;
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+    border-bottom-color: transparent;
+}
+
+.repo-picker-trigger-text {
+    flex: 1;
+    font-size: 13px;
+    color: #2c3e50;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.repo-picker-trigger-placeholder {
+    flex: 1;
+    font-size: 13px;
+    color: #adb5bd;
+}
+
+.repo-picker-chevron {
+    font-size: 11px;
+    color: #6c757d;
+    margin-left: 8px;
+    transition: transform 0.2s;
+}
+
+.repo-picker-trigger.open .repo-picker-chevron { transform: rotate(180deg); }
+
+.repo-picker-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 10;
+    border: 1px solid #2c3e50;
+    border-top: none;
+    border-radius: 0 0 8px 8px;
+    max-height: 210px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    background: #f8f9fc;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.repo-picker-filter {
+    padding: 8px 12px;
+    border: none;
+    border-bottom: 1px solid #e5e9f0;
+    outline: none;
+    font-size: 13px;
+    color: #2c3e50;
+    background: transparent;
+    box-sizing: border-box;
+    width: 100%;
+}
+
+.repo-picker-filter::placeholder { color: #adb5bd; }
+
+.repo-picker-list {
+    overflow-y: auto;
+    flex: 1;
+}
+
+.repo-picker-item {
+    padding: 7px 12px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 13px;
+    color: #2c3e50;
+    transition: background 0.15s;
+}
+
+.repo-picker-item:hover { background: #eceff4; }
+.repo-picker-item.selected { background: #e0e6ee; }
+
+.repo-picker-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+}
+
+.repo-picker-private {
+    font-size: 11px;
+    color: #6c757d;
+    margin-left: 8px;
+    flex-shrink: 0;
+}
+
+.repo-picker-empty {
+    padding: 10px 12px;
+    color: #6c757d;
+    font-size: 13px;
+}
+
+.repo-picker-footer {
+    padding: 7px 12px;
+    border-top: 1px solid #e5e9f0;
+    font-size: 12px;
+    color: #4c566a;
+    text-decoration: none;
+    display: block;
+}
+
+.repo-picker-footer:hover { text-decoration: underline; }
+
+/* ========== GitHub App Install Prompt ========== */
+
+.github-app-prompt {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 10px;
+    font-size: 13px;
+    color: #6c757d;
+    text-decoration: none;
+}
+
+.github-app-prompt:hover {
+    color: #2d6a27;
+    text-decoration: underline;
+}
+
+.github-app-prompt svg { flex-shrink: 0; }
+
+/* ========== Dark Mode — Repo Picker ========== */
+[data-bs-theme="dark"] .repo-picker h6 { color: var(--dark-text-primary) !important; }
+[data-bs-theme="dark"] .repo-picker-trigger { background: var(--dark-bg-tertiary) !important; border-color: var(--dark-border) !important; }
+[data-bs-theme="dark"] .repo-picker-trigger:hover { border-color: var(--dark-text-secondary) !important; }
+[data-bs-theme="dark"] .repo-picker-trigger.open { border-color: var(--dark-text-secondary) !important; border-bottom-color: transparent !important; }
+[data-bs-theme="dark"] .repo-picker-trigger-text { color: var(--dark-text-primary) !important; }
+[data-bs-theme="dark"] .repo-picker-trigger-placeholder { color: var(--dark-text-muted) !important; }
+[data-bs-theme="dark"] .repo-picker-chevron { color: var(--dark-text-muted) !important; }
+[data-bs-theme="dark"] .repo-picker-dropdown { background: var(--dark-bg-tertiary) !important; border-color: var(--dark-text-secondary) !important; }
+[data-bs-theme="dark"] .repo-picker-filter { color: var(--dark-text-primary) !important; border-bottom-color: var(--dark-border) !important; }
+[data-bs-theme="dark"] .repo-picker-filter::placeholder { color: var(--dark-text-muted) !important; }
+[data-bs-theme="dark"] .repo-picker-item { color: var(--dark-text-primary) !important; }
+[data-bs-theme="dark"] .repo-picker-item:hover { background: #3d444b !important; }
+[data-bs-theme="dark"] .repo-picker-item.selected { background: #3a4550 !important; }
+[data-bs-theme="dark"] .repo-picker-private { color: var(--dark-text-muted) !important; }
+[data-bs-theme="dark"] .repo-picker-empty { color: var(--dark-text-muted) !important; }
+[data-bs-theme="dark"] .repo-picker-footer { color: var(--dark-text-secondary) !important; border-top-color: var(--dark-border) !important; }
+
+/* ========== Dark Mode — GitHub App Prompt ========== */
+[data-bs-theme="dark"] .github-app-prompt { color: var(--dark-text-muted) !important; }
+[data-bs-theme="dark"] .github-app-prompt:hover { color: #7ec87a !important; }

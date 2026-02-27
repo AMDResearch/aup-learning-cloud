@@ -3391,6 +3391,19 @@ properties:
             description: |
               Maximum time in seconds allowed for a clone or fetch operation.
               Defaults to 300 (5 minutes).
+          githubAppName:
+            type: string
+            description: |
+              GitHub App slug name. When configured, enables GitHub App integration
+              for private repo access and repo picker UI.
+              Leave empty to disable GitHub App features.
+          defaultAccessToken:
+            type: string
+            description: |
+              Default access token for private repos (e.g. a bot/service account PAT).
+              Used as fallback when user provides no PAT and no OAuth token is available.
+              Priority: user PAT > OAuth token > defaultAccessToken.
+              Helm auto-creates a K8s Secret (jupyterhub-git-default-token) from this value.
 
       apiService:
         type: object

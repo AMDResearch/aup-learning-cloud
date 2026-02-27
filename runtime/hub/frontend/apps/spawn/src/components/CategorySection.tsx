@@ -18,7 +18,7 @@
 // SOFTWARE.
 
 import { memo, useCallback } from 'react';
-import type { Resource, ResourceGroup, Accelerator } from '@auplc/shared';
+import type { Resource, ResourceGroup, Accelerator, GitHubRepo } from '@auplc/shared';
 import { CourseCard } from './CourseCard';
 
 interface Props {
@@ -38,6 +38,10 @@ interface Props {
   repoBranch: string;
   onRepoUrlChange: (value: string) => void;
   allowedGitProviders: string[];
+  githubAppName: string;
+  githubRepos: GitHubRepo[];
+  githubAppInstalled: boolean;
+  onSelectGitHubRepo: (repo: GitHubRepo) => void;
 }
 
 export const CategorySection = memo(function CategorySection({
@@ -57,6 +61,10 @@ export const CategorySection = memo(function CategorySection({
   repoBranch,
   onRepoUrlChange,
   allowedGitProviders,
+  githubAppName,
+  githubRepos,
+  githubAppInstalled,
+  onSelectGitHubRepo,
 }: Props) {
   const handleToggle = useCallback(() => {
     // When collapsing, clear selection if the selected resource is in this group
@@ -96,6 +104,10 @@ export const CategorySection = memo(function CategorySection({
             repoBranch={repoBranch}
             onRepoUrlChange={onRepoUrlChange}
             allowedGitProviders={allowedGitProviders}
+            githubAppName={githubAppName}
+            githubRepos={githubRepos}
+            githubAppInstalled={githubAppInstalled}
+            onSelectGitHubRepo={onSelectGitHubRepo}
           />
         ))}
       </div>

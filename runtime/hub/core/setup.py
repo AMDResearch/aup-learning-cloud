@@ -89,6 +89,7 @@ def setup_hub(c: Any) -> None:
     # =========================================================================
 
     c.Authenticator.enable_auth_state = True
+    c.Authenticator.auth_refresh_age = 3600  # check token refresh every hour
 
     async def auth_state_hook(spawner, auth_state):
         if auth_state is None:

@@ -52,4 +52,5 @@ export interface ResourcesResponse {
   groups: ResourceGroup[];
   acceleratorKeys: string[];
   allowedGitProviders: string[];
+  githubAppName?: string;
 }

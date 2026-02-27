@@ -18,8 +18,8 @@
 // SOFTWARE.
 
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
-import type { Resource, Accelerator } from '@auplc/shared';
-import { validateRepo } from '@auplc/shared';
+import type { Resource, Accelerator, GitHubRepo } from '@auplc/shared';
+import { validateRepo, fetchGitHubRepos, isCurrentUserGitHub } from '@auplc/shared';
 import { CategorySection } from './components/CategorySection';
 import { useResources } from './hooks/useResources';
 import { useAccelerators } from './hooks/useAccelerators';
@@ -91,7 +91,7 @@ function App() {
   const initialResourceKey = searchParams.get('resource') ?? '';
   const initialAcceleratorKey = searchParams.get('accelerator') ?? '';
 
-  const { resources, groups, allowedGitProviders, loading: resourcesLoading, error: resourcesError } = useResources();
+  const { resources, groups, allowedGitProviders, githubAppName, loading: resourcesLoading, error: resourcesError } = useResources();
   const { accelerators, loading: acceleratorsLoading } = useAccelerators();
   const { quota, loading: quotaLoading } = useQuota();
 
@@ -108,6 +108,8 @@ function App() {
   const [repoValid, setRepoValid] = useState(false);
   const [paramWarning, setParamWarning] = useState('');
   const validateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [githubRepos, setGithubRepos] = useState<GitHubRepo[]>([]);
+  const [githubAppInstalled, setGithubAppInstalled] = useState(false);
 
   // Derive branch and shareable /hub/git/ link from raw input
   const { branch: repoBranch, url: normalizedRepoUrl } = useMemo(
@@ -176,6 +178,20 @@ function App() {
       form?.submit();
     }, 300);
   }, [autostart, selectedResource, loading]);
+
+  // Fetch GitHub repos when githubAppName is configured (GitHub OAuth users only)
+  const isGitHub = isCurrentUserGitHub();
+  useEffect(() => {
+    if (!githubAppName || !isGitHub) return;
+    fetchGitHubRepos()
+      .then(data => {
+        setGithubRepos(data.repos);
+        setGithubAppInstalled(data.installed);
+      })
+      .catch(() => {
+        // Silently fail - user just won't see repo picker
+      });
+  }, [githubAppName, isGitHub]);
 
   // Compute available accelerators based on selected resource
   const availableAccelerators = useMemo(() => {
@@ -279,6 +295,36 @@ function App() {
     }
   }, [allowedGitProviders]);
 
+  const handleSelectGitHubRepo = useCallback((repo: GitHubRepo) => {
+    const url = repo.html_url;
+    setRepoUrl(url);
+    const { url: normalizedUrl, branch } = normalizeRepoUrl(url);
+    const formatError = validateRepoUrl(normalizedUrl, allowedGitProviders);
+    setRepoUrlError(formatError);
+    setRepoValid(false);
+
+    if (validateTimerRef.current) clearTimeout(validateTimerRef.current);
+
+    if (!formatError && normalizedUrl) {
+      setRepoValidating(true);
+      validateTimerRef.current = setTimeout(async () => {
+        try {
+          const result = await validateRepo(normalizedUrl, branch || undefined);
+          if (result.valid) {
+            setRepoValid(true);
+            setRepoUrlError('');
+          } else {
+            setRepoUrlError(result.error);
+          }
+        } catch {
+          // API error
+        } finally {
+          setRepoValidating(false);
+        }
+      }, 300);
+    }
+  }, [allowedGitProviders]);
+
   const handleSelectAccelerator = useCallback((accelerator: Accelerator) => {
     setSelectedAcceleratorKey(accelerator.key);
   }, []);
@@ -335,7 +381,6 @@ function App() {
           value={selectedAccelerator?.key ?? ''}
         />
       )}
-
       {/* Invalid query param warning */}
       {paramWarning && (
         <div className="warning-box">
@@ -379,6 +424,10 @@ function App() {
                 repoBranch={repoBranch}
                 onRepoUrlChange={handleRepoUrlChange}
                 allowedGitProviders={allowedGitProviders}
+                githubAppName={githubAppName}
+                githubRepos={githubRepos}
+                githubAppInstalled={githubAppInstalled}
+                onSelectGitHubRepo={handleSelectGitHubRepo}
               />
             ))}
           </div>

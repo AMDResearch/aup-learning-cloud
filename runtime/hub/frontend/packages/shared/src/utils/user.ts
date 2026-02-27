@@ -17,5 +17,16 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-export * from "./xsrf.js";
-export * from "./user.js";
+const GITHUB_PREFIX = "github:";
+
+export function isGitHubUser(username: string): boolean {
+  return username.startsWith(GITHUB_PREFIX);
+}
+
+export function isCurrentUserGitHub(): boolean {
+  return isGitHubUser(window.jhdata?.user ?? "");
+}
+
+export function isNativeUser(username: string): boolean {
+  return !isGitHubUser(username);
+}

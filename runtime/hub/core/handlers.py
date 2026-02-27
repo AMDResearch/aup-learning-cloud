@@ -32,7 +32,7 @@ from __future__ import annotations
 import asyncio
 import json
 from typing import Any
-from urllib.parse import urlencode, urlparse
+from urllib.parse import urlencode, urlparse, urlunparse
 
 from jupyterhub.apihandlers import APIHandler
 from jupyterhub.handlers import BaseHandler
@@ -759,6 +759,7 @@ class ResourcesAPIHandler(APIHandler):
                     "groups": groups_list,
                     "acceleratorKeys": list(config.accelerators.keys()),
                     "allowedGitProviders": list(config.git_clone.allowedProviders),
+                    "githubAppName": config.git_clone.githubAppName,
                 }
             )
         )
@@ -811,33 +812,242 @@ class GitSpawnHandler(BaseHandler):
 class ValidateRepoHandler(APIHandler):
     """Validate a git repository URL (and optional branch) via dulwich ls_remote."""
 
+    @staticmethod
+    def _github_repo_path(url: str) -> str | None:
+        """Return 'owner/repo' if url is a GitHub URL, else None."""
+        parsed = urlparse(url)
+        if parsed.netloc.lower() not in ("github.com", "www.github.com"):
+            return None
+        path = parsed.path.rstrip("/")
+        if path.endswith(".git"):
+            path = path[:-4]
+        parts = path.strip("/").split("/")
+        return f"{parts[0]}/{parts[1]}" if len(parts) == 2 else None
+
+    async def _try_github_api(self, repo_path: str, branch: str, token: str) -> dict | None:
+        """Try GitHub REST API. Returns result dict, or None if the API itself is unavailable
+        (network error, rate limit) so the caller can fall back to another strategy."""
+        import aiohttp
+
+        headers = {"Accept": "application/vnd.github.v3+json"}
+        if token:
+            headers["Authorization"] = f"token {token}"
+        timeout = aiohttp.ClientTimeout(total=5)
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(f"https://api.github.com/repos/{repo_path}", headers=headers) as resp:
+                    if resp.status == 403:
+                        # Could be rate-limited (no token) or forbidden; signal fallback
+                        return None
+                    if resp.status != 200:
+                        return {"valid": False, "error": "Repository not found or not accessible"}
+
+                if not branch:
+                    return {"valid": True, "error": ""}
+
+                async with session.get(
+                    f"https://api.github.com/repos/{repo_path}/branches/{branch}",
+                    headers=headers,
+                ) as resp:
+                    if resp.status == 200:
+                        return {"valid": True, "error": ""}
+
+                async with session.get(
+                    f"https://api.github.com/repos/{repo_path}/git/ref/tags/{branch}",
+                    headers=headers,
+                ) as resp:
+                    if resp.status == 200:
+                        return {"valid": True, "error": ""}
+
+                return {"valid": False, "error": f"Branch '{branch}' not found"}
+        except Exception:
+            # Network error, timeout, etc. — signal fallback
+            return None
+
+    async def _try_dulwich(self, url: str, branch: str, token: str = "") -> dict | None:
+        """Try dulwich ls_remote. Returns result dict, or None on failure."""
+        check_url = url
+        if token:
+            try:
+                parsed = urlparse(url)
+                authed_netloc = f"x-access-token:{token}@{parsed.netloc}"
+                check_url = urlunparse(
+                    (parsed.scheme, authed_netloc, parsed.path, parsed.params, parsed.query, parsed.fragment)
+                )
+            except Exception:
+                pass
+        try:
+            from dulwich.porcelain import ls_remote
+
+            ls_result = await asyncio.wait_for(
+                asyncio.get_event_loop().run_in_executor(None, ls_remote, check_url),
+                timeout=10,
+            )
+            refs = ls_result.refs
+            if branch:
+                ref_key = f"refs/heads/{branch}".encode()
+                tag_key = f"refs/tags/{branch}".encode()
+                if ref_key not in refs and tag_key not in refs:
+                    return {"valid": False, "error": f"Branch '{branch}' not found"}
+            return {"valid": True, "error": ""}
+        except Exception:
+            return None
+
+    async def _validate(self, url: str, branch: str, token: str) -> dict:
+        """Validate with fallback chain:
+
+        GitHub URL + token : GitHub API → dulwich+token → dulwich (no token)
+        GitHub URL, no token: dulwich (no token)
+        Other URL + token  : dulwich+token → dulwich (no token)
+        Other URL, no token: dulwich (no token)
+        """
+        repo_path = self._github_repo_path(url)
+
+        if repo_path and token:
+            # 1. GitHub REST API (handles all token types, fastest)
+            result = await self._try_github_api(repo_path, branch, token)
+            if result is not None:
+                return result
+            # 2. dulwich with embedded token (API unavailable/rate-limited)
+            result = await self._try_dulwich(url, branch, token)
+            if result is not None:
+                return result
+        elif token:
+            # Non-GitHub provider with token
+            result = await self._try_dulwich(url, branch, token)
+            if result is not None:
+                return result
+
+        # Final fallback: dulwich without token (public repos)
+        result = await self._try_dulwich(url, branch)
+        return result or {"valid": False, "error": "Repository not found or not accessible"}
+
     @web.authenticated
     async def post(self):
         body = json.loads(self.request.body)
         url = (body.get("url") or "").strip()
         branch = (body.get("branch") or "").strip()
+
+        # Token fallback: OAuth token (GitHub App) > default token
+        from core.config import HubConfig
+
+        config = HubConfig.get()
+        access_token = ""
+        try:
+            user = self.current_user
+            auth_state = await user.get_auth_state()
+            if auth_state and auth_state.get("access_token") and config.git_clone.githubAppName:
+                access_token = auth_state["access_token"]
+        except Exception:
+            pass
+        if not access_token and config.git_clone.defaultAccessToken:
+            access_token = config.git_clone.defaultAccessToken
+
         result = {"valid": False, "error": "URL is required"}
         if url:
-            try:
-                from dulwich.porcelain import ls_remote
-
-                refs = await asyncio.wait_for(
-                    asyncio.get_event_loop().run_in_executor(None, ls_remote, url),
-                    timeout=10,
-                )
-                if branch:
-                    ref_key = f"refs/heads/{branch}".encode()
-                    tag_key = f"refs/tags/{branch}".encode()
-                    if ref_key not in refs and tag_key not in refs:
-                        result = {"valid": False, "error": f"Branch '{branch}' not found"}
-                    else:
-                        result = {"valid": True, "error": ""}
-                else:
-                    result = {"valid": True, "error": ""}
-            except Exception:
-                result = {"valid": False, "error": "Repository not found or not accessible"}
+            result = await self._validate(url, branch, access_token)
         self.set_header("Content-Type", "application/json")
         self.finish(json.dumps(result))
+
+
+class GitHubReposHandler(APIHandler):
+    """List repositories accessible via the user's GitHub App installation."""
+
+    @web.authenticated
+    async def get(self):
+        user = self.current_user
+        try:
+            auth_state = await user.get_auth_state()
+        except Exception:
+            auth_state = None
+
+        token = auth_state.get("access_token") if auth_state else None
+        if not token:
+            self.set_header("Content-Type", "application/json")
+            self.finish(json.dumps({"repos": [], "installed": False}))
+            return
+
+        from core.config import HubConfig
+
+        config = HubConfig.get()
+        app_name = config.git_clone.githubAppName
+        if not app_name:
+            self.set_header("Content-Type", "application/json")
+            self.finish(json.dumps({"repos": [], "installed": False}))
+            return
+
+        headers = {
+            "Authorization": f"token {token}",
+            "Accept": "application/vnd.github.v3+json",
+        }
+
+        repos = []
+        installed = False
+
+        try:
+            import aiohttp
+
+            async with aiohttp.ClientSession() as session:
+                # Step 1: Find app installation
+                async with session.get(
+                    "https://api.github.com/user/installations",
+                    headers=headers,
+                ) as resp:
+                    if resp.status != 200:
+                        self.set_header("Content-Type", "application/json")
+                        self.finish(json.dumps({"repos": [], "installed": False}))
+                        return
+
+                    data = await resp.json()
+                    installations = data.get("installations", [])
+
+                installation_ids = []
+                for inst in installations:
+                    slug = inst.get("app_slug", "")
+                    if slug == app_name:
+                        installation_ids.append(inst["id"])
+                        installed = True
+
+                if not installation_ids:
+                    self.set_header("Content-Type", "application/json")
+                    self.finish(json.dumps({"repos": [], "installed": False}))
+                    return
+
+                # Step 2: List repos for all matching installations
+                seen = set()
+                for installation_id in installation_ids:
+                    page = 1
+                    while True:
+                        async with session.get(
+                            f"https://api.github.com/user/installations/{installation_id}/repositories?per_page=100&page={page}",
+                            headers=headers,
+                        ) as resp:
+                            if resp.status != 200:
+                                break
+                            data = await resp.json()
+                            page_repos = data.get("repositories", [])
+                            if not page_repos:
+                                break
+                            for r in page_repos:
+                                if r["full_name"] not in seen:
+                                    seen.add(r["full_name"])
+                                    repos.append(
+                                        {
+                                            "full_name": r["full_name"],
+                                            "html_url": r["html_url"],
+                                            "private": r["private"],
+                                            "description": r.get("description") or "",
+                                        }
+                                    )
+                            if len(page_repos) < 100:
+                                break
+                            page += 1
+
+        except Exception as e:
+            self.log.warning(f"Failed to fetch GitHub repos: {e}")
+
+        self.set_header("Content-Type", "application/json")
+        self.finish(json.dumps({"repos": repos, "installed": installed}))
 
 
 # =============================================================================
@@ -868,6 +1078,8 @@ def get_handlers() -> list[tuple[str, type]]:
         (r"/api/resources", ResourcesAPIHandler),
         # Git repo validation API
         (r"/api/validate-repo", ValidateRepoHandler),
+        # GitHub repos API (GitHub App integration)
+        (r"/api/github/repos", GitHubReposHandler),
         # Git spawn shortcut: /hub/git/github.com/owner/repo[?autostart=1&resource=cpu]
         (r"/git/(.*)", GitSpawnHandler),
         # Quota management API
@@ -898,6 +1110,7 @@ __all__ = [
     "QuotaRatesAPIHandler",
     "UserQuotaInfoHandler",
     "ResourcesAPIHandler",
+    "GitHubReposHandler",
     # Configuration
     "configure_handlers",
     # Registration

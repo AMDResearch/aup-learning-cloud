@@ -428,10 +428,11 @@ python scripts/manage_users.py set-passwords users.csv --generate
    - Use `set-admin` command to manage (auditable)
    - Review admin list regularly
 
-4. **GitHub OAuth**:
+4. **GitHub App**:
+   - Create the App under the organization, not a personal account
    - Keep GitHub organization membership updated
    - Review team permissions regularly
-   - Use GitHub organization SSO if available
+   - Set `scope: []` — permissions are configured in the App settings
 
 ## Additional Resources
 

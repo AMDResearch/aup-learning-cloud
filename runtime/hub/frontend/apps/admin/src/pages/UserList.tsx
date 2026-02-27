@@ -22,6 +22,7 @@ import { useNavigate } from 'react-router-dom';
 import { Table, Button, Form, InputGroup, Badge, Spinner, Alert, ButtonGroup, Modal } from 'react-bootstrap';
 import type { User, UserQuota, Server } from '@auplc/shared';
 import * as api from '@auplc/shared';
+import { isGitHubUser, isNativeUser as isNativeUsername } from '@auplc/shared';
 import { CreateUserModal } from '../components/CreateUserModal';
 import { SetPasswordModal } from '../components/SetPasswordModal';
 import { EditUserModal } from '../components/EditUserModal';
@@ -61,7 +62,7 @@ function getServerStatusBadge(user: User): React.ReactNode {
 }
 
 function isNativeUser(user: User): boolean {
-  return !user.name.startsWith('github:');
+  return isNativeUsername(user.name);
 }
 
 // Memoized SortIcon component
@@ -149,7 +150,7 @@ const UserRow = memo(function UserRow({
         </td>
         <td>
           {user.name}
-          {user.name.startsWith('github:') && (
+          {isGitHubUser(user.name) && (
             <Badge bg="info" className="ms-2">GitHub</Badge>
           )}
         </td>

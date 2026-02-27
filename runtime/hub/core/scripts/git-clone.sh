@@ -43,6 +43,19 @@ git config --global http.sslVerify true
 git config --global user.email jupyterhub@local
 git config --global user.name JupyterHub
 
+# Inject token into HTTPS URLs via git URL rewriting.
+# This approach works for all token types (classic PAT, fine-grained PAT, OAuth)
+# because the token is embedded directly in the URL rather than going through
+# the credential challenge/response flow.
+# The rewrite targets only the actual host in REPO_URL, so it works for any provider.
+if [ -n "${GIT_ACCESS_TOKEN:-}" ]; then
+  _repo_host=$(echo "$REPO_URL" | sed 's|https://||' | cut -d/ -f1)
+  git config --global \
+    url."https://x-access-token:${GIT_ACCESS_TOKEN}@${_repo_host}/".insteadOf \
+    "https://${_repo_host}/"
+  unset _repo_host
+fi
+
 # Remove leftover clone directory from a previous session (e.g. preStop hook
 # was skipped due to force-delete or node failure).
 if [ -d "$CLONE_DIR" ]; then

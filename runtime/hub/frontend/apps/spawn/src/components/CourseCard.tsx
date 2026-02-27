@@ -17,8 +17,9 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-import { memo, useMemo, useCallback } from 'react';
-import type { Resource, Accelerator } from '@auplc/shared';
+import { memo, useMemo, useCallback, useState, useRef, useEffect } from 'react';
+import type { Resource, Accelerator, GitHubRepo } from '@auplc/shared';
+import { isCurrentUserGitHub } from '@auplc/shared';
 
 interface Props {
   resource: Resource;
@@ -34,6 +35,10 @@ interface Props {
   repoBranch: string;
   onRepoUrlChange: (value: string) => void;
   allowedGitProviders: string[];
+  githubAppName: string;
+  githubRepos: GitHubRepo[];
+  githubAppInstalled: boolean;
+  onSelectGitHubRepo: (repo: GitHubRepo) => void;
 }
 
 function formatResourceTag(resource: Resource): string {
@@ -63,6 +68,10 @@ export const CourseCard = memo(function CourseCard({
   repoBranch,
   onRepoUrlChange,
   allowedGitProviders,
+  githubAppName,
+  githubRepos,
+  githubAppInstalled,
+  onSelectGitHubRepo,
 }: Props) {
   const handleClick = useCallback(() => {
     onSelect(resource);
@@ -137,11 +146,25 @@ export const CourseCard = memo(function CourseCard({
         </div>
       )}
 
-      {/* Git Repository URL - only show when selected and resource allows git clone */}
+      {/* Git Repository - only show when selected and resource allows git clone */}
       {selected && resource.metadata?.allowGitClone && (
         <div className="gpu-selection" onClick={e => e.stopPropagation()}>
+          {/* A) GitHub App Repo Picker */}
+          {githubRepos.length > 0 && (
+            <RepoPicker
+              repos={githubRepos}
+              onSelectRepo={onSelectGitHubRepo}
+              selectedUrl={repoUrl}
+            />
+          )}
+
+          {/* B) Manual URL Input */}
           <h6>
-            Git Repository URL <span className="optional-label">(optional)</span>
+            {githubRepos.length > 0 ? 'Or enter URL manually' : (
+              <>
+                Git Repository URL <span className="optional-label">(optional)</span>
+              </>
+            )}
             <span className="repo-url-hint" aria-label="Git repository hint">
               ?
               <span className="repo-url-tooltip">
@@ -171,6 +194,21 @@ export const CourseCard = memo(function CourseCard({
           )}
           {repoUrlError && !repoValidating && (
             <small className="repo-url-error">{repoUrlError}</small>
+          )}
+
+          {/* GitHub App Install/Manage Prompt (only for GitHub OAuth users) */}
+          {githubAppName && isCurrentUserGitHub() && (
+            <a
+              className="github-app-prompt"
+              href={`https://github.com/apps/${githubAppName}/installations/new`}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
+              </svg>
+              {githubAppInstalled ? 'Add access to more repositories' : 'Authorize access to your private repositories'}
+            </a>
           )}
         </div>
       )}
@@ -217,6 +255,109 @@ const GpuOption = memo(function GpuOption({
         <div className="gpu-option-name">{accelerator.displayName}</div>
         <div className="gpu-option-desc">{accelerator.description}</div>
       </div>
+    </div>
+  );
+});
+
+// Repo picker for GitHub App repos
+interface RepoPickerProps {
+  repos: GitHubRepo[];
+  onSelectRepo: (repo: GitHubRepo) => void;
+  selectedUrl: string;
+}
+
+const RepoPicker = memo(function RepoPicker({ repos, onSelectRepo, selectedUrl }: RepoPickerProps) {
+  const [filter, setFilter] = useState('');
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const selectedRepo = useMemo(() =>
+    repos.find(r => r.html_url === selectedUrl),
+    [repos, selectedUrl]
+  );
+
+  const filteredRepos = useMemo(() => {
+    if (!filter) return repos;
+    const lower = filter.toLowerCase();
+    return repos.filter(r =>
+      r.full_name.toLowerCase().includes(lower) ||
+      (r.description && r.description.toLowerCase().includes(lower))
+    );
+  }, [repos, filter]);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  const handleSelect = useCallback((repo: GitHubRepo) => {
+    onSelectRepo(repo);
+    setOpen(false);
+    setFilter('');
+  }, [onSelectRepo]);
+
+  return (
+    <div className="repo-picker" ref={containerRef}>
+      <h6>Your Repositories</h6>
+      <div
+        className={`repo-picker-trigger ${open ? 'open' : ''}`}
+        onClick={() => setOpen(!open)}
+      >
+        {selectedRepo ? (
+          <>
+            <span className="repo-picker-trigger-text">{selectedRepo.full_name}</span>
+            {selectedRepo.private && <span className="repo-picker-private">🔒</span>}
+          </>
+        ) : (
+          <span className="repo-picker-trigger-placeholder">Select a repository...</span>
+        )}
+        <span className="repo-picker-chevron">▾</span>
+      </div>
+      {open && (
+        <div className="repo-picker-dropdown">
+          <input
+            type="text"
+            value={filter}
+            onChange={e => setFilter(e.target.value)}
+            placeholder="Filter..."
+            className="repo-picker-filter"
+            onClick={e => e.stopPropagation()}
+            autoFocus
+          />
+          <div className="repo-picker-list">
+            {filteredRepos.map(repo => (
+              <div
+                key={repo.full_name}
+                onClick={() => handleSelect(repo)}
+                className={`repo-picker-item ${selectedUrl === repo.html_url ? 'selected' : ''}`}
+              >
+                <span className="repo-picker-name">{repo.full_name}</span>
+                {repo.private && (
+                  <span className="repo-picker-private" title="Private repository">🔒</span>
+                )}
+              </div>
+            ))}
+            {filteredRepos.length === 0 && (
+              <div className="repo-picker-empty">No matching repositories</div>
+            )}
+          </div>
+          <a
+            href="https://github.com/settings/installations"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="repo-picker-footer"
+            onClick={e => e.stopPropagation()}
+          >
+            Manage repo access →
+          </a>
+        </div>
+      )}
     </div>
   );
 });

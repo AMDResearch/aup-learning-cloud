@@ -122,6 +122,8 @@ class GitCloneSettings(BaseModel):
     initContainerImage: str = "alpine/git:2.47.2"
     allowedProviders: list[str] = Field(default_factory=lambda: ["github.com", "gitlab.com", "bitbucket.org"])
     maxCloneTimeout: int = 300
+    githubAppName: str = ""
+    defaultAccessToken: str = ""
 
     model_config = {"extra": "allow"}
 

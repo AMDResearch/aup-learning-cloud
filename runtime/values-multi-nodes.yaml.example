@@ -26,112 +26,247 @@
 #   helm install jupyterhub ./chart -n jupyterhub --create-namespace \
 #     -f values.yaml -f values-multi-nodes.yaml
 
-# Authentication mode: "auto-login" | "dummy" | "github" | "multi"
-#   - auto-login: No credentials required, auto-login as 'student' (default, for single-node)
-#   - dummy: Accept any username/password (for testing)
-#   - github: GitHub OAuth authentication
-#   - multi: GitHub OAuth + Local accounts
+# ============================================================================
+# Course Management Guide
+# ============================================================================
+# Add a new course:
+#   1. Add course image in custom.resources.images
+#   2. Add resource requirements in custom.resources.requirements
+#   3. Add course metadata in custom.resources.metadata
+#   4. Add team access permissions in custom.teams.mapping
+#
+# Modify a course:
+#   - Change image address or tag in images
+#   - Adjust CPU/memory/GPU settings in requirements
+#
+# Add a new accelerator:
+#   - Add new GPU/NPU node type in custom.accelerators
+# ============================================================================
+
 custom:
+  # Authentication mode: "auto-login" | "dummy" | "github" | "multi"
+  #   - auto-login: No credentials required, auto-login as 'student' (for single-node dev)
+  #   - dummy: Accept any username/password (for testing)
+  #   - github: GitHub OAuth authentication
+  #   - multi: GitHub OAuth + Local accounts
   authMode: "multi"
+
   # GitHub organization name for team-based resource access
-  # Users must be members of this org to access resources via GitHub OAuth
   githubOrgName: "your-github-org"
 
+  # Auto-create admin user on first install
+  adminUser:
+    enabled: false
+
+  # --------------------------------------------------------------------------
+  # Git Repository Cloning
+  # --------------------------------------------------------------------------
+  # Users can provide an optional Git URL on the spawn form; the repo will be
+  # cloned into ~/home at container start via an init container.
+  #
+  # Private repo access — two independent mechanisms (can be used together):
+  #   1. GitHub App (githubAppName) — per-repo read-only access for OAuth users
+  #   2. Default Access Token (defaultAccessToken) — admin PAT for all users
+  #
+  # Token priority: OAuth token (GitHub App) > defaultAccessToken > none
+  gitClone:
+    githubAppName: ""
+    defaultAccessToken: ""
+    allowedProviders:
+      - github.com
+      - gitlab.com
+      - bitbucket.org
+
+  # --------------------------------------------------------------------------
+  # Accelerator Configuration
+  # --------------------------------------------------------------------------
+  accelerators:
+    igpu:
+      displayName: "AMD Radeon™ 890M (Strix Point iGPU)"
+      description: "RDNA 3.5 (gfx1150) | Compute Units 16 | 4GB LPDDR5X"
+      nodeSelector:
+        node-type: strix
+      env: {}
+      quotaRate: 2
+    dgpu:
+      displayName: "AMD Radeon™ 9070XT (Desktop GPU)"
+      description: "RDNA 4.0 (gfx1201) | Compute Units 64 | 16GB GDDR6"
+      nodeSelector:
+        node-type: dgpu
+      env: {}
+      quotaRate: 4
+
+  # --------------------------------------------------------------------------
+  # Course Resources
+  # --------------------------------------------------------------------------
+  resources:
+    images:
+      cpu: "ghcr.io/your-org/cpu-notebook:latest"
+      Course-CV: "ghcr.io/your-org/course-cv:latest"
+      Course-DL: "ghcr.io/your-org/course-dl:latest"
+
+    requirements:
+      cpu:
+        cpu: "2"
+        memory: "4Gi"
+        memory_limit: "6Gi"
+      Course-CV:
+        cpu: "4"
+        memory: "16Gi"
+        memory_limit: "24Gi"
+        amd.com/gpu: "1"
+      Course-DL:
+        cpu: "4"
+        memory: "16Gi"
+        memory_limit: "24Gi"
+        amd.com/gpu: "1"
+      none:
+        cpu: "2"
+        memory: "4Gi"
+        memory_limit: "6Gi"
+
+    metadata:
+      cpu:
+        group: "CUSTOM REPO"
+        description: "Basic Python Environment"
+        subDescription: "CPU Only Environment"
+        accelerator: ""
+        acceleratorKeys: []
+        allowGitClone: true
+      Course-CV:
+        group: "COURSE"
+        description: "Computer Vision Course"
+        subDescription: "Suitable for CV experiments with GPU"
+        accelerator: "GPU"
+        acceleratorKeys:
+          - igpu
+          - dgpu
+      Course-DL:
+        group: "COURSE"
+        description: "Deep Learning Course"
+        subDescription: "Suitable for DL experiments with GPU"
+        accelerator: "GPU"
+        acceleratorKeys:
+          - igpu
+          - dgpu
+
+  # --------------------------------------------------------------------------
+  # Team Permission Configuration
+  # --------------------------------------------------------------------------
+  teams:
+    mapping:
+      gpu:
+        - Course-CV
+        - Course-DL
+      official:
+        - cpu
+        - Course-CV
+        - Course-DL
+      native-users:
+        - cpu
+        - Course-CV
+        - Course-DL
+
+  # Local accounts for multi auth mode (pattern supports ranges like {01-50})
+  # localAccounts:
+  #   CLASS-A:
+  #     pattern: "STUDENT{01-30}"
+  #     password: "ChangeMe@2025"
+  #     courses:
+  #       - Course-CV
+  #       - Course-DL
+
+  # --------------------------------------------------------------------------
+  # Quota Management
+  # --------------------------------------------------------------------------
+  quota:
+    enabled: null  # auto-disabled for auto-login/dummy modes
+    cpuRate: 1
+    minimumToStart: 10
+    defaultQuota: 0
+    refreshRules: {}
+
+# ============================================================================
+# Hub Configuration
+# ============================================================================
 hub:
   db:
     pvc:
       storageClassName: nfs-client
-  # If you modify the hub image, you should change it here.
   image:
     name: ghcr.io/amdresearch/auplc-hub
-    tag: v0.1
-    pullPolicy: Always
-
-  extraConfig:
-    01-templates-and-static: |
-      import os
-      import tornado.web
-
-      template_path = os.environ.get('JUPYTERHUB_TEMPLATE_PATH', '/tmp/custom_templates')
-      print(f"[DEBUG] Template path: {template_path}")
-
-      c.JupyterHub.template_paths = [template_path]
-      print(f"Template paths set to: {c.JupyterHub.template_paths}")
-
-      if not hasattr(c.JupyterHub, 'extra_handlers') or c.JupyterHub.extra_handlers is None:
-          c.JupyterHub.extra_handlers = []
-      print("Static file handler configuration completed")
-
-    02-hide-logout-for-autologin: |
-      # Hide logout button in auto-login mode
-      if AUTH_MODE == "auto-login":
-          c.JupyterHub.template_vars = {"hide_logout": True}
-          print("[INFO] Auto-login mode: logout button hidden")
+    tag: latest
+    pullPolicy: IfNotPresent
+    pullSecrets:
+      - github-registry-secret
 
   extraFiles:
     announcement.txt:
-    # If you want to edit the notice on login.html, change here.
       mountPath: /usr/local/share/jupyterhub/static/announcement.txt
       stringData: |
           <div class="announcement-box" style="padding: 1em; border: 1px solid #ccc; border-radius: 6px; background-color: #f8f8f8;">
-          <h3>Welcome to AUP Remote Lab!</h3>
-          <p>This is a <strong>dynamic announcement</strong>.</p>
-          <p>My location is on <code>runtime/values.yaml</code></p>
-          <p>You can edit this via <strong>ConfigMap</strong> without rebuilding the image.</p>
+          <h3>Welcome to AUP Learning Cloud!</h3>
+          <p>Edit this announcement in <code>values-multi-nodes.yaml</code></p>
           </div>
 
   config:
-    # ---- Hub Core ----
     Authenticator:
       allow_all: true
       admin_users:
-        - ADMIN1
-        - ADMIN2
+        - your-github-username
 
-    # ---- GitHub OAuth ----
-    # If you are only using GitHub Oath, not Multi-Auth, the link should be:
-    # https://<Your.domain>/hub/oauth_callback
+    # GitHub App OAuth (replaces legacy OAuth App)
+    # Create at: https://github.com/organizations/<YOUR-ORG>/settings/apps/new
+    # Permissions: Contents (read-only), Members (read-only)
+    # Webhook: off
     GitHubOAuthenticator:
-      oauth_callback_url: "https://<Your.domain>/hub/github/oauth_callback"
+      oauth_callback_url: "https://your.domain.com/hub/github/oauth_callback"
       client_id: "TODO"
       client_secret: "TODO"
       allowed_organizations:
-        - <YOUR-ORG-NAME>
-      scope:
-        - read:user
-        - read:org
+        - your-github-org
+      scope: []
 
-    # ---- KubeSpawner Prepuller Setup ----
     KubeSpawner:
       image_pull_policy: IfNotPresent
+      image_pull_secrets:
+        - github-registry-secret
 
-# singleuser:
-#   extraEnv:
-#   #this should be configured based on your AIPC  GPU type.
-#      HSA_OVERRIDE_GFX_VERSION: "11.0.0"
-#   storage:
-#     dynamic:
-#       storageClass: nfs-client
+singleuser:
+  storage:
+    dynamic:
+      storageClass: nfs-client
 
-debug:
-  enabled: false
-
+# Use ClusterIP + Ingress for production domains
 proxy:
   service:
-    # If you want to use <domain>, config the domain on Ingress section.
-    #type: ClusterIP
-    # If you want to use LocadBalancer
-    #type: LoadBalancer
-    # If you want to use <IP>:<Port>
-    type: NodePort
+    type: ClusterIP
     nodePorts:
-      http: 30890
+      http: null
+      https: null
+
+# If using Ingress (recommended for production)
+# ingress:
+#   enabled: true
+#   ingressClassName: traefik  # or nginx
+#   hosts:
+#     - your.domain.com
+#   tls:
+#     - hosts:
+#         - your.domain.com
+#       secretName: jupyter-tls-cert
+
+# If not using Ingress, use NodePort instead:
+# proxy:
+#   service:
+#     type: NodePort
+#     nodePorts:
+#       http: 30890
 
 imagePullSecrets:
   - github-registry-secret
 
-
-# Set up all your images here for prepulling.
+# Pre-pull images for faster startup
 prePuller:
   extraImages:
     aup-cpu-notebook:

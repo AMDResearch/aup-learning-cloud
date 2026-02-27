@@ -59,9 +59,46 @@ custom:
   # ============================================================================
   # Users can provide an optional Git URL on the spawn form; the repo will be
   # cloned into ~/home at container start via an init container.
+  #
+  # Private repo access — two independent mechanisms (can be used together):
+  #
+  #   1. GitHub App (githubAppName)
+  #      For GitHub OAuth users. Users authorize per-repo read-only access via
+  #      the GitHub App UI. Token is obtained automatically from OAuth session.
+  #      Requires migrating from OAuth App to GitHub App — see below.
+  #
+  #   2. Default Access Token (defaultAccessToken)
+  #      A bot/service-account PAT configured by the admin. Applied transparently
+  #      to all users (including auto-login). Useful for single-node / classroom
+  #      setups where everyone needs access to the same private repos without
+  #      any GitHub login.
+  #
+  # Token priority: OAuth token (GitHub App) > defaultAccessToken > none (public only)
+  #
+  # Migrating from OAuth App to GitHub App:
+  #   1. Create a GitHub App (org settings → Developer settings → GitHub Apps)
+  #      - Callback URL: same as current oauth_callback_url
+  #      - Permissions: Contents (read-only), Metadata (read-only), Members (read-only)
+  #      - Webhook: off
+  #   2. Update hub.config.GitHubOAuthenticator:
+  #        client_id: "<GitHub App Client ID>"
+  #        client_secret: "<GitHub App Client Secret>"
+  #        scope: []  # GitHub App does not use OAuth scopes
+  #   3. Set githubAppName below to the App slug
+  #   4. helm upgrade — existing user sessions continue, new logins use GitHub App
+  #
   gitClone:
-    # Container image used for git operations (must include git and sh)
-    initContainerImage: "alpine/git:2.47.2"
+    # -- Private Repo Access --
+    # GitHub App slug (e.g. "aup-learning-cloud")
+    # Enables repo picker UI and automatic OAuth token usage for private repos.
+    # Only effective for GitHub OAuth users; auto-login/native users are unaffected.
+    githubAppName: ""
+    # Default access token for private repos (e.g. a bot/service account PAT).
+    # Works for ALL auth modes including auto-login — users don't need to know
+    # the token exists. Helm auto-creates a K8s Secret from this value.
+    # Scope the PAT to read-only on specific repos to limit blast radius.
+    defaultAccessToken: ""
+    # -- Clone Behavior --
     # Allowed Git hosting providers (subdomains are also accepted)
     allowedProviders:
       - github.com
@@ -69,6 +106,8 @@ custom:
       - bitbucket.org
     # Maximum time (seconds) allowed for a clone or fetch operation
     maxCloneTimeout: 300
+    # Container image used for git operations (must include git and sh)
+    initContainerImage: "alpine/git:2.47.2"
 
   # ============================================================================
   # Accelerator Configuration
