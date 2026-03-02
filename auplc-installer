@@ -453,8 +453,17 @@ Commands:
   img build             Build custom images locally
   img pull              Pull external images for offline use
 
-Default: Docker runtime (after "make hub", use "rt upgrade" to apply).
-  Offline/containerd: K3S_USE_DOCKER=0 ./auplc-installer install
+Runtime Configuration:
+  K3S_USE_DOCKER  Use host Docker as K3s container runtime (default: 1).
+                  1 = Docker mode: images built with "make hub" are visible to K3s
+                      immediately after "rt upgrade", no export needed.
+                      Requires Docker to be installed on the host.
+                  0 = containerd mode: images are exported to K3s image dir
+                      (K3S_IMAGES_DIR) for offline/portable deployments.
+
+  Examples:
+    ./auplc-installer install                    # Docker mode (default)
+    K3S_USE_DOCKER=0 ./auplc-installer install  # containerd + export mode
 
 Mirror Configuration:
   MIRROR_PREFIX   Registry mirror (e.g. mirror.example.com)
