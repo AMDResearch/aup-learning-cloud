@@ -25,6 +25,7 @@ AUP Learning Cloud is a tailored JupyterHub deployment designed to provide an in
 
 ![Software Architecture](docs/imgs/software-stack.png)
 
+
 ## Quick Start
 
 The simplest way to deploy AUP Learning Cloud on a single machine in a development or demo environment.
@@ -155,3 +156,7 @@ Current environments are set up as `RESOURCE_IMAGES` in `runtime/chart/files/hub
 ## Contributing
 
 Please refer to [CONTRIBUTING.md](docs/contribute.md) for details on how to contribute to the project.
+
+## Acknowledgment
+
+Icons from [Flaticon](https://www.flaticon.com): deployment (Prashanth Rapolu 15, Freepik), team & user (Freepik), machine learning (Becris).
