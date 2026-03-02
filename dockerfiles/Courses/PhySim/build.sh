@@ -20,6 +20,7 @@
 
 cp -r ../../../projects/PhySim ./course_data
 
-docker build -t ghcr.io/amdresearch/auplc-physim:latest .
+docker build ${BASE_IMAGE:+--build-arg BASE_IMAGE="$BASE_IMAGE"} \
+  -t ghcr.io/amdresearch/auplc-physim:latest .
 
 rm -r course_data

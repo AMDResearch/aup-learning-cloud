@@ -19,8 +19,8 @@
 
 
 # Use a verified ROCm PyTorch image as base
-#FROM harbor-aup-int.openhw.cloud:7443/rocm/therock_pytorch_dev_ubuntu_24_04_gfx1151:main
-FROM ghcr.io/amdresearch/base-gfx1151:v0.1-full
+ARG BASE_IMAGE=ghcr.io/amdresearch/base-gfx1151:v0.1-full
+FROM ${BASE_IMAGE}
 
 # Copy related rocm notebooks into the docker
 COPY ./course_data /opt/workspace/DL

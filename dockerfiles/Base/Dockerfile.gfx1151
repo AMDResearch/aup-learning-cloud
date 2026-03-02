@@ -5,10 +5,10 @@
 # to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
-# 
+#
 # The above copyright notice and this permission notice shall be included in all
 # copies or substantial portions of the Software.
-# 
+#
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 # FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -23,60 +23,64 @@ FROM ${BASE_IMAGE}
 # Default Shell
 SHELL ["/bin/bash", "-c"]
 
-# Register the ROCM package repository, and install rocm-dev package
 # Create jovyan user with specific UID 1000
 ARG NB_USER=jovyan
 ARG NB_UID=1000
 ARG NB_GID=100
-ARG ROCM_VERSION=7.10.0
-ARG AMDGPU_VERSION=7.10.0
+
+# ROCm / PyTorch version pins — override at build time to upgrade
+# gfx110X-all covers gfx1100/1101/1102/1103; strix-halo (gfx1151) uses HSA_OVERRIDE
+ARG ROCM_VERSION=7.11.0
+ARG ROCM_TARBALL_URL=https://repo.amd.com/rocm/tarball/therock-dist-linux-gfx110X-all-${ROCM_VERSION}.tar.gz
+ARG PYTORCH_INDEX_URL=https://repo.amd.com/rocm/whl/gfx110X-all/
 
 # Set environment variables
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 ENV ROCM_PATH=/opt/rocm
 ENV PATH="${ROCM_PATH}/bin:${PATH}"
-ENV LD_LIBRARY_PATH="${ROCM_PATH}/lib:${LD_LIBRARY_PATH}"
+ENV LD_LIBRARY_PATH="${ROCM_PATH}/lib"
 ENV DEVICE_LIB_PATH=/opt/rocm/lib/llvm/amdgcn/bitcode
 ENV HIP_DEVICE_LIB_PATH=/opt/rocm/lib/llvm/amdgcn/bitcode
 
-# Override PIP configuration to allow system-wide installation
-RUN touch /etc/pip.conf && \
-    echo "[global]" > /etc/pip.conf && \
-    echo "break-system-packages = true" >> /etc/pip.conf
+# Allow pip to install system-wide
+RUN printf '[global]\nbreak-system-packages = true\n' > /etc/pip.conf
 
-# Install system dependencies
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl libnuma-dev gnupg \
-  && curl -sL https://repo.radeon.com/rocm/rocm.gpg.key | apt-key add - \
-  && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+# Install system dependencies (deduplicated)
+RUN apt-get update && apt-get install -y --no-install-recommends \
   sudo \
+  ca-certificates \
+  curl \
+  wget \
+  git \
+  gnupg \
+  build-essential \
+  python3-dev \
+  python3-pip \
+  libnuma-dev \
   libelf1 \
   kmod \
   file \
-  python3-dev \
-  python3-pip \
-  wget \
-  git \
-  build-essential \
-  ca-certificates \
-  git \
   locales \
   fonts-liberation \
-  run-one && \
-  apt-get clean && \
-  rm -rf /var/lib/apt/lists/*
+  run-one \
+  && curl -sL https://repo.radeon.com/rocm/rocm.gpg.key | apt-key add - \
+  && apt-get clean \
+  && rm -rf /var/lib/apt/lists/*
 
-# Install ROCm 7.10.0
+# Install ROCm from tarball
 RUN mkdir -p /opt/rocm && \
-    wget https://repo.amd.com/rocm/tarball/therock-dist-linux-gfx1151-7.10.0.tar.gz && \
-    tar -xf therock-dist-linux-gfx1151-7.10.0.tar.gz -C /opt/rocm --strip-components=1 && \
-    rm therock-dist-linux-gfx1151-7.10.0.tar.gz
+    wget -q "${ROCM_TARBALL_URL}" -O /tmp/rocm.tar.gz && \
+    tar -xf /tmp/rocm.tar.gz -C /opt/rocm --strip-components=1 && \
+    rm /tmp/rocm.tar.gz
 
 # Install ROCm PyTorch
-RUN python3 -m pip install --index-url https://repo.amd.com/rocm/whl/gfx1151/ torch torchvision torchaudio --break-system-packages
+RUN python3 -m pip install --no-cache-dir \
+    --index-url "${PYTORCH_INDEX_URL}" \
+    torch torchvision torchaudio
 
-# Install JupyterHub and related packages system-wide
-RUN pip3 install --no-cache-dir --break-system-packages \
+# Install JupyterHub and related packages
+RUN pip3 install --no-cache-dir \
     jupyterhub==4.0.2 \
     jupyterlab==4.0.9 \
     notebook==7.0.6 \
@@ -88,7 +92,6 @@ RUN pip3 install --no-cache-dir --break-system-packages \
     scikit-learn \
     numpy \
     pandas \
-    ipywidgets \
     hiredis \
     pillow \
     tqdm \

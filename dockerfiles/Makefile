@@ -13,6 +13,9 @@ MIRROR_PREFIX ?=
 MIRROR_PIP ?=
 MIRROR_NPM ?=
 
+# GPU base image used by course Dockerfiles (override to track a specific version)
+GPU_BASE_IMAGE ?= ghcr.io/amdresearch/base-gfx1151:v0.1-full
+
 # Build args for docker build (constructed from mirror settings)
 BUILD_ARGS :=
 ifneq ($(MIRROR_PREFIX),)
@@ -74,7 +77,7 @@ cv:
 		echo "Building CV Course Image..."; \
 		echo "-------------------------------------------";
 
-	cd Courses/CV && bash ./build.sh
+	cd Courses/CV && BASE_IMAGE=$(GPU_BASE_IMAGE) bash ./build.sh
 	$(MAKE) save-image IMAGE=ghcr.io/amdresearch/auplc-cv:latest
 
 dl:
@@ -82,7 +85,7 @@ dl:
 		echo "Building DL Course Image..."; \
 		echo "-------------------------------------------";
 
-	cd Courses/DL && bash ./build.sh
+	cd Courses/DL && BASE_IMAGE=$(GPU_BASE_IMAGE) bash ./build.sh
 	$(MAKE) save-image IMAGE=ghcr.io/amdresearch/auplc-dl:latest
 
 llm:
@@ -90,7 +93,7 @@ llm:
 		echo "Building LLM Course Image..."; \
 		echo "-------------------------------------------";
 
-	cd Courses/LLM && bash ./build.sh
+	cd Courses/LLM && BASE_IMAGE=$(GPU_BASE_IMAGE) bash ./build.sh
 	$(MAKE) save-image IMAGE=ghcr.io/amdresearch/auplc-llm:latest
 
 physim:
@@ -98,7 +101,7 @@ physim:
 		echo "Building PhySim Course Image..."; \
 		echo "-------------------------------------------";
 
-	cd Courses/PhySim && bash ./build.sh
+	cd Courses/PhySim && BASE_IMAGE=$(GPU_BASE_IMAGE) bash ./build.sh
 	$(MAKE) save-image IMAGE=ghcr.io/amdresearch/auplc-physim:latest
 
 # --- Export Images ---

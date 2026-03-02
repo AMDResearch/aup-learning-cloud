@@ -21,28 +21,104 @@ name: Build Docker Images
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
+    tags: ['v*']
     paths:
-      - 'runtime/Dockerfile/**'
       - 'dockerfiles/**'
+      - 'runtime/hub/**'
+      - 'projects/**'
+      - '.github/workflows/docker-build.yml'
   pull_request:
-    branches: [main]
+    branches: [main, develop]
     paths:
-      - 'runtime/Dockerfile/**'
       - 'dockerfiles/**'
+      - 'runtime/hub/**'
+      - 'projects/**'
+      - '.github/workflows/docker-build.yml'
   workflow_dispatch:
     inputs:
-      override_versions:
-        description: 'Override all versions (leave empty to use default versions)'
-        required: false
       version:
-        description: 'Version tag (e.g. v1.6)'
+        description: 'Version tag for images (e.g. v1.2.0)'
+        required: false
+        default: ''
+      images:
+        description: 'Which images to build'
         required: true
-        default: 'v1.0'
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - hub
+          - courses
+          - base-cpu
+          - base-gpu
+
+# Prevent duplicate builds on the same branch / PR
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
 
 jobs:
+  # ──────────────────────────────────────────────
+  # Detect which files changed to decide what to build
+  # ──────────────────────────────────────────────
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      hub: ${{ steps.filter.outputs.hub }}
+      courses: ${{ steps.filter.outputs.courses }}
+      base-cpu: ${{ steps.filter.outputs.base-cpu }}
+      base-gpu: ${{ steps.filter.outputs.base-gpu }}
+      registry: ${{ steps.registry.outputs.prefix }}
+      is-tag: ${{ steps.check.outputs.is-tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set registry prefix
+        id: registry
+        run: echo "prefix=ghcr.io/$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+      - name: Check if tag push
+        id: check
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            echo "is-tag=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is-tag=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: dorny/paths-filter@v3
+        if: github.ref_type != 'tag' && github.event_name != 'workflow_dispatch'
+        id: filter
+        with:
+          filters: |
+            hub:
+              - 'dockerfiles/Hub/**'
+              - 'runtime/hub/**'
+            courses:
+              - 'dockerfiles/Courses/**'
+              - 'dockerfiles/Base/**'
+              - 'projects/**'
+            base-cpu:
+              - 'dockerfiles/Base/Dockerfile.cpu'
+            base-gpu:
+              - 'dockerfiles/Base/Dockerfile.gfx1151'
+
+  # ──────────────────────────────────────────────
+  # Hub Image (CPU only, runs on GitHub Actions)
+  # ──────────────────────────────────────────────
   build-hub:
     name: Build Hub Image
+    needs: changes
+    if: |
+      needs.changes.outputs.is-tag == 'true' ||
+      (github.event_name != 'workflow_dispatch' && needs.changes.outputs.hub == 'true') ||
+      (github.event_name == 'workflow_dispatch' && (github.event.inputs.images == 'all' || github.event.inputs.images == 'hub'))
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -52,37 +128,51 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Login to GitHub Container Registry
+        if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GH_PACKAGES_TOKEN }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ needs.changes.outputs.registry }}/auplc-hub
+          tags: |
+            type=semver,pattern=v{{version}}
+            type=semver,pattern=v{{major}}.{{minor}}
+            type=semver,pattern=v{{major}}
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=${{ github.event.inputs.version }},enable=${{ github.event.inputs.version != '' }}
+            type=sha,prefix=sha-
+            type=ref,event=branch
+            type=ref,event=pr
 
       - name: Build and push Hub image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: dockerfiles/Hub/Dockerfile
           push: ${{ github.event_name != 'pull_request' }}
-          tags: |
-            ghcr.io/amdresearch/auplc-hub:${{ github.event.inputs.override_versions || 'v1.2.0' }}
-            ghcr.io/amdresearch/auplc-hub:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=hub
+          cache-to: type=gha,mode=max,scope=hub
+          provenance: false
 
-  build-notebooks:
-    name: Build Notebook Images
+  # ──────────────────────────────────────────────
+  # Base CPU Image (runs on GitHub Actions)
+  # ──────────────────────────────────────────────
+  build-base-cpu:
+    name: Build Base CPU Image
+    needs: changes
+    if: |
+      needs.changes.outputs.is-tag == 'true' ||
+      (github.event_name != 'workflow_dispatch' && needs.changes.outputs.base-cpu == 'true') ||
+      (github.event_name == 'workflow_dispatch' && (github.event.inputs.images == 'all' || github.event.inputs.images == 'base-cpu'))
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - docker_path: runtime/Dockerfile/Basic
-            image_name: aup-cpu-notebook
-            default_version: 'v1.0'
-          - docker_path: runtime/Dockerfile/RyzenAI-ONNX
-            image_name: aup-ryzenai-onnx-notebook
-            default_version: 'v2.0'
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -91,20 +181,193 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Login to GitHub Container Registry
+        if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GH_PACKAGES_TOKEN }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push
-        uses: docker/build-push-action@v5
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
         with:
-          context: ${{ matrix.docker_path }}
-          file: ${{ matrix.docker_path }}/Dockerfile
-          push: ${{ github.event_name != 'pull_request' }}
+          images: ${{ needs.changes.outputs.registry }}/auplc-default
           tags: |
-            ghcr.io/amdresearch/${{ matrix.image_name }}:${{ github.event.inputs.override_versions || matrix.default_version }}
-            ghcr.io/amdresearch/${{ matrix.image_name }}:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+            type=semver,pattern=v{{version}}
+            type=semver,pattern=v{{major}}.{{minor}}
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix=sha-
+            type=ref,event=branch
+            type=ref,event=pr
+
+      - name: Build and push Base CPU image
+        uses: docker/build-push-action@v6
+        with:
+          context: dockerfiles/Base
+          file: dockerfiles/Base/Dockerfile.cpu
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=base-cpu
+          cache-to: type=gha,mode=max,scope=base-cpu
+          provenance: false
+
+  # ──────────────────────────────────────────────
+  # Base GPU Image (gfx1151)
+  #
+  # No GPU hardware required — only downloads ROCm tarball + pip wheels.
+  # Uses free-disk-space action to reclaim runner disk for the large image.
+  # ──────────────────────────────────────────────
+  build-base-gpu:
+    name: Build Base GPU Image (gfx1151)
+    needs: changes
+    if: |
+      needs.changes.outputs.is-tag == 'true' ||
+      (github.event_name != 'workflow_dispatch' && needs.changes.outputs.base-gpu == 'true') ||
+      (github.event_name == 'workflow_dispatch' && (github.event.inputs.images == 'all' || github.event.inputs.images == 'base-gpu'))
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.out.outputs.image }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ needs.changes.outputs.registry }}/base-gfx1151
+          tags: |
+            type=semver,pattern=v{{version}}
+            type=semver,pattern=v{{major}}.{{minor}}
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=${{ github.event.inputs.version }},enable=${{ github.event.inputs.version != '' }}
+            type=sha,prefix=sha-
+            type=ref,event=branch
+            type=ref,event=pr
+
+      - name: Build and push Base GPU image
+        uses: docker/build-push-action@v6
+        with:
+          context: dockerfiles/Base
+          file: dockerfiles/Base/Dockerfile.gfx1151
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=base-gpu
+          cache-to: type=gha,mode=max,scope=base-gpu
+          provenance: false
+
+      - name: Export first image tag for downstream jobs
+        if: github.event_name != 'pull_request'
+        id: out
+        run: echo "image=$(echo '${{ steps.meta.outputs.tags }}' | head -1)" >> "$GITHUB_OUTPUT"
+
+  # ──────────────────────────────────────────────
+  # Course Images (CV, DL, LLM, PhySim)
+  #
+  # These images use `FROM ghcr.io/amdresearch/base-gfx1151:v0.1-full`
+  # which is pre-built and pushed to GHCR. The build itself only copies
+  # files and installs pip packages — no GPU required.
+  #
+  # BASE_IMAGE build-arg overrides the default so course images
+  # can track the latest GPU base image version from CI.
+  # ──────────────────────────────────────────────
+  build-courses:
+    name: "Build Course: ${{ matrix.course }}"
+    needs: [changes, build-base-gpu]
+    if: |
+      always() &&
+      needs.changes.result == 'success' &&
+      (needs.build-base-gpu.result == 'success' || needs.build-base-gpu.result == 'skipped') &&
+      (
+        needs.changes.outputs.is-tag == 'true' ||
+        (github.event_name != 'workflow_dispatch' && needs.changes.outputs.courses == 'true') ||
+        (github.event_name == 'workflow_dispatch' && (github.event.inputs.images == 'all' || github.event.inputs.images == 'courses' || github.event.inputs.images == 'base-gpu'))
+      )
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - course: CV
+            image_suffix: auplc-cv
+            prepare: cp -r projects/CV dockerfiles/Courses/CV/course_data
+          - course: DL
+            image_suffix: auplc-dl
+            prepare: cp -r projects/DL dockerfiles/Courses/DL/course_data
+          - course: LLM
+            image_suffix: auplc-llm
+            prepare: cp -r projects/LLM dockerfiles/Courses/LLM/LLM
+          - course: PhySim
+            image_suffix: auplc-physim
+            prepare: cp -r projects/PhySim dockerfiles/Courses/PhySim/course_data
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Prepare build context
+        run: ${{ matrix.prepare }}
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ needs.changes.outputs.registry }}/${{ matrix.image_suffix }}
+          tags: |
+            type=semver,pattern=v{{version}}
+            type=semver,pattern=v{{major}}.{{minor}}
+            type=semver,pattern=v{{major}}
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=${{ github.event.inputs.version }},enable=${{ github.event.inputs.version != '' }}
+            type=sha,prefix=sha-
+            type=ref,event=branch
+            type=ref,event=pr
+
+      - name: Build and push ${{ matrix.course }} image
+        uses: docker/build-push-action@v6
+        with:
+          context: dockerfiles/Courses/${{ matrix.course }}
+          file: dockerfiles/Courses/${{ matrix.course }}/Dockerfile
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            ${{ needs.build-base-gpu.outputs.image && format('BASE_IMAGE={0}', needs.build-base-gpu.outputs.image) || '' }}
+          cache-from: type=gha,scope=course-${{ matrix.course }}
+          cache-to: type=gha,mode=max,scope=course-${{ matrix.course }}
+          provenance: false
