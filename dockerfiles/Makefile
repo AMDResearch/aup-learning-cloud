@@ -2,6 +2,9 @@
 
 SHELL := /bin/bash
 
+
+# Export to K3s image dir: off by default. Set SAVE_IMAGES=1 and K3S_IMAGES_DIR to enable.
+SAVE_IMAGES ?=
 K3S_IMAGES_DIR ?= /var/lib/rancher/k3s/agent/images
 
 # Mirror configuration (optional)
@@ -106,7 +109,7 @@ physim:
 
 # --- Export Images ---
 save-image:
-	@if [ -n "$(K3S_IMAGES_DIR)" ]; then \
+	@if [ -n "$(SAVE_IMAGES)" ] && [ -n "$(K3S_IMAGES_DIR)" ]; then \
 		echo "Exporting $(IMAGE) to $(K3S_IMAGES_DIR)..."; \
 		filename=$$(basename $(IMAGE)); \
 		filename=$$(echo $$filename | sed 's/:/-/g').tar; \
@@ -118,5 +121,5 @@ save-image:
 		sudo docker save "$(IMAGE)" -o "$$out_path" && echo "✅ Success" || (echo "❌ ERROR"; exit 1); \
 		echo "-------------------------------------------"; \
 	else \
-		echo "K3S_IMAGES_DIR not set. Skipping export for $(IMAGE)."; \
+		echo "Skipping export for $(IMAGE) (set SAVE_IMAGES=1 and K3S_IMAGES_DIR to enable)."; \
 	fi

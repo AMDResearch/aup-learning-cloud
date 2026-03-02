@@ -22,9 +22,13 @@
 
 set -euo pipefail
 
-# k3s image dir
+# k3s image dir (used only when not using Docker runtime)
 K3S_IMAGES_DIR="/var/lib/rancher/k3s/agent/images"
 K3S_REGISTRIES_FILE="/etc/rancher/k3s/registries.yaml"
+
+# Default: use host Docker as K3s runtime so "docker build" updates are visible without
+# exporting to agent/images. Set K3S_USE_DOCKER=0 for containerd + export (offline/portable).
+K3S_USE_DOCKER="${K3S_USE_DOCKER:-1}"
 
 # Registry mirror prefix (set via environment variable)
 # Example: MIRROR_PREFIX="m.daocloud.io" will transform:
@@ -172,16 +176,30 @@ EOF
 function install_k3s_single_node() {
     echo "Starting K3s installation..."
 
+    if [[ -n "${K3S_USE_DOCKER}" ]]; then
+        echo "Using Docker as container runtime (K3S_USE_DOCKER=1). Images stay in Docker; no export to agent/images."
+        if ! command -v docker &> /dev/null; then
+            echo "Error: K3S_USE_DOCKER is set but Docker is not installed. Install Docker first." >&2
+            exit 1
+        fi
+    fi
+
     # Setup dummy interface for offline operation
     setup_dummy_interface
 
     # Configure registry mirrors before starting k3s
     configure_registry_mirrors
 
+    # Build K3s server exec flags (--docker = use host Docker so image updates are visible in dev)
+    local k3s_exec="--node-ip=${K3S_NODE_IP} --flannel-iface=dummy0"
+    if [[ -n "${K3S_USE_DOCKER}" ]]; then
+        k3s_exec="${k3s_exec} --docker"
+    fi
+
     # Bind K3s to dummy interface IP for portable operation
-    # This ensures K3s works regardless of which network is connected
+    # With --docker, K3s uses host Docker; image updates (e.g. make hub) are visible without re-export.
     curl -sfL https://get.k3s.io | sudo K3S_KUBECONFIG_MODE="644" \
-        INSTALL_K3S_EXEC="--node-ip=${K3S_NODE_IP} --flannel-iface=dummy0" sh -
+        INSTALL_K3S_EXEC="${k3s_exec}" sh -
 
     echo "Configuring kubeconfig for user: $(whoami)"
     mkdir -p "$HOME/.kube"
@@ -252,7 +270,7 @@ function deploy_rocm_gpu_device_plugin() {
 function deply_aup_learning_cloud_runtime() {
     echo "Deploying AUP Learning Cloud Runtime..."
 
-    helm install jupyterhub ../runtime/chart  --namespace jupyterhub   --create-namespace   -f ../runtime/values.yaml
+    helm install jupyterhub runtime/chart  --namespace jupyterhub   --create-namespace   -f runtime/values.yaml
 
     echo "Waiting for JupyterHub deployments to be ready..."
     kubectl wait --namespace jupyterhub \
@@ -264,7 +282,7 @@ function deply_aup_learning_cloud_runtime() {
 }
 
 function upgrade_aup_learning_cloud_runtime() {
-    helm upgrade jupyterhub ../runtime/chart  --namespace jupyterhub   --create-namespace   -f ../runtime/values.yaml
+    helm upgrade jupyterhub runtime/chart  --namespace jupyterhub   --create-namespace   -f runtime/values.yaml
 }
 
 function remove_aup_learning_cloud_runtime() {
@@ -279,15 +297,27 @@ function local_image_build() {
 
     echo "Building local images..."
 
-    if [ ! -d "${K3S_IMAGES_DIR}" ]; then
-        sudo mkdir -p "${K3S_IMAGES_DIR}"
+    # When using Docker runtime, images stay in Docker; no need to export to K3S_IMAGES_DIR
+    if [[ -z "${K3S_USE_DOCKER}" ]]; then
+        if [ ! -d "${K3S_IMAGES_DIR}" ]; then
+            sudo mkdir -p "${K3S_IMAGES_DIR}"
+        fi
+        echo "Build & copy images to K3s image pool (${K3S_IMAGES_DIR})"
+    else
+        echo "Build images in Docker (K3S_USE_DOCKER=1; K3s will use them directly)"
     fi
 
-    echo "Build & Copy Images to K3S image pool"
+    # Makefile: SAVE_IMAGES=1 and K3S_IMAGES_DIR only when not using Docker backend (containerd + export)
+    local save_images_for_make=""
+    local images_dir_for_make=""
+    if [[ -z "${K3S_USE_DOCKER}" ]]; then
+        save_images_for_make="1"
+        images_dir_for_make="${K3S_IMAGES_DIR}"
+    fi
 
-    # Pass IMAGES array and mirror settings to Makefile
-    cd ../dockerfiles/ && make \
-        K3S_IMAGES_DIR="${K3S_IMAGES_DIR}" \
+    cd dockerfiles/ && make \
+        SAVE_IMAGES="${save_images_for_make}" \
+        K3S_IMAGES_DIR="${images_dir_for_make}" \
         IMAGES="${IMAGES[*]}" \
         MIRROR_PREFIX="${MIRROR_PREFIX}" \
         MIRROR_PIP="${MIRROR_PIP}" \
@@ -297,8 +327,7 @@ function local_image_build() {
 }
 
 function pull_external_images() {
-    # Pull and save external images required for offline deployment
-    # This ensures JupyterHub can run without internet access
+    # Pull external images. When K3S_USE_DOCKER=1, keep in Docker only; else also save to K3S_IMAGES_DIR for offline.
 
     if ! command -v docker &> /dev/null; then
         echo "Please install docker"
@@ -306,13 +335,18 @@ function pull_external_images() {
     fi
 
     echo "==========================================="
-    echo "Pulling external images for offline deployment..."
+    echo "Pulling external images..."
+    if [[ -n "${K3S_USE_DOCKER}" ]]; then
+        echo "K3S_USE_DOCKER=1: images stay in Docker (no export to K3s image dir)"
+    else
+        echo "Saving to K3s image pool for offline deployment"
+    fi
     if [[ -n "${MIRROR_PREFIX}" ]]; then
         echo "Using mirror prefix: ${MIRROR_PREFIX}"
     fi
     echo "==========================================="
 
-    if [ ! -d "${K3S_IMAGES_DIR}" ]; then
+    if [[ -z "${K3S_USE_DOCKER}" && ! -d "${K3S_IMAGES_DIR}" ]]; then
         sudo mkdir -p "${K3S_IMAGES_DIR}"
     fi
 
@@ -355,17 +389,20 @@ function pull_external_images() {
                 docker tag "${pull_image}" "${MIRROR_PREFIX}/${full_image}"
             fi
 
-            # Generate filename from original image name (replace / and : with -)
-            local filename
-            filename=$(echo "${image}" | sed 's/[\/:]/-/g').tar
-            local out_path="${K3S_IMAGES_DIR}/${filename}"
-
-            echo "Saving to: ${out_path}"
-            if sudo docker save "${image}" -o "${out_path}"; then
-                echo "Saved: ${image}"
+            # Save to K3S_IMAGES_DIR only when not using Docker backend (so K3s can load at boot)
+            if [[ -z "${K3S_USE_DOCKER}" && -n "${K3S_IMAGES_DIR}" ]]; then
+                local filename
+                filename=$(echo "${image}" | sed 's/[\/:]/-/g').tar
+                local out_path="${K3S_IMAGES_DIR}/${filename}"
+                echo "Saving to: ${out_path}"
+                if sudo docker save "${image}" -o "${out_path}"; then
+                    echo "Saved: ${image}"
+                else
+                    echo "Failed to save: ${image}"
+                    failed_images+=("${image}")
+                fi
             else
-                echo "Failed to save: ${image}"
-                failed_images+=("${image}")
+                echo "In Docker: ${image}"
             fi
         else
             echo "Failed to pull: ${pull_image}"
@@ -402,33 +439,30 @@ function remove_all_components() {
 
 function show_help() {
     cat << 'EOF'
-Usage: ./single-node.sh <command>
+Usage: ./auplc-installer <command> [subcommand]
 
 Commands:
-  install          Full installation (k3s + images + runtime)
-  uninstall        Remove everything
-  install-tools    Install helm and k9s
-  install-runtime  Deploy JupyterHub runtime only
-  remove-runtime   Remove JupyterHub runtime
-  upgrade-runtime  Upgrade JupyterHub runtime
-  build-images     Build custom images locally
-  pull-images      Pull external images for offline use
+  install              Full installation (k3s + images + runtime)
+  uninstall            Remove everything
+  install-tools        Install helm and k9s
+
+  rt install            Deploy JupyterHub runtime only
+  rt upgrade            Upgrade JupyterHub runtime
+  rt remove             Remove JupyterHub runtime
+
+  img build             Build custom images locally
+  img pull              Pull external images for offline use
+
+Default: Docker runtime (after "make hub", use "rt upgrade" to apply).
+  Offline/containerd: K3S_USE_DOCKER=0 ./auplc-installer install
 
 Mirror Configuration:
-  Set environment variables to use alternative mirrors.
-
-  Container Registries:
-    MIRROR_PREFIX   Registry mirror prefix (without https://)
-                    Transforms: quay.io/image -> <prefix>/quay.io/image
-
-  Package Managers:
-    MIRROR_PIP      PyPI mirror URL
-    MIRROR_NPM      npm registry URL
+  MIRROR_PREFIX   Registry mirror (e.g. mirror.example.com)
+  MIRROR_PIP      PyPI mirror URL
+  MIRROR_NPM      npm registry URL
 
   Example:
-    MIRROR_PREFIX="mirror.example.com" \
-    MIRROR_PIP="https://pypi.example.com/simple" \
-    ./single-node.sh install
+    MIRROR_PREFIX="mirror.example.com" ./auplc-installer install
 
 EOF
 }
@@ -442,6 +476,23 @@ case "$1" in
     install) deploy_all_components ;;
     uninstall) remove_all_components ;;
     install-tools) install_tools ;;
+    # New short form: rt / img
+    rt)
+        case "${2:-}" in
+            install) deply_aup_learning_cloud_runtime ;;
+            upgrade) upgrade_aup_learning_cloud_runtime ;;
+            remove) remove_aup_learning_cloud_runtime ;;
+            *) echo "Usage: $0 rt {install|upgrade|remove}"; exit 1 ;;
+        esac
+        ;;
+    img)
+        case "${2:-}" in
+            build) local_image_build ;;
+            pull) pull_external_images ;;
+            *) echo "Usage: $0 img {build|pull}"; exit 1 ;;
+        esac
+        ;;
+    # Legacy long form (still supported)
     install-runtime) deply_aup_learning_cloud_runtime ;;
     remove-runtime) remove_aup_learning_cloud_runtime ;;
     upgrade-runtime) upgrade_aup_learning_cloud_runtime ;;
