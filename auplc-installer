@@ -176,7 +176,7 @@ EOF
 function install_k3s_single_node() {
     echo "Starting K3s installation..."
 
-    if [[ -n "${K3S_USE_DOCKER}" ]]; then
+    if [[ "${K3S_USE_DOCKER}" == "1" ]]; then
         echo "Using Docker as container runtime (K3S_USE_DOCKER=1). Images stay in Docker; no export to agent/images."
         if ! command -v docker &> /dev/null; then
             echo "Error: K3S_USE_DOCKER is set but Docker is not installed. Install Docker first." >&2
@@ -192,7 +192,7 @@ function install_k3s_single_node() {
 
     # Build K3s server exec flags (--docker = use host Docker so image updates are visible in dev)
     local k3s_exec="--node-ip=${K3S_NODE_IP} --flannel-iface=dummy0"
-    if [[ -n "${K3S_USE_DOCKER}" ]]; then
+    if [[ "${K3S_USE_DOCKER}" == "1" ]]; then
         k3s_exec="${k3s_exec} --docker"
     fi
 
@@ -298,7 +298,7 @@ function local_image_build() {
     echo "Building local images..."
 
     # When using Docker runtime, images stay in Docker; no need to export to K3S_IMAGES_DIR
-    if [[ -z "${K3S_USE_DOCKER}" ]]; then
+    if [[ "${K3S_USE_DOCKER}" != "1" ]]; then
         if [ ! -d "${K3S_IMAGES_DIR}" ]; then
             sudo mkdir -p "${K3S_IMAGES_DIR}"
         fi
@@ -310,7 +310,7 @@ function local_image_build() {
     # Makefile: SAVE_IMAGES=1 and K3S_IMAGES_DIR only when not using Docker backend (containerd + export)
     local save_images_for_make=""
     local images_dir_for_make=""
-    if [[ -z "${K3S_USE_DOCKER}" ]]; then
+    if [[ "${K3S_USE_DOCKER}" != "1" ]]; then
         save_images_for_make="1"
         images_dir_for_make="${K3S_IMAGES_DIR}"
     fi
@@ -336,7 +336,7 @@ function pull_external_images() {
 
     echo "==========================================="
     echo "Pulling external images..."
-    if [[ -n "${K3S_USE_DOCKER}" ]]; then
+    if [[ "${K3S_USE_DOCKER}" == "1" ]]; then
         echo "K3S_USE_DOCKER=1: images stay in Docker (no export to K3s image dir)"
     else
         echo "Saving to K3s image pool for offline deployment"
@@ -346,7 +346,7 @@ function pull_external_images() {
     fi
     echo "==========================================="
 
-    if [[ -z "${K3S_USE_DOCKER}" && ! -d "${K3S_IMAGES_DIR}" ]]; then
+    if [[ "${K3S_USE_DOCKER}" != "1" && ! -d "${K3S_IMAGES_DIR}" ]]; then
         sudo mkdir -p "${K3S_IMAGES_DIR}"
     fi
 
@@ -390,7 +390,7 @@ function pull_external_images() {
             fi
 
             # Save to K3S_IMAGES_DIR only when not using Docker backend (so K3s can load at boot)
-            if [[ -z "${K3S_USE_DOCKER}" && -n "${K3S_IMAGES_DIR}" ]]; then
+            if [[ "${K3S_USE_DOCKER}" != "1" && -n "${K3S_IMAGES_DIR}" ]]; then
                 local filename
                 filename=$(echo "${image}" | sed 's/[\/:]/-/g').tar
                 local out_path="${K3S_IMAGES_DIR}/${filename}"
