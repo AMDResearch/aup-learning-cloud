@@ -10,8 +10,8 @@ project = 'AUP Learning Cloud'
 copyright = '2025, Advanced Micro Devices, Inc. All rights reserved'
 author = 'AMD Research'
 
-version = 'v1.0'
-release = 'v1.0'
+version = 'v0.3'
+release = 'v0.3'
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
