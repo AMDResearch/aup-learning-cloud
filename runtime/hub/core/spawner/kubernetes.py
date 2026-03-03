@@ -627,8 +627,7 @@ class RemoteLabKubeSpawner(KubeSpawner):
                 override_image = metadata.imageOverrides.get(gpu_selection)
                 if override_image:
                     self.log.info(
-                        f"Image override for {resource_type}/{gpu_selection}: "
-                        f"{self.image} -> {override_image}"
+                        f"Image override for {resource_type}/{gpu_selection}: {self.image} -> {override_image}"
                     )
                     self.image = override_image
 
