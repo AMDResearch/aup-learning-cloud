@@ -32,35 +32,29 @@ See [Docker Post-installation Steps](https://docs.docker.com/engine/install/linu
 
 ## Installation
 
+Use the **auplc-installer** script on the **develop** branch:
+
 ```bash
 git clone https://github.com/AMDResearch/aup-learning-cloud.git
-cd aup-learning-cloud/deploy/
-sudo ./single-node.sh install
+cd aup-learning-cloud
+git checkout develop
+
+sudo ./auplc-installer install
 ```
 
-After installation completes, open <http://localhost:30890> in your browser. No login credentials are required - you will be automatically logged in.
+After installation completes, open <http://localhost:30890> in your browser. No login credentials are required — you will be automatically logged in.
 
-## Script Commands
+## Uninstall
 
-| Command | Description |
-|---------|-------------|
-| `install` | Full installation (K3s, tools, GPU plugin, images, JupyterHub) |
-| `uninstall` | Complete removal of all components |
-| `upgrade-runtime` | Upgrade JupyterHub deployment |
-| `build-images` | Build and import container images |
-| `install-tools` | Install Helm and K9s only |
-| `install-runtime` | Deploy JupyterHub only |
-| `remove-runtime` | Remove JupyterHub only |
-
-### Examples
+To remove all components (K3s, JupyterHub, and related resources):
 
 ```bash
-# Upgrade JupyterHub after configuration changes
-sudo ./single-node.sh upgrade-runtime
-
-# Rebuild images after modifying Dockerfiles
-sudo ./single-node.sh build-images
+sudo ./auplc-installer uninstall
 ```
+
+:::{seealso}
+For all other commands (upgrade, runtime-only install/remove, image build/pull, mirror configuration, etc.), see the [Single-Node Deployment](../installation/single-node.md) guide.
+:::
 
 ## Next Steps
 

@@ -1,9 +1,9 @@
 # Single-Node Deployment
 
-This guide provides step-by-step instructions for manually deploying AUP Learning Cloud on a single node. This deployment is suitable for development, testing, and demo environments.
+This guide describes single-node deployment of AUP Learning Cloud using the **auplc-installer** script on the **develop** branch. This deployment is suitable for development, testing, and demo environments.
 
 :::{seealso}
-For quick automated installation, see the [Quick Start](quick-start.md) guide.
+For the shortest path, see the [Quick Start](quick-start.md) guide.
 :::
 
 ## Prerequisites
@@ -18,12 +18,16 @@ For quick automated installation, see the [Quick Start](quick-start.md) guide.
 ### Software Requirements
 
 - **Operating System**: Ubuntu 24.04.3 LTS
-- **Docker**: Version 20.10 or later
-- **Root/Sudo Access**: Required for installation
+- **Docker**: Version 20.10 or later (required when using default Docker-as-runtime mode)
+- **Root/Sudo Access**: Required to run the installer
 
-## Installation Steps
+## Installation with auplc-installer
+
+On the **develop** branch, single-node installation is done with the **auplc-installer** script at the repository root.
 
 ### 1. Install Docker
+
+The installer uses the host Docker by default so that image updates are visible to K3s without re-export. Install Docker first:
 
 ```bash
 # Install Docker
@@ -35,7 +39,7 @@ sudo usermod -aG docker $USER
 # Apply group changes (or logout/login)
 newgrp docker
 
-# Install Build Tools
+# Install Build Tools (needed for building images)
 sudo apt install build-essential
 
 # Verify installation
@@ -46,133 +50,79 @@ docker --version
 See [Docker Post-installation Steps](https://docs.docker.com/engine/install/linux-postinstall/) for detailed configuration.
 :::
 
-### 2. Install K3s
-
-K3s is a lightweight Kubernetes distribution optimized for resource-constrained environments.
-
-```bash
-# Install K3s with readable kubeconfig (recommended for non-root kubectl)
-curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=v1.32.3+k3s1 K3S_KUBECONFIG_MODE="644" sh -
-
-# Verify installation
-sudo k3s kubectl get nodes
-```
-
-:::{tip}
-`K3S_KUBECONFIG_MODE="644"` makes the kubeconfig file readable by your user so you can run `kubectl` without copying the file. See [K3s Cluster Access](https://docs.k3s.io/cluster-access).
-:::
-
-K3s includes a built-in **local-path** StorageClass, so no extra storage setup is needed for single-node.
-
-### 3. Configure kubectl
-
-```bash
-# Create kubectl config directory
-mkdir -p ~/.kube
-
-# Copy K3s config
-sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
-
-# Fix permissions (if not using K3S_KUBECONFIG_MODE="644")
-sudo chown $USER:$USER ~/.kube/config
-
-# Verify
-kubectl get nodes
-kubectl get storageclass
-```
-
-### 4. Install Helm
-
-Helm is the package manager for Kubernetes.
-
-```bash
-# Install Helm (v3.17.2 or later recommended)
-wget https://get.helm.sh/helm-v3.17.2-linux-amd64.tar.gz -O /tmp/helm-linux-amd64.tar.gz
-cd /tmp && tar -zxvf helm-linux-amd64.tar.gz
-sudo mv linux-amd64/helm /usr/local/bin/helm
-
-# Verify installation
-helm version
-```
-
-### 5. Install ROCm (for GPU nodes)
-
-On AMD GPU systems, install the ROCm driver and device plugin so JupyterHub can schedule GPU workloads.
-
-```bash
-# Follow the official guide for Ubuntu 24.04
-# https://rocm.docs.amd.com/projects/install-on-linux/en/latest/install/quick-start.html
-
-# Deploy the ROCm device plugin
-kubectl create -f https://raw.githubusercontent.com/ROCm/k8s-device-plugin/master/k8s-ds-amdgpu-dp.yaml
-
-# Verify GPU is allocatable
-kubectl get nodes -o jsonpath='{.items[*].status.allocatable}' | grep amd
-```
-
-### 6. Label the node (GPU / NPU)
-
-If you have GPU or NPU hardware, label the node so the spawner can schedule user pods correctly. Use the same labels as in `custom.accelerators` in `runtime/values.yaml`.
-
-```bash
-NODE_NAME=$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')
-
-# Examples (choose one that matches your hardware):
-kubectl label nodes $NODE_NAME node-type=strix-halo    # Strix Halo iGPU
-kubectl label nodes $NODE_NAME node-type=strix         # Strix iGPU
-kubectl label nodes $NODE_NAME node-type=dgpu          # Discrete GPU
-
-kubectl get nodes --show-labels | grep node-type
-```
-
-### 7. Clone the repository and configure
+### 2. Clone the repository and run the installer
 
 ```bash
 git clone https://github.com/AMDResearch/aup-learning-cloud.git
 cd aup-learning-cloud
-git checkout develop   # Use the branch that contains runtime/ and chart/
+git checkout develop
+
+# Full installation (K3s, Helm, K9s, ROCm device plugin, images, JupyterHub)
+sudo ./auplc-installer install
 ```
 
-Edit **`runtime/values.yaml`** to match your environment (auth, images, storage, network). The default uses **auto-login** and **NodePort 30890**.
+After installation completes, open <http://localhost:30890> in your browser. The default uses **auto-login** — no credentials required.
 
-Key sections to configure:
+### 3. auplc-installer commands
 
-- **custom.authMode** — `auto-login` (dev), `github`, or `multi`
-- **custom.resources.images** / **requirements** / **metadata** — Course images and UI
-- **custom.accelerators** — GPU/NPU node types and labels
-- **custom.teams.mapping** — Which teams can access which courses
-- **hub.config.GitHubOAuthenticator** — If using GitHub OAuth
-- **proxy** / **ingress** — NodePort (default 30890) or domain + TLS
+| Command | Description |
+|---------|-------------|
+| `install` | Full installation (K3s, tools, GPU plugin, images, JupyterHub) |
+| `uninstall` | Remove K3s and all components |
+| `install-tools` | Install Helm and K9s only |
+| `rt install` | Deploy JupyterHub runtime only |
+| `rt upgrade` | Upgrade JupyterHub (e.g. after editing `runtime/values.yaml`) |
+| `rt remove` | Remove JupyterHub runtime only |
+| `rt reinstall` | Remove and reinstall JupyterHub (e.g. after image changes) |
+| `img build` | Build all custom container images |
+| `img build [target...]` | Build specific images (e.g. `img build hub`, `img build hub cv`) |
+| `img pull` | Pull external images for offline use |
 
-See the [Configuration Reference: runtime/values.yaml](../jupyterhub/configuration-reference.md) for every section and recommended workflow.
+Legacy long-form commands are still supported: `install-runtime`, `remove-runtime`, `upgrade-runtime`, `build-images`, `pull-images`.
 
-:::{note}
-To use **pre-built images** from the registry (default in `runtime/values.yaml`), no local Docker build is required. To build images yourself, use the `dockerfiles/` and `make` targets on the develop branch, then set the image names/tags in `runtime/values.yaml` accordingly.
-:::
-
-### 8. Deploy JupyterHub
-
-From the **runtime** directory:
+**Examples:**
 
 ```bash
-cd runtime
+# Upgrade JupyterHub after changing runtime/values.yaml
+sudo ./auplc-installer rt upgrade
 
-# First-time install
-helm install jupyterhub ./chart \
-  --namespace jupyterhub \
-  --create-namespace \
-  -f values.yaml
+# Rebuild images and reinstall runtime after Dockerfile changes
+sudo ./auplc-installer img build
+sudo ./auplc-installer rt reinstall
+
+# Show all options
+./auplc-installer help
 ```
 
-For upgrades after editing `values.yaml`:
+### 4. Runtime and mirror configuration
+
+You can pass environment variables when running the installer:
+
+- **K3S_USE_DOCKER** (default: `1`) — Use host Docker as K3s container runtime so that images built with `make hub` are visible after `rt upgrade`. Set to `0` for containerd mode with image export (offline/portable).
+
+  ```bash
+  K3S_USE_DOCKER=0 sudo ./auplc-installer install
+  ```
+
+- **MIRROR_PREFIX** — Registry mirror host (e.g. `mirror.example.com`) for container images.
+
+  ```bash
+  MIRROR_PREFIX="mirror.example.com" sudo ./auplc-installer install
+  ```
+
+- **MIRROR_PIP** / **MIRROR_NPM** — Package mirrors for image builds (e.g. `img build`).
+
+### 5. Configure runtime (optional)
+
+To customize auth, images, storage, network, and other options, edit **`runtime/values.yaml`**. For all available settings and recommended workflow, see the [Configuration Reference: runtime/values.yaml](../jupyterhub/configuration-reference.md).
+
+After editing, run:
 
 ```bash
-helm upgrade jupyterhub ./chart -n jupyterhub -f values.yaml
+sudo ./auplc-installer rt upgrade
 ```
 
-On the develop branch, a helper script is also available: `bash scripts/helm_upgrade.bash` (run from the repo root or runtime, depending on the script).
-
-### 9. Verify deployment
+### 6. Verify deployment
 
 ```bash
 # Check all pods are running
@@ -242,48 +192,31 @@ kubectl get ingress -n jupyterhub
 
 ## Upgrading
 
-To upgrade JupyterHub after configuration changes:
+To upgrade JupyterHub after editing `runtime/values.yaml`:
 
 ```bash
-cd runtime
-helm upgrade jupyterhub ./chart -n jupyterhub -f values.yaml
+sudo ./auplc-installer rt upgrade
 ```
 
-If you use the develop branch and have the deploy helper script:
+To rebuild container images after changing Dockerfiles, then reinstall runtime:
 
 ```bash
-cd runtime
-bash scripts/helm_upgrade.bash
+sudo ./auplc-installer img build
+sudo ./auplc-installer rt reinstall
 ```
-
-To rebuild container images after changing Dockerfiles (develop branch):
-
-```bash
-cd dockerfiles
-make all
-```
-
-Then update image tags in `runtime/values.yaml` and run `helm upgrade` as above.
 
 ## Uninstalling
 
-To remove the JupyterHub release (keeps the namespace and PVCs unless you delete them):
+To remove JupyterHub runtime only (keeps K3s and other components):
 
 ```bash
-helm uninstall jupyterhub -n jupyterhub
+sudo ./auplc-installer rt remove
 ```
 
-To remove the namespace and free resources:
+To remove everything (K3s, JupyterHub, and installer-managed resources):
 
 ```bash
-kubectl delete namespace jupyterhub
-```
-
-On the develop branch, a full uninstall script is available:
-
-```bash
-cd deploy
-sudo ./single-node.sh uninstall
+sudo ./auplc-installer uninstall
 ```
 
 ## Next Steps
