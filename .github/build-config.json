@@ -1,5 +1,10 @@
 {
-  "gpu_targets": ["gfx110x", "gfx1150", "gfx1151", "gfx120x"],
+  "gpu_targets": [
+    {"name": "gfx110x", "pytorch_whl": "gfx110X-all"},
+    {"name": "gfx1150", "pytorch_whl": "gfx1150"},
+    {"name": "gfx1151", "pytorch_whl": "gfx1151"},
+    {"name": "gfx120x", "pytorch_whl": "gfx120X-all"}
+  ],
   "default_gpu_target": "gfx1151",
   "courses": ["CV", "DL", "LLM", "PhySim"]
 }

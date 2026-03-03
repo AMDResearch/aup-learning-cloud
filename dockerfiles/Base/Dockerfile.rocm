@@ -40,7 +40,9 @@ ARG NB_GID=100
 # Use ROCM_TARBALL_URL / PYTORCH_INDEX_URL to override for edge cases.
 ARG GPU_TARGET=gfx1151
 ARG ROCM_VERSION=7.11.0
-ARG ROCM_TARBALL_URL=
+# PyTorch wheel target — may differ from GPU_TARGET (e.g. gfx110x → gfx110X-all)
+# See https://repo.amd.com/rocm/whl/ for available targets
+ARG PYTORCH_WHL_TARGET=
 ARG PYTORCH_INDEX_URL=
 
 # Set environment variables
@@ -93,7 +95,8 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # Install ROCm PyTorch
-RUN INDEX_URL="${PYTORCH_INDEX_URL:-https://repo.amd.com/rocm/whl/${GPU_TARGET}/}" && \
+RUN WHL_TARGET="${PYTORCH_WHL_TARGET:-${GPU_TARGET}}" && \
+    INDEX_URL="${PYTORCH_INDEX_URL:-https://repo.amd.com/rocm/whl/${WHL_TARGET}/}" && \
     python3 -m pip install --no-cache-dir \
     --index-url "${INDEX_URL}" \
     torch torchvision torchaudio

@@ -90,6 +90,7 @@ jobs:
       registry: ${{ steps.registry.outputs.prefix }}
       is-tag: ${{ steps.check.outputs.is-tag }}
       gpu-targets: ${{ steps.config.outputs.targets }}
+      gpu-map: ${{ steps.config.outputs.gpu-map }}
       default-gpu-target: ${{ steps.config.outputs.default }}
       course-list: ${{ steps.config.outputs.courses }}
     steps:
@@ -112,18 +113,20 @@ jobs:
         id: config
         run: |
           CONFIG='.github/build-config.json'
-          ALL_TARGETS=$(jq -c '.gpu_targets' "$CONFIG")
+          ALL_NAMES=$(jq -c '[.gpu_targets[].name]' "$CONFIG")
           DEFAULT=$(jq -r '.default_gpu_target' "$CONFIG")
           COURSES=$(jq -c '.courses' "$CONFIG")
+          GPU_MAP=$(jq -c '.gpu_targets' "$CONFIG")
 
           INPUT="${{ github.event.inputs.gpu_target }}"
           if [[ -n "$INPUT" && "$INPUT" != "all" ]]; then
             echo "targets=[\"${INPUT}\"]" >> "$GITHUB_OUTPUT"
           else
-            echo "targets=${ALL_TARGETS}" >> "$GITHUB_OUTPUT"
+            echo "targets=${ALL_NAMES}" >> "$GITHUB_OUTPUT"
           fi
           echo "default=${DEFAULT}" >> "$GITHUB_OUTPUT"
           echo "courses=${COURSES}" >> "$GITHUB_OUTPUT"
+          echo "gpu-map=${GPU_MAP}" >> "$GITHUB_OUTPUT"
 
       - uses: dorny/paths-filter@v3
         if: github.ref_type != 'tag' && github.event_name != 'workflow_dispatch'
@@ -293,10 +296,13 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GH_PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}
 
-      - name: Derive tag suffix
+      - name: Resolve GPU config
         id: suffix
         run: |
           echo "tag_suffix=${{ matrix.gpu_target }}" >> "$GITHUB_OUTPUT"
+          # Look up pytorch_whl from gpu-map; fall back to gpu_target if not found
+          WHL=$(echo '${{ needs.changes.outputs.gpu-map }}' | jq -r --arg t "${{ matrix.gpu_target }}" '.[] | select(.name == $t) | .pytorch_whl // .name')
+          echo "pytorch_whl=${WHL}" >> "$GITHUB_OUTPUT"
 
       - name: Docker metadata (target-suffixed tags)
         id: meta-suffixed
@@ -357,6 +363,7 @@ jobs:
           labels: ${{ steps.meta-suffixed.outputs.labels }}
           build-args: |
             GPU_TARGET=${{ matrix.gpu_target }}
+            PYTORCH_WHL_TARGET=${{ steps.suffix.outputs.pytorch_whl }}
           cache-from: type=gha,scope=base-gpu-${{ matrix.gpu_target }}
           cache-to: type=gha,mode=max,scope=base-gpu-${{ matrix.gpu_target }}
           provenance: false
