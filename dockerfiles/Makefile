@@ -17,7 +17,7 @@ MIRROR_PIP ?=
 MIRROR_NPM ?=
 
 # GPU target architecture (e.g. gfx110X-all, gfx1150, gfx1151, gfx1152, gfx120X-all)
-GPU_TARGET ?= gfx110X-all
+GPU_TARGET ?= gfx1151
 
 # GPU base image used by course Dockerfiles (override to track a specific version)
 GPU_BASE_IMAGE ?= ghcr.io/amdresearch/auplc-base:latest
