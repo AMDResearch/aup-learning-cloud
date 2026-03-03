@@ -32,7 +32,9 @@ SOFTWARE.
 
 ---
 
-# How to setup [runtime/values.yaml](../../runtime/values.yaml)
+# How to set up runtime/values.yaml
+
+The main deployment configuration file is **`runtime/values.yaml`** (in the repository root under the `runtime/` directory). For a complete field-by-field reference of every section, see [Configuration Reference: runtime/values.yaml](configuration-reference.md).
 
 ## PrePuller settings
 
@@ -146,16 +148,23 @@ Fill in this section with credentials from your organization's OAuth app. Please
         - read:org
 ```
 
-## NFS Storage setting
+## NFS storage (multi-node)
 
-Refer to [Cluster-NFS-Setting](../../deploy/k8s/nfs-provisioner).
-```yml
+For multi-node clusters using NFS, set the singleuser storage class in `runtime/values.yaml` and ensure your cluster has an NFS provisioner and StorageClass (e.g. `nfs-client`). See [Configuration Reference](configuration-reference.md) → `singleuser.storage`.
+
+```yaml
+singleuser:
   storage:
     dynamic:
       storageClass: nfs-client
-
 ```
 
 ## After
 
-You should run [`helm upgrade`](../../scripts/helm_upgrade.bash) to apply the changes.
+Apply changes by running from the `runtime/` directory:
+
+```bash
+helm upgrade jupyterhub ./chart -n jupyterhub -f values.yaml
+```
+
+On the develop branch, you can also use `bash scripts/helm_upgrade.bash` if available.

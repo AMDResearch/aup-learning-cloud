@@ -51,12 +51,18 @@ See [Docker Post-installation Steps](https://docs.docker.com/engine/install/linu
 K3s is a lightweight Kubernetes distribution optimized for resource-constrained environments.
 
 ```bash
-# Install K3s
-curl -sfL https://get.k3s.io | sh -
+# Install K3s with readable kubeconfig (recommended for non-root kubectl)
+curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=v1.32.3+k3s1 K3S_KUBECONFIG_MODE="644" sh -
 
 # Verify installation
 sudo k3s kubectl get nodes
 ```
+
+:::{tip}
+`K3S_KUBECONFIG_MODE="644"` makes the kubeconfig file readable by your user so you can run `kubectl` without copying the file. See [K3s Cluster Access](https://docs.k3s.io/cluster-access).
+:::
+
+K3s includes a built-in **local-path** StorageClass, so no extra storage setup is needed for single-node.
 
 ### 3. Configure kubectl
 
@@ -67,11 +73,12 @@ mkdir -p ~/.kube
 # Copy K3s config
 sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
 
-# Fix permissions
+# Fix permissions (if not using K3S_KUBECONFIG_MODE="644")
 sudo chown $USER:$USER ~/.kube/config
 
 # Verify
 kubectl get nodes
+kubectl get storageclass
 ```
 
 ### 4. Install Helm
@@ -79,66 +86,93 @@ kubectl get nodes
 Helm is the package manager for Kubernetes.
 
 ```bash
-# Install Helm
-curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+# Install Helm (v3.17.2 or later recommended)
+wget https://get.helm.sh/helm-v3.17.2-linux-amd64.tar.gz -O /tmp/helm-linux-amd64.tar.gz
+cd /tmp && tar -zxvf helm-linux-amd64.tar.gz
+sudo mv linux-amd64/helm /usr/local/bin/helm
 
 # Verify installation
 helm version
 ```
 
-### 5. Clone the Repository
+### 5. Install ROCm (for GPU nodes)
+
+On AMD GPU systems, install the ROCm driver and device plugin so JupyterHub can schedule GPU workloads.
 
 ```bash
-# Clone the repository
+# Follow the official guide for Ubuntu 24.04
+# https://rocm.docs.amd.com/projects/install-on-linux/en/latest/install/quick-start.html
+
+# Deploy the ROCm device plugin
+kubectl create -f https://raw.githubusercontent.com/ROCm/k8s-device-plugin/master/k8s-ds-amdgpu-dp.yaml
+
+# Verify GPU is allocatable
+kubectl get nodes -o jsonpath='{.items[*].status.allocatable}' | grep amd
+```
+
+### 6. Label the node (GPU / NPU)
+
+If you have GPU or NPU hardware, label the node so the spawner can schedule user pods correctly. Use the same labels as in `custom.accelerators` in `runtime/values.yaml`.
+
+```bash
+NODE_NAME=$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')
+
+# Examples (choose one that matches your hardware):
+kubectl label nodes $NODE_NAME node-type=strix-halo    # Strix Halo iGPU
+kubectl label nodes $NODE_NAME node-type=strix         # Strix iGPU
+kubectl label nodes $NODE_NAME node-type=dgpu          # Discrete GPU
+
+kubectl get nodes --show-labels | grep node-type
+```
+
+### 7. Clone the repository and configure
+
+```bash
 git clone https://github.com/AMDResearch/aup-learning-cloud.git
 cd aup-learning-cloud
+git checkout develop   # Use the branch that contains runtime/ and chart/
 ```
 
-### 6. Build Docker Images
+Edit **`runtime/values.yaml`** to match your environment (auth, images, storage, network). The default uses **auto-login** and **NodePort 30890**.
 
-```bash
-# Navigate to dockerfiles directory
-cd dockerfiles
+Key sections to configure:
 
-# Build all images
-make all
+- **custom.authMode** — `auto-login` (dev), `github`, or `multi`
+- **custom.resources.images** / **requirements** / **metadata** — Course images and UI
+- **custom.accelerators** — GPU/NPU node types and labels
+- **custom.teams.mapping** — Which teams can access which courses
+- **hub.config.GitHubOAuthenticator** — If using GitHub OAuth
+- **proxy** / **ingress** — NodePort (default 30890) or domain + TLS
 
-# This will build:
-# - Base CPU image
-# - JupyterHub hub image
-# - Course images (DL, LLM, CV)
-```
+See the [Configuration Reference: runtime/values.yaml](../jupyterhub/configuration-reference.md) for every section and recommended workflow.
 
 :::{note}
-Building images may take 30-60 minutes depending on your internet connection and hardware.
+To use **pre-built images** from the registry (default in `runtime/values.yaml`), no local Docker build is required. To build images yourself, use the `dockerfiles/` and `make` targets on the develop branch, then set the image names/tags in `runtime/values.yaml` accordingly.
 :::
-
-### 7. Configure JupyterHub
-
-Edit the configuration file `runtime/values.yaml`:
-
-```bash
-cd ../runtime
-nano values.yaml
-```
-
-Key settings to configure:
-
-- Network access (NodePort or Domain)
-- Authentication (GitHub OAuth or Native)
-- Storage (NFS settings)
-- Resource limits
-
-See [JupyterHub Configuration](../jupyterhub/index.md) for detailed configuration options.
 
 ### 8. Deploy JupyterHub
 
+From the **runtime** directory:
+
 ```bash
-# Deploy using Helm
-bash scripts/helm_upgrade.bash
+cd runtime
+
+# First-time install
+helm install jupyterhub ./chart \
+  --namespace jupyterhub \
+  --create-namespace \
+  -f values.yaml
 ```
 
-### 9. Verify Deployment
+For upgrades after editing `values.yaml`:
+
+```bash
+helm upgrade jupyterhub ./chart -n jupyterhub -f values.yaml
+```
+
+On the develop branch, a helper script is also available: `bash scripts/helm_upgrade.bash` (run from the repo root or runtime, depending on the script).
+
+### 9. Verify deployment
 
 ```bash
 # Check all pods are running
@@ -212,19 +246,40 @@ To upgrade JupyterHub after configuration changes:
 
 ```bash
 cd runtime
+helm upgrade jupyterhub ./chart -n jupyterhub -f values.yaml
+```
+
+If you use the develop branch and have the deploy helper script:
+
+```bash
+cd runtime
 bash scripts/helm_upgrade.bash
 ```
 
-To rebuild images after code changes:
+To rebuild container images after changing Dockerfiles (develop branch):
 
 ```bash
 cd dockerfiles
 make all
 ```
 
+Then update image tags in `runtime/values.yaml` and run `helm upgrade` as above.
+
 ## Uninstalling
 
-To completely remove the installation:
+To remove the JupyterHub release (keeps the namespace and PVCs unless you delete them):
+
+```bash
+helm uninstall jupyterhub -n jupyterhub
+```
+
+To remove the namespace and free resources:
+
+```bash
+kubectl delete namespace jupyterhub
+```
+
+On the develop branch, a full uninstall script is available:
 
 ```bash
 cd deploy
