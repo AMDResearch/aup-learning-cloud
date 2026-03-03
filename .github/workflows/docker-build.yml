@@ -64,6 +64,8 @@ on:
           - gfx1151
           - gfx120x
 
+# Build matrix is defined in .github/build-config.json
+
 # Prevent duplicate builds on the same branch / PR
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
@@ -87,8 +89,9 @@ jobs:
       base-gpu: ${{ steps.filter.outputs.base-gpu }}
       registry: ${{ steps.registry.outputs.prefix }}
       is-tag: ${{ steps.check.outputs.is-tag }}
-      gpu-targets: ${{ steps.gpu.outputs.targets }}
-      default-gpu-target: ${{ steps.gpu.outputs.default }}
+      gpu-targets: ${{ steps.config.outputs.targets }}
+      default-gpu-target: ${{ steps.config.outputs.default }}
+      courses: ${{ steps.config.outputs.courses }}
     steps:
       - uses: actions/checkout@v4
 
@@ -105,25 +108,22 @@ jobs:
             echo "is-tag=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Resolve GPU targets
-        id: gpu
+      - name: Load build config
+        id: config
         run: |
-          # ── Single source of truth for GPU targets ──
-          # To add a new target: append to ALL_TARGETS and TAG_MAP below.
-          # Values are the AMD tarball names (used as GPU_TARGET build-arg).
-          # Tag suffixes strip -all/-dgpu (e.g. gfx110X-all → gfx110X).
-          ALL_TARGETS='["gfx110X-all","gfx1150","gfx1151","gfx1152","gfx120X-all"]'
-          DEFAULT_TARGET="gfx110X-all"
+          CONFIG='.github/build-config.json'
+          ALL_TARGETS=$(jq -c '.gpu_targets' "$CONFIG")
+          DEFAULT=$(jq -r '.default_gpu_target' "$CONFIG")
+          COURSES=$(jq -c '.courses' "$CONFIG")
 
           INPUT="${{ github.event.inputs.gpu_target }}"
           if [[ -n "$INPUT" && "$INPUT" != "all" ]]; then
-            TARGETS="[\"${INPUT}\"]"
+            echo "targets=[\"${INPUT}\"]" >> "$GITHUB_OUTPUT"
           else
-            TARGETS="$ALL_TARGETS"
+            echo "targets=${ALL_TARGETS}" >> "$GITHUB_OUTPUT"
           fi
-
-          echo "targets=${TARGETS}" >> "$GITHUB_OUTPUT"
-          echo "default=${DEFAULT_TARGET}" >> "$GITHUB_OUTPUT"
+          echo "default=${DEFAULT}" >> "$GITHUB_OUTPUT"
+          echo "courses=${COURSES}" >> "$GITHUB_OUTPUT"
 
       - uses: dorny/paths-filter@v3
         if: github.ref_type != 'tag' && github.event_name != 'workflow_dispatch'
@@ -394,25 +394,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        course:
-          - CV
-          - DL
-          - LLM
-          - PhySim
+        course: ${{ fromJSON(needs.changes.outputs.courses) }}
         gpu_target: ${{ fromJSON(needs.changes.outputs.gpu-targets) }}
-        include:
-          - course: CV
-            image_suffix: auplc-cv
-            prepare: cp -r projects/CV dockerfiles/Courses/CV/course_data
-          - course: DL
-            image_suffix: auplc-dl
-            prepare: cp -r projects/DL dockerfiles/Courses/DL/course_data
-          - course: LLM
-            image_suffix: auplc-llm
-            prepare: cp -r projects/LLM dockerfiles/Courses/LLM/LLM
-          - course: PhySim
-            image_suffix: auplc-physim
-            prepare: cp -r projects/PhySim dockerfiles/Courses/PhySim/course_data
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -429,34 +412,35 @@ jobs:
           password: ${{ secrets.GH_PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}
 
       - name: Prepare build context
-        run: ${{ matrix.prepare }}
+        run: cp -r projects/${{ matrix.course }} dockerfiles/Courses/${{ matrix.course }}/course_data
 
-      - name: Derive tag suffix
-        id: suffix
+      - name: Derive image name and tag suffix
+        id: meta-inputs
         run: |
+          echo "image_name=auplc-$(echo '${{ matrix.course }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
           echo "tag_suffix=${{ matrix.gpu_target }}" >> "$GITHUB_OUTPUT"
 
       - name: Determine base image tag
         if: github.event_name != 'pull_request'
         id: base
         run: |
-          SUFFIX="${{ steps.suffix.outputs.tag_suffix }}"
+          SUFFIX="${{ steps.meta-inputs.outputs.tag_suffix }}"
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            TAG="${GITHUB_REF##*/}-${SUFFIX}"
+            BRANCH="${GITHUB_REF##*/}"
           elif [[ "$GITHUB_REF" == refs/heads/main ]]; then
-            TAG="latest-${SUFFIX}"
+            BRANCH="latest"
           else
-            TAG="${GITHUB_REF##refs/heads/}-${SUFFIX}"
+            BRANCH=$(echo "${GITHUB_REF##refs/heads/}" | tr '/' '-')
           fi
-          echo "image=${{ needs.changes.outputs.registry }}/auplc-base:${TAG}" >> "$GITHUB_OUTPUT"
+          echo "image=${{ needs.changes.outputs.registry }}/auplc-base:${BRANCH}-${SUFFIX}" >> "$GITHUB_OUTPUT"
 
       - name: Docker metadata (target-suffixed tags)
         id: meta-suffixed
         uses: docker/metadata-action@v5
         with:
-          images: ${{ needs.changes.outputs.registry }}/${{ matrix.image_suffix }}
+          images: ${{ needs.changes.outputs.registry }}/${{ steps.meta-inputs.outputs.image_name }}
           flavor: |
-            suffix=-${{ steps.suffix.outputs.tag_suffix }}
+            suffix=-${{ steps.meta-inputs.outputs.tag_suffix }}
           tags: |
             type=semver,pattern=v{{version}}
             type=semver,pattern=v{{major}}.{{minor}}
@@ -472,7 +456,7 @@ jobs:
         id: meta-default
         uses: docker/metadata-action@v5
         with:
-          images: ${{ needs.changes.outputs.registry }}/${{ matrix.image_suffix }}
+          images: ${{ needs.changes.outputs.registry }}/${{ steps.meta-inputs.outputs.image_name }}
           tags: |
             type=semver,pattern=v{{version}}
             type=semver,pattern=v{{major}}.{{minor}}

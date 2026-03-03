@@ -1,0 +1,5 @@
+{
+  "gpu_targets": ["gfx110x", "gfx1150", "gfx1151", "gfx120x"],
+  "default_gpu_target": "gfx1151",
+  "courses": ["CV", "DL", "LLM", "PhySim"]
+}

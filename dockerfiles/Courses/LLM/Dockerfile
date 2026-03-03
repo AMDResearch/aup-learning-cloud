@@ -55,7 +55,7 @@ RUN pip3 install --no-cache-dir \
 USER root
 
 # Copy related rocm notebooks into the docker
-COPY LLM/ /opt/workspace/LLM
+COPY ./course_data /opt/workspace/LLM
 
 #FasionMNIST
 RUN mkdir -p /opt/workspace/LLM/data/FashionMNIST/raw && cd /opt/workspace/LLM/data/FashionMNIST/raw && \

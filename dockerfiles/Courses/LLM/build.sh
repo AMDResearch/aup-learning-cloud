@@ -17,9 +17,9 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-cp -r ../../../projects/LLM ./LLM
+cp -r ../../../projects/LLM ./course_data
 
 docker build ${BASE_IMAGE:+--build-arg BASE_IMAGE="$BASE_IMAGE"} \
   -t ghcr.io/amdresearch/auplc-llm:latest .
 
-rm -r ./LLM/
+rm -r ./course_data/
