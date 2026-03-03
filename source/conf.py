@@ -45,19 +45,14 @@ myst_enable_extensions = [
 copybutton_prompt_text = r">>> |\.\.\. |\$ |In \[\d*\]: | {2,5}\.\.\.: | {5,8}: "
 copybutton_prompt_is_regexp = True
 
-# Furo theme options
+# Sphinx Book Theme options (see sphinx-book-theme docs for more)
 html_theme_options = {
-    "light_css_variables": {
-        "color-brand-primary": "#E8175D",  # AMD red
-        "color-brand-content": "#E8175D",
-    },
-    "dark_css_variables": {
-        "color-brand-primary": "#E8175D",
-        "color-brand-content": "#E8175D",
-    },
-    "sidebar_hide_name": False,
+    "repository_url": "",
+    "use_repository_button": False,
     "navigation_with_keys": True,
+    "show_navbar_depth": 1,
 }
+# For AMD brand colors (#E8175D), add _static/custom.css and set html_css_files = ["custom.css"]
 
 # Project logo (optional - you can add AMD logo later)
 # html_logo = "_static/logo.png"
