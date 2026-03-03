@@ -30,10 +30,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libvulkan1 mesa-vulkan-drivers vulkan-tools \
  && rm -rf /var/lib/apt/lists/*
 
-USER jovyan
+# IMPORTANT: must remain under USER root here. pip install as jovyan silently
+# falls back to ~/.local/, which gets masked by the PVC mount at runtime.
 
 # Install Genesis related packages
-RUN pip3 install --no-cache-dir --break-system-packages \
+RUN pip3 install --no-cache-dir \
     loguru \
     omegaconf \
     gstaichi \
