@@ -60,7 +60,7 @@ cd aup-learning-cloud
 sudo ./auplc-installer install
 ```
 After installation completes, open http://localhost:30890 in your browser. No login credentials are required - you will be automatically logged in.
-The installer uses **Docker as the default container runtime** (`K3S_USE_DOCKER=1`), see more at [link])(https://amdresearch.github.io/aup-learning-cloud/installation/single-node.html#runtime-and-mirror-configuration)
+The installer uses **Docker as the default container runtime** (`K3S_USE_DOCKER=1`), see more at [link](https://amdresearch.github.io/aup-learning-cloud/installation/single-node.html#runtime-and-mirror-configuration)
 
 
 ### Uninstall
