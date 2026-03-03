@@ -50,8 +50,7 @@ Use the **auplc-installer** script on the **develop** branch:
 
 ```bash
 git clone https://github.com/AMDResearch/aup-learning-cloud.git
-cd aup-learning-cloud
-git checkout develop
+cd aup-learning-cloud && chmod +x auplc-installer
 
 sudo ./auplc-installer install
 ```
