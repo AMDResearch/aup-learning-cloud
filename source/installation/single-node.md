@@ -56,9 +56,8 @@ newgrp docker
 docker --version
 ```
 
-:::{seealso}
 See [Docker Post-installation Steps](https://docs.docker.com/engine/install/linux-postinstall/) for detailed configuration.
-:::
+
 :::
 
 ### 3. Clone the repository and run the installer

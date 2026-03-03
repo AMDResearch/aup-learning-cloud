@@ -28,7 +28,7 @@ SOFTWARE.
 - [Authentication Guide](./authentication-guide.md) - Setup GitHub OAuth and native authentication
 - [User Management Guide](./user-management.md) - Batch user operations with scripts
 - [User Quota System](./quota-system.md) - Resource usage tracking and quota management
-- [GitHub OAuth Setup](./How_to_Setup_GitHub_OAuth.md) - Step-by-step OAuth configuration
+- [GitHub OAuth Setup](./github-oauth-setup.md) - Step-by-step OAuth configuration
 
 ---
 

@@ -307,7 +307,7 @@ bash scripts/helm_upgrade.bash
 
 ### Backup and Restore
 
-See the [Backup Guide](../operations/backup.md) for cluster backup procedures.
+Back up the hub database PVC and NFS storage (if used) before major upgrades. Backup and monitoring guides will be added in a future release.
 
 ## Troubleshooting
 
@@ -371,5 +371,5 @@ ansible worker4 -m shell -a "/usr/local/bin/k3s-agent-uninstall.sh"
 
 - [Configure JupyterHub](../jupyterhub/index.md)
 - [Set up Authentication](../jupyterhub/authentication-guide.md)
-- [Configure Monitoring](../operations/monitoring.md)
-- [Backup Configuration](../operations/backup.md)
+- [Manage Users](../jupyterhub/user-management.md)
+- [Configure Quotas](../jupyterhub/quota-system.md)

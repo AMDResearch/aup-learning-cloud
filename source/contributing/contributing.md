@@ -196,6 +196,6 @@ Standard production code rules apply to:
 ## Questions?
 
 - Open an issue for bugs or feature requests
-- Check existing documentation in `docs/`
+- Check existing documentation in the `source/` directory (this documentation site)
 
 Thank you for contributing!

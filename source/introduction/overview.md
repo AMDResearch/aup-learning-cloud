@@ -44,7 +44,7 @@ Dynamic NFS provisioning ensures scalable and persistent storage for user data, 
 AUP Learning Cloud offers the following Learning Toolkits:
 
 :::{note}
-Only **Deep Learning** and **Large Language Model from Scratch** are available in the v1.0 release.
+Only **Deep Learning** and **Large Language Model from Scratch** are available in the v1.0 release (v1.0 here refers to the learning toolkit release).
 :::
 
 - **Computer Vision** - 10 hands-on labs covering common computer vision concepts and techniques

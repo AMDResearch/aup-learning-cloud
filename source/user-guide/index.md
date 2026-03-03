@@ -14,13 +14,14 @@ admin-manual
 
 ## For Users
 
-The user documentation covers:
+End-user topics are summarized in **Quick Links** below. For login and authentication, see the [Authentication Guide](../jupyterhub/authentication-guide.md). Your administrator can provide the JupyterHub URL; once logged in you can:
 
-- Accessing JupyterHub
-- Launching notebook environments
-- Using different hardware acceleration options (CPU, GPU, NPU)
-- Managing your workspace and files
-- Best practices for resource usage
+- Launch notebook environments (Base CPU, CV/DL/LLM courses)
+- Use hardware acceleration options (CPU, GPU, NPU) as allowed for your account
+- Manage your workspace and files in JupyterLab
+- Stop your server when finished to free resources
+
+Detailed end-user documentation may be expanded in future releases; contact your system administrator or see the repository for updates.
 
 ## Quick Links
 

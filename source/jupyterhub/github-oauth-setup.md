@@ -146,7 +146,7 @@ Teams allow you to organize members and control access to different resources in
 
    ![JupyterHub OAuth Configuration](../../_static/images/github-12.png)
 
-3. Configure team-to-resource mapping on `jupyterhub_config.py`:
+3. Configure team-to-resource mapping. In custom setups this is in `jupyterhub_config.py`:
 
    ```python
    # TEAM RESOURCE MAPPING
@@ -160,9 +160,11 @@ Teams allow you to organize members and control access to different resources in
    }
    ```
 
+   For Helm deployments, use **`runtime/values.yaml`** under `custom.teams.mapping` instead. See [Configuration Reference](configuration-reference.md).
+
    ![Team Resource Mapping](../../_static/images/github-13.png)
 
-4. Update the organization in `jupyterhub_config.py` file
+4. Update the organization in `jupyterhub_config.py` file (or in `hub.config.GitHubOAuthenticator.allowed_organizations` in `values.yaml` for Helm)
 
 Search for the following line and update the name of your GitHub organization
 

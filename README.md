@@ -34,12 +34,16 @@ sphinx-autobuild source build/html
 source/
 ├── index.rst                    # Main documentation index
 ├── conf.py                      # Sphinx configuration
-├── getting-started/             # Getting started guides
-│   ├── index.md
+├── introduction/                # Introduction
+│   └── overview.md
+├── installation/                # Installation guides
 │   ├── quick-start.md
-│   └── installation.md
+│   ├── single-node.md
+│   └── multi-node.md
 ├── jupyterhub/                  # JupyterHub configuration
 │   ├── index.md
+│   ├── README.md
+│   ├── configuration-reference.md
 │   ├── authentication-guide.md
 │   ├── user-management.md
 │   ├── quota-system.md
@@ -48,6 +52,7 @@ source/
 │   ├── index.md
 │   └── admin-manual.md
 ├── contributing/                # Contributing guide
+│   ├── index.md
 │   └── contributing.md
 └── _static/                     # Static files (images, CSS, etc.)
     └── images/
