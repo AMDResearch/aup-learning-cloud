@@ -511,7 +511,7 @@ case "$1" in
                 local_image_build "$@"
                 ;;
             pull) pull_external_images ;;
-            *) echo "Usage: $0 img {build [target...]|pull}. Targets: all, hub, base-cpu, base-gfx1151, cv, dl, llm, physim"; exit 1 ;;
+            *) echo "Usage: $0 img {build [target...]|pull}. Targets: all, hub, base-cpu, base-rocm, cv, dl, llm, physim"; exit 1 ;;
         esac
         ;;
     # Legacy long form (still supported)

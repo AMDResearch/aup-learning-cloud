@@ -159,7 +159,7 @@ custom:
     # Add new course images here
     images:
       cpu: "ghcr.io/amdresearch/auplc-default:latest"
-      gpu: "ghcr.io/amdresearch/base-gfx1151:v0.1-full"
+      gpu: "ghcr.io/amdresearch/auplc-base:latest"
       Course-CV: "ghcr.io/amdresearch/auplc-cv:latest"
       Course-DL: "ghcr.io/amdresearch/auplc-dl:latest"
       Course-LLM: "ghcr.io/amdresearch/auplc-llm:latest"

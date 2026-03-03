@@ -18,7 +18,7 @@
 # SOFTWARE.
 
 # Use a verified ROCm PyTorch image as base
-ARG BASE_IMAGE=ghcr.io/amdresearch/base-gfx1151:v0.1-full
+ARG BASE_IMAGE=ghcr.io/amdresearch/auplc-base:latest
 FROM ${BASE_IMAGE}
 
 # IMPORTANT: base image ends with USER jovyan. pip install as jovyan silently

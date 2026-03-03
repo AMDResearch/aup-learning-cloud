@@ -28,11 +28,21 @@ ARG NB_USER=jovyan
 ARG NB_UID=1000
 ARG NB_GID=100
 
-# ROCm / PyTorch version pins — override at build time to upgrade
-# gfx110X-all covers gfx1100/1101/1102/1103; strix-halo (gfx1151) uses HSA_OVERRIDE
+# GPU target and ROCm version — override at build time
+#
+# Supported GPU_TARGET values:
+#   gfx110X-all   RDNA 3   — gfx1100/1101/1102/1103 (dGPU)
+#   gfx1150       RDNA 3.5 — Strix (Radeon 890M)
+#   gfx1151       RDNA 3.5 — Strix Halo (Radeon 8060S)
+#   gfx1152       RDNA 3.5
+#   gfx120X-all   RDNA 4   — gfx1201 (dGPU)
+#
+# The tarball and wheel URLs are derived from GPU_TARGET automatically.
+# Use ROCM_TARBALL_URL / PYTORCH_INDEX_URL to override for edge cases.
+ARG GPU_TARGET=gfx110X-all
 ARG ROCM_VERSION=7.11.0
-ARG ROCM_TARBALL_URL=https://repo.amd.com/rocm/tarball/therock-dist-linux-gfx110X-all-${ROCM_VERSION}.tar.gz
-ARG PYTORCH_INDEX_URL=https://repo.amd.com/rocm/whl/gfx110X-all/
+ARG ROCM_TARBALL_URL=
+ARG PYTORCH_INDEX_URL=
 
 # Set environment variables
 ENV DEBIAN_FRONTEND=noninteractive
@@ -69,14 +79,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   && rm -rf /var/lib/apt/lists/*
 
 # Install ROCm from tarball
-RUN mkdir -p /opt/rocm && \
-    wget -q "${ROCM_TARBALL_URL}" -O /tmp/rocm.tar.gz && \
+RUN TARBALL_URL="${ROCM_TARBALL_URL:-https://repo.amd.com/rocm/tarball/therock-dist-linux-${GPU_TARGET}-${ROCM_VERSION}.tar.gz}" && \
+    mkdir -p /opt/rocm && \
+    wget -q "${TARBALL_URL}" -O /tmp/rocm.tar.gz && \
     tar -xf /tmp/rocm.tar.gz -C /opt/rocm --strip-components=1 && \
     rm /tmp/rocm.tar.gz
 
 # Install ROCm PyTorch
-RUN python3 -m pip install --no-cache-dir \
-    --index-url "${PYTORCH_INDEX_URL}" \
+RUN INDEX_URL="${PYTORCH_INDEX_URL:-https://repo.amd.com/rocm/whl/${GPU_TARGET}/}" && \
+    python3 -m pip install --no-cache-dir \
+    --index-url "${INDEX_URL}" \
     torch torchvision torchaudio
 
 # Install JupyterHub and related packages

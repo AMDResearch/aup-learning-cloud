@@ -52,6 +52,18 @@ on:
           - courses
           - base-cpu
           - base-gpu
+      gpu_target:
+        description: 'GPU target (all = build every target)'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - gfx110X-all
+          - gfx1150
+          - gfx1151
+          - gfx1152
+          - gfx120X-all
 
 # Prevent duplicate builds on the same branch / PR
 concurrency:
@@ -107,7 +119,7 @@ jobs:
             base-cpu:
               - 'dockerfiles/Base/Dockerfile.cpu'
             base-gpu:
-              - 'dockerfiles/Base/Dockerfile.gfx1151'
+              - 'dockerfiles/Base/Dockerfile.rocm'
 
   # ──────────────────────────────────────────────
   # Hub Image (CPU only, runs on GitHub Actions)
@@ -133,7 +145,7 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GH_PACKAGES_TOKEN }}
+          password: ${{ secrets.GH_PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}
 
       - name: Docker metadata
         id: meta
@@ -186,7 +198,7 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GH_PACKAGES_TOKEN }}
+          password: ${{ secrets.GH_PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}
 
       - name: Docker metadata
         id: meta
@@ -214,26 +226,50 @@ jobs:
           provenance: false
 
   # ──────────────────────────────────────────────
-  # Base GPU Image (gfx1151)
+  # Base GPU Image (multi-target via GPU_TARGET)
   #
   # No GPU hardware required — only downloads ROCm tarball + pip wheels.
   # Uses free-disk-space action to reclaim runner disk for the large image.
+  # Builds 5 GPU targets in parallel via matrix strategy.
   # ──────────────────────────────────────────────
   build-base-gpu:
-    name: Build Base GPU Image (gfx1151)
+    name: "Build Base GPU Image (${{ matrix.gpu_target }})"
     needs: changes
     if: |
       needs.changes.outputs.is-tag == 'true' ||
       (github.event_name != 'workflow_dispatch' && needs.changes.outputs.base-gpu == 'true') ||
       (github.event_name == 'workflow_dispatch' && (github.event.inputs.images == 'all' || github.event.inputs.images == 'base-gpu'))
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        gpu_target: [gfx110X-all, gfx1150, gfx1151, gfx1152, gfx120X-all]
+        include:
+          - gpu_target: gfx110X-all
+            is_default: true
+          - gpu_target: gfx1150
+            is_default: false
+          - gpu_target: gfx1151
+            is_default: false
+          - gpu_target: gfx1152
+            is_default: false
+          - gpu_target: gfx120X-all
+            is_default: false
     outputs:
       image: ${{ steps.out.outputs.image }}
     steps:
+      - name: Skip if filtered by gpu_target input
+        if: github.event.inputs.gpu_target != 'all' && github.event.inputs.gpu_target != '' && matrix.gpu_target != github.event.inputs.gpu_target
+        run: |
+          echo "Skipping ${{ matrix.gpu_target }} — only building ${{ github.event.inputs.gpu_target }}"
+          exit 0
+
       - name: Checkout code
+        if: github.event.inputs.gpu_target == 'all' || github.event.inputs.gpu_target == '' || matrix.gpu_target == github.event.inputs.gpu_target
         uses: actions/checkout@v4
 
       - name: Free disk space
+        if: github.event.inputs.gpu_target == 'all' || github.event.inputs.gpu_target == '' || matrix.gpu_target == github.event.inputs.gpu_target
         uses: jlumbroso/free-disk-space@main
         with:
           tool-cache: true
@@ -245,59 +281,109 @@ jobs:
           swap-storage: false
 
       - name: Set up Docker Buildx
+        if: github.event.inputs.gpu_target == 'all' || github.event.inputs.gpu_target == '' || matrix.gpu_target == github.event.inputs.gpu_target
         uses: docker/setup-buildx-action@v3
 
       - name: Login to GitHub Container Registry
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && (github.event.inputs.gpu_target == 'all' || github.event.inputs.gpu_target == '' || matrix.gpu_target == github.event.inputs.gpu_target)
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GH_PACKAGES_TOKEN }}
+          password: ${{ secrets.GH_PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}
 
-      - name: Docker metadata
-        id: meta
+      - name: Derive tag suffix
+        if: github.event.inputs.gpu_target == 'all' || github.event.inputs.gpu_target == '' || matrix.gpu_target == github.event.inputs.gpu_target
+        id: suffix
+        run: |
+          TAG_SUFFIX=$(echo "${{ matrix.gpu_target }}" | sed 's/-all$//; s/-dgpu$//')
+          echo "tag_suffix=${TAG_SUFFIX}" >> "$GITHUB_OUTPUT"
+
+      - name: Docker metadata (target-suffixed tags)
+        if: github.event.inputs.gpu_target == 'all' || github.event.inputs.gpu_target == '' || matrix.gpu_target == github.event.inputs.gpu_target
+        id: meta-suffixed
         uses: docker/metadata-action@v5
         with:
-          images: ${{ needs.changes.outputs.registry }}/base-gfx1151
+          images: ${{ needs.changes.outputs.registry }}/auplc-base
+          flavor: |
+            suffix=-${{ steps.suffix.outputs.tag_suffix }}
           tags: |
             type=semver,pattern=v{{version}}
             type=semver,pattern=v{{major}}.{{minor}}
+            type=semver,pattern=v{{major}}
             type=raw,value=latest,enable={{is_default_branch}}
             type=raw,value=${{ github.event.inputs.version }},enable=${{ github.event.inputs.version != '' }}
             type=sha,prefix=sha-
             type=ref,event=branch
             type=ref,event=pr
 
+      - name: Docker metadata (unsuffixed tags — default target only)
+        if: matrix.is_default && (github.event.inputs.gpu_target == 'all' || github.event.inputs.gpu_target == '' || matrix.gpu_target == github.event.inputs.gpu_target)
+        id: meta-default
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ needs.changes.outputs.registry }}/auplc-base
+          tags: |
+            type=semver,pattern=v{{version}}
+            type=semver,pattern=v{{major}}.{{minor}}
+            type=semver,pattern=v{{major}}
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=${{ github.event.inputs.version }},enable=${{ github.event.inputs.version != '' }}
+            type=sha,prefix=sha-
+            type=ref,event=branch
+            type=ref,event=pr
+
+      - name: Merge tags
+        if: github.event.inputs.gpu_target == 'all' || github.event.inputs.gpu_target == '' || matrix.gpu_target == github.event.inputs.gpu_target
+        id: tags
+        run: |
+          TAGS="${{ steps.meta-suffixed.outputs.tags }}"
+          if [ -n "${{ steps.meta-default.outputs.tags }}" ]; then
+            TAGS="${TAGS}
+          ${{ steps.meta-default.outputs.tags }}"
+          fi
+          # Deduplicate
+          TAGS=$(echo "$TAGS" | sort -u)
+          {
+            echo "tags<<EOF"
+            echo "$TAGS"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Build and push Base GPU image
+        if: github.event.inputs.gpu_target == 'all' || github.event.inputs.gpu_target == '' || matrix.gpu_target == github.event.inputs.gpu_target
         uses: docker/build-push-action@v6
         with:
           context: dockerfiles/Base
-          file: dockerfiles/Base/Dockerfile.gfx1151
+          file: dockerfiles/Base/Dockerfile.rocm
           push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=base-gpu
-          cache-to: type=gha,mode=max,scope=base-gpu
+          tags: ${{ steps.tags.outputs.tags }}
+          labels: ${{ steps.meta-suffixed.outputs.labels }}
+          build-args: |
+            GPU_TARGET=${{ matrix.gpu_target }}
+          cache-from: type=gha,scope=base-gpu-${{ matrix.gpu_target }}
+          cache-to: type=gha,mode=max,scope=base-gpu-${{ matrix.gpu_target }}
           provenance: false
 
       - name: Export first image tag for downstream jobs
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && (github.event.inputs.gpu_target == 'all' || github.event.inputs.gpu_target == '' || matrix.gpu_target == github.event.inputs.gpu_target)
         id: out
-        run: echo "image=$(echo '${{ steps.meta.outputs.tags }}' | head -1)" >> "$GITHUB_OUTPUT"
+        run: echo "image=$(echo '${{ steps.tags.outputs.tags }}' | head -1)" >> "$GITHUB_OUTPUT"
 
   # ──────────────────────────────────────────────
   # Course Images (CV, DL, LLM, PhySim)
   #
-  # These images use `FROM ghcr.io/amdresearch/base-gfx1151:v0.1-full`
+  # These images use `FROM ghcr.io/amdresearch/auplc-base:latest`
   # which is pre-built and pushed to GHCR. The build itself only copies
   # files and installs pip packages — no GPU required.
   #
   # BASE_IMAGE build-arg overrides the default so course images
   # can track the latest GPU base image version from CI.
+  #
+  # Each course is built for all 5 GPU targets (course × gpu_target matrix).
   # ──────────────────────────────────────────────
   build-courses:
-    name: "Build Course: ${{ matrix.course }}"
+    name: "Build Course: ${{ matrix.course }} (${{ matrix.gpu_target }})"
     needs: [changes, build-base-gpu]
     if: |
       always() &&
@@ -312,7 +398,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        course:
+          - CV
+          - DL
+          - LLM
+          - PhySim
+        gpu_target:
+          - gfx110X-all
+          - gfx1150
+          - gfx1151
+          - gfx1152
+          - gfx120X-all
         include:
+          # Course-specific settings
           - course: CV
             image_suffix: auplc-cv
             prepare: cp -r projects/CV dockerfiles/Courses/CV/course_data
@@ -325,26 +423,87 @@ jobs:
           - course: PhySim
             image_suffix: auplc-physim
             prepare: cp -r projects/PhySim dockerfiles/Courses/PhySim/course_data
+          # Default target flag
+          - gpu_target: gfx110X-all
+            is_default: true
+          - gpu_target: gfx1150
+            is_default: false
+          - gpu_target: gfx1151
+            is_default: false
+          - gpu_target: gfx1152
+            is_default: false
+          - gpu_target: gfx120X-all
+            is_default: false
     steps:
+      - name: Skip if filtered by gpu_target input
+        if: github.event.inputs.gpu_target != 'all' && github.event.inputs.gpu_target != '' && matrix.gpu_target != github.event.inputs.gpu_target
+        run: |
+          echo "Skipping ${{ matrix.gpu_target }} — only building ${{ github.event.inputs.gpu_target }}"
+          exit 0
+
       - name: Checkout code
+        if: github.event.inputs.gpu_target == 'all' || github.event.inputs.gpu_target == '' || matrix.gpu_target == github.event.inputs.gpu_target
         uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
+        if: github.event.inputs.gpu_target == 'all' || github.event.inputs.gpu_target == '' || matrix.gpu_target == github.event.inputs.gpu_target
         uses: docker/setup-buildx-action@v3
 
       - name: Login to GitHub Container Registry
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && (github.event.inputs.gpu_target == 'all' || github.event.inputs.gpu_target == '' || matrix.gpu_target == github.event.inputs.gpu_target)
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GH_PACKAGES_TOKEN }}
+          password: ${{ secrets.GH_PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}
 
       - name: Prepare build context
+        if: github.event.inputs.gpu_target == 'all' || github.event.inputs.gpu_target == '' || matrix.gpu_target == github.event.inputs.gpu_target
         run: ${{ matrix.prepare }}
 
-      - name: Docker metadata
-        id: meta
+      - name: Derive tag suffix
+        if: github.event.inputs.gpu_target == 'all' || github.event.inputs.gpu_target == '' || matrix.gpu_target == github.event.inputs.gpu_target
+        id: suffix
+        run: |
+          TAG_SUFFIX=$(echo "${{ matrix.gpu_target }}" | sed 's/-all$//; s/-dgpu$//')
+          echo "tag_suffix=${TAG_SUFFIX}" >> "$GITHUB_OUTPUT"
+
+      - name: Determine base image tag
+        if: github.event.inputs.gpu_target == 'all' || github.event.inputs.gpu_target == '' || matrix.gpu_target == github.event.inputs.gpu_target
+        id: base
+        run: |
+          # Derive the branch/tag-based base image reference
+          REF="${GITHUB_REF##*/}"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            BASE_TAG="${REF}-${{ steps.suffix.outputs.tag_suffix }}"
+          elif [[ "$REF" == "main" ]]; then
+            BASE_TAG="latest-${{ steps.suffix.outputs.tag_suffix }}"
+          else
+            BASE_TAG="${REF}-${{ steps.suffix.outputs.tag_suffix }}"
+          fi
+          echo "image=${{ needs.changes.outputs.registry }}/auplc-base:${BASE_TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Docker metadata (target-suffixed tags)
+        if: github.event.inputs.gpu_target == 'all' || github.event.inputs.gpu_target == '' || matrix.gpu_target == github.event.inputs.gpu_target
+        id: meta-suffixed
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ needs.changes.outputs.registry }}/${{ matrix.image_suffix }}
+          flavor: |
+            suffix=-${{ steps.suffix.outputs.tag_suffix }}
+          tags: |
+            type=semver,pattern=v{{version}}
+            type=semver,pattern=v{{major}}.{{minor}}
+            type=semver,pattern=v{{major}}
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=${{ github.event.inputs.version }},enable=${{ github.event.inputs.version != '' }}
+            type=sha,prefix=sha-
+            type=ref,event=branch
+            type=ref,event=pr
+
+      - name: Docker metadata (unsuffixed tags — default target only)
+        if: matrix.is_default && (github.event.inputs.gpu_target == 'all' || github.event.inputs.gpu_target == '' || matrix.gpu_target == github.event.inputs.gpu_target)
+        id: meta-default
         uses: docker/metadata-action@v5
         with:
           images: ${{ needs.changes.outputs.registry }}/${{ matrix.image_suffix }}
@@ -358,16 +517,34 @@ jobs:
             type=ref,event=branch
             type=ref,event=pr
 
-      - name: Build and push ${{ matrix.course }} image
+      - name: Merge tags
+        if: github.event.inputs.gpu_target == 'all' || github.event.inputs.gpu_target == '' || matrix.gpu_target == github.event.inputs.gpu_target
+        id: tags
+        run: |
+          TAGS="${{ steps.meta-suffixed.outputs.tags }}"
+          if [ -n "${{ steps.meta-default.outputs.tags }}" ]; then
+            TAGS="${TAGS}
+          ${{ steps.meta-default.outputs.tags }}"
+          fi
+          # Deduplicate
+          TAGS=$(echo "$TAGS" | sort -u)
+          {
+            echo "tags<<EOF"
+            echo "$TAGS"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build and push ${{ matrix.course }} (${{ matrix.gpu_target }}) image
+        if: github.event.inputs.gpu_target == 'all' || github.event.inputs.gpu_target == '' || matrix.gpu_target == github.event.inputs.gpu_target
         uses: docker/build-push-action@v6
         with:
           context: dockerfiles/Courses/${{ matrix.course }}
           file: dockerfiles/Courses/${{ matrix.course }}/Dockerfile
           push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.tags.outputs.tags }}
+          labels: ${{ steps.meta-suffixed.outputs.labels }}
           build-args: |
-            ${{ needs.build-base-gpu.outputs.image && format('BASE_IMAGE={0}', needs.build-base-gpu.outputs.image) || '' }}
-          cache-from: type=gha,scope=course-${{ matrix.course }}
-          cache-to: type=gha,mode=max,scope=course-${{ matrix.course }}
+            BASE_IMAGE=${{ steps.base.outputs.image }}
+          cache-from: type=gha,scope=course-${{ matrix.course }}-${{ matrix.gpu_target }}
+          cache-to: type=gha,mode=max,scope=course-${{ matrix.course }}-${{ matrix.gpu_target }}
           provenance: false

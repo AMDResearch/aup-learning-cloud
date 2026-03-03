@@ -16,8 +16,11 @@ MIRROR_PREFIX ?=
 MIRROR_PIP ?=
 MIRROR_NPM ?=
 
+# GPU target architecture (e.g. gfx110X-all, gfx1150, gfx1151, gfx1152, gfx120X-all)
+GPU_TARGET ?= gfx110X-all
+
 # GPU base image used by course Dockerfiles (override to track a specific version)
-GPU_BASE_IMAGE ?= ghcr.io/amdresearch/base-gfx1151:v0.1-full
+GPU_BASE_IMAGE ?= ghcr.io/amdresearch/auplc-base:latest
 
 # Build args for docker build (constructed from mirror settings)
 BUILD_ARGS :=
@@ -32,13 +35,13 @@ ifneq ($(MIRROR_NPM),)
   BUILD_ARGS += --build-arg NPM_REGISTRY=$(MIRROR_NPM)
 endif
 
-.PHONY: all base base-cpu base-gfx1151 hub courses cv dl llm physim
+.PHONY: all base base-cpu base-rocm base-gfx1151 hub courses cv dl llm physim
 
 # Build all images
 all: base hub courses
 
 # --- Base Images ---
-base: base-cpu base-gfx1151
+base: base-cpu base-rocm
 
 base-cpu:
 	@echo "-------------------------------------------"; \
@@ -50,14 +53,18 @@ base-cpu:
 		-t ghcr.io/amdresearch/auplc-default:latest --file Dockerfile.cpu .
 	$(MAKE) save-image IMAGE=ghcr.io/amdresearch/auplc-default:latest
 
-base-gfx1151:
+base-rocm:
 	@echo "-------------------------------------------"; \
-	 	echo "Building Base Image (gfx1151)..."; \
+	 	echo "Building Base Image (rocm, GPU_TARGET=$(GPU_TARGET))..."; \
 		echo "-------------------------------------------";
 
 	cd Base && docker build $(BUILD_ARGS) \
+		--build-arg GPU_TARGET=$(GPU_TARGET) \
 		$(if $(MIRROR_PREFIX),--build-arg BASE_IMAGE=$(MIRROR_PREFIX)/docker.io/library/ubuntu:24.04,) \
-		-t ghcr.io/amdresearch/base-gfx1151:v0.1-full --file Dockerfile.gfx1151 .
+		-t ghcr.io/amdresearch/auplc-base:latest --file Dockerfile.rocm .
+
+# Deprecated alias — use base-rocm instead
+base-gfx1151: base-rocm
 
 # --- Hub Image ---
 hub:
