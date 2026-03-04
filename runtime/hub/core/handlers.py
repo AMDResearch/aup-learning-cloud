@@ -731,6 +731,13 @@ class ResourcesAPIHandler(APIHandler):
                 resource_data["metadata"] = metadata.model_dump(exclude_none=True)
                 group_name = metadata.group or "OTHERS"
             else:
+                # Fallback: derive a human-readable description from the resource key
+                readable = key.replace("-", " ").replace("_", " ")
+                resource_data["metadata"] = {
+                    "group": "OTHERS",
+                    "description": readable,
+                    "subDescription": "",
+                }
                 group_name = "OTHERS"
 
             resources_list.append(resource_data)
