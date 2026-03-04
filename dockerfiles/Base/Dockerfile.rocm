@@ -89,10 +89,17 @@ RUN echo 'deb [arch=amd64 signed-by=/etc/apt/keyrings/amdrocm.gpg] https://repo.
     > /etc/apt/sources.list.d/rocm.list
 
 # Install ROCm from apt (package name uses GPU_TARGET, e.g. amdrocm7.11-gfx110X-all)
+# After install, ensure /opt/rocm/lib exists — the amdrocm packages install into
+# /opt/rocm/core-<ver>/lib/ without creating the standard /opt/rocm/lib symlink,
+# which causes comgr to fail finding device bitcode for JIT compilation.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends amdrocm${ROCM_VERSION%.*}-${GPU_TARGET} && \
     apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+    rm -rf /var/lib/apt/lists/* && \
+    if [ ! -e /opt/rocm/lib ]; then \
+        CORE_DIR=$(ls -d /opt/rocm/core-*/lib 2>/dev/null | head -1) && \
+        [ -n "$CORE_DIR" ] && ln -s "$CORE_DIR" /opt/rocm/lib; \
+    fi
 
 # Install ROCm PyTorch
 RUN WHL_TARGET="${PYTORCH_WHL_TARGET:-${GPU_TARGET}}" && \
