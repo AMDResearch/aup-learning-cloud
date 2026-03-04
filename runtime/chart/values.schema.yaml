@@ -3216,9 +3216,18 @@ properties:
                     Allow users to clone a Git repository into their home
                     directory at spawn time. Should be false for course
                     resources that already include their own content.
+                env:
+                  type: object
+                  additionalProperties:
+                    type: string
+                  description: |
+                    Per-resource environment variable overrides. Applied after
+                    accelerator-level env vars. Set a value to empty string ""
+                    to unset an accelerator-inherited variable.
             description: |
               Resource metadata for spawn UI display.
               Defines how each resource appears in the selection interface.
+              The `env` field allows per-resource environment overrides.
 
               Example:
               ```yaml
@@ -3231,6 +3240,8 @@ properties:
                   acceleratorKeys:
                     - strix-halo
                     - dgpu
+                  env:
+                    HSA_OVERRIDE_GFX_VERSION: ""
               ```
 
       teams:

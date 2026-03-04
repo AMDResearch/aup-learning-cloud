@@ -692,12 +692,23 @@ class RemoteLabKubeSpawner(KubeSpawner):
             self.node_affinity_required = [node_affinity]
             self.log.debug(f"Set node affinity for GPU {gpu_selection}: {node_affinity}")
 
-            # Set environment variables
+            # Set environment variables from accelerator config
             if gpu_selection in self.environment_mapping:
                 env_vars = self.environment_mapping[gpu_selection]
                 if env_vars:
                     self.environment.update(env_vars)
                     self.log.debug(f"Set environment variables: {env_vars}")
+
+        # Apply per-resource env overrides (can override or unset accelerator vars)
+        if self._hub_config:
+            resource_meta = self._hub_config.get_resource_metadata(resource_type)
+            if resource_meta and resource_meta.env:
+                for key, value in resource_meta.env.items():
+                    if value == "":
+                        self.environment.pop(key, None)
+                    else:
+                        self.environment[key] = value
+                self.log.debug(f"Applied per-resource env overrides for {resource_type}: {resource_meta.env}")
 
         # Special configuration for NPU resources
         if resource_type in ["Tutorial-NPU-Resnet", "ROSCON2025-GPU", "ROSCON2025-NPU"]:

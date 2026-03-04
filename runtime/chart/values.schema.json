@@ -3049,10 +3049,17 @@
                   "allowGitClone": {
                     "type": "boolean",
                     "description": "Allow users to clone a Git repository into their home\ndirectory at spawn time. Should be false for course\nresources that already include their own content.\n"
+                  },
+                  "env": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "description": "Per-resource environment variable overrides. Applied after\naccelerator-level env vars. Set a value to empty string \"\"\nto unset an accelerator-inherited variable.\n"
                   }
                 }
               },
-              "description": "Resource metadata for spawn UI display.\nDefines how each resource appears in the selection interface.\n\nExample:\n```yaml\nmetadata:\n  Course-DL:\n    group: \"COURSE\"\n    description: \"Deep Learning Course\"\n    subDescription: \"Suitable for DL experiments with GPU\"\n    accelerator: \"GPU\"\n    acceleratorKeys:\n      - strix-halo\n      - dgpu\n```\n"
+              "description": "Resource metadata for spawn UI display.\nDefines how each resource appears in the selection interface.\nThe `env` field allows per-resource environment overrides.\n\nExample:\n```yaml\nmetadata:\n  Course-DL:\n    group: \"COURSE\"\n    description: \"Deep Learning Course\"\n    subDescription: \"Suitable for DL experiments with GPU\"\n    accelerator: \"GPU\"\n    acceleratorKeys:\n      - strix-halo\n      - dgpu\n    env:\n      HSA_OVERRIDE_GFX_VERSION: \"\"\n```\n"
             }
           }
         },
