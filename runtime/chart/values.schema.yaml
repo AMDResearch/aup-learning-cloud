@@ -3216,21 +3216,57 @@ properties:
                     Allow users to clone a Git repository into their home
                     directory at spawn time. Should be false for course
                     resources that already include their own content.
+                env:
+                  type: object
+                  additionalProperties:
+                    type: string
+                  description: |
+                    Per-resource environment variable overrides. Applied after
+                    accelerator-level env vars. Set a value to empty string ""
+                    to unset an accelerator-inherited variable.
+                acceleratorOverrides:
+                  type: object
+                  additionalProperties:
+                    type: object
+                    properties:
+                      image:
+                        type: string
+                        description: Override image for this accelerator.
+                      env:
+                        type: object
+                        additionalProperties:
+                          type: string
+                        description: |
+                          Environment variable overrides for this accelerator.
+                          Set a value to empty string "" to unset a variable.
+                  description: |
+                    Per-accelerator overrides for image and/or env, keyed by
+                    accelerator name. Highest priority for env — applied after
+                    both accelerator-level and resource-level env.
             description: |
               Resource metadata for spawn UI display.
               Defines how each resource appears in the selection interface.
 
+              Environment priority (highest wins):
+              1. `acceleratorOverrides.<accel>.env` (per-accelerator per-resource)
+              2. `env` (per-resource, all accelerators)
+              3. `accelerators.<name>.env` (per-accelerator, all resources)
+
               Example:
               ```yaml
               metadata:
-                Course-DL:
+                Course-CV:
                   group: "COURSE"
-                  description: "Deep Learning Course"
-                  subDescription: "Suitable for DL experiments with GPU"
+                  description: "Computer Vision Course"
                   accelerator: "GPU"
                   acceleratorKeys:
                     - strix-halo
-                    - dgpu
+                    - phx
+                  acceleratorOverrides:
+                    phx:
+                      image: "ghcr.io/amdresearch/auplc-cv:v1.3.7"
+                      env:
+                        HSA_OVERRIDE_GFX_VERSION: "11.0.0"
               ```
 
       teams:

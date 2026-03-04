@@ -233,9 +233,11 @@ custom:
         accelerator: "GPU"
         acceleratorKeys:
           - strix-halo
-        # imageOverrides: (optional) override image per accelerator key
-        #   dgpu: "ghcr.io/amdresearch/auplc-cv:v1.0-rocm-gfx120X"
-        #   # keys not listed here will use the default image from images section
+        # acceleratorOverrides: (optional) per-accelerator image and env overrides
+        #   dgpu:
+        #     image: "ghcr.io/amdresearch/auplc-cv:v1.0-rocm-gfx120X"
+        #     env:
+        #       HSA_OVERRIDE_GFX_VERSION: "11.0.0"
       Course-DL:
         group: "COURSE"
         description: "Deep Learning Course"

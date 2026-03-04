@@ -623,13 +623,13 @@ class RemoteLabKubeSpawner(KubeSpawner):
         # Override image based on accelerator selection
         if gpu_selection and self._hub_config:
             metadata = self._hub_config.get_resource_metadata(resource_type)
-            if metadata and metadata.imageOverrides:
-                override_image = metadata.imageOverrides.get(gpu_selection)
-                if override_image:
+            if metadata and metadata.acceleratorOverrides:
+                accel_override = metadata.acceleratorOverrides.get(gpu_selection)
+                if accel_override and accel_override.image:
                     self.log.info(
-                        f"Image override for {resource_type}/{gpu_selection}: {self.image} -> {override_image}"
+                        f"Image override for {resource_type}/{gpu_selection}: {self.image} -> {accel_override.image}"
                     )
-                    self.image = override_image
+                    self.image = accel_override.image
 
         # Set resource requirements
         requirements = self.resource_requirements[resource_type]
@@ -692,12 +692,38 @@ class RemoteLabKubeSpawner(KubeSpawner):
             self.node_affinity_required = [node_affinity]
             self.log.debug(f"Set node affinity for GPU {gpu_selection}: {node_affinity}")
 
-            # Set environment variables
+            # Set environment variables from accelerator config
             if gpu_selection in self.environment_mapping:
                 env_vars = self.environment_mapping[gpu_selection]
                 if env_vars:
                     self.environment.update(env_vars)
                     self.log.debug(f"Set environment variables: {env_vars}")
+
+        # Apply per-resource env overrides (can override or unset accelerator vars)
+        if self._hub_config:
+            resource_meta = self._hub_config.get_resource_metadata(resource_type)
+            if resource_meta:
+                # Resource-level env (applies to all accelerators)
+                if resource_meta.env:
+                    for key, value in resource_meta.env.items():
+                        if value == "":
+                            self.environment.pop(key, None)
+                        else:
+                            self.environment[key] = value
+                    self.log.debug(f"Applied per-resource env for {resource_type}: {resource_meta.env}")
+
+                # Per-accelerator env override (highest priority)
+                if gpu_selection and resource_meta.acceleratorOverrides:
+                    accel_override = resource_meta.acceleratorOverrides.get(gpu_selection)
+                    if accel_override and accel_override.env:
+                        for key, value in accel_override.env.items():
+                            if value == "":
+                                self.environment.pop(key, None)
+                            else:
+                                self.environment[key] = value
+                        self.log.debug(
+                            f"Applied acceleratorOverrides env for {resource_type}/{gpu_selection}: {accel_override.env}"
+                        )
 
         # Special configuration for NPU resources
         if resource_type in ["Tutorial-NPU-Resnet", "ROSCON2025-GPU", "ROSCON2025-NPU"]:

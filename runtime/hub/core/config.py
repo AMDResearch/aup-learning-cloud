@@ -85,6 +85,15 @@ class QuotaSettings(BaseModel):
     model_config = {"extra": "allow"}
 
 
+class AcceleratorOverride(BaseModel):
+    """Per-accelerator overrides for a resource (image and/or env)."""
+
+    image: str | None = None
+    env: dict[str, str] = Field(default_factory=dict)
+
+    model_config = {"extra": "allow"}
+
+
 class ResourceMetadata(BaseModel):
     """Metadata for a resource (course/tutorial)."""
 
@@ -94,7 +103,8 @@ class ResourceMetadata(BaseModel):
     accelerator: str = ""
     acceleratorKeys: list[str] = Field(default_factory=list)
     allowGitClone: bool = False
-    imageOverrides: dict[str, str] | None = None
+    env: dict[str, str] = Field(default_factory=dict)
+    acceleratorOverrides: dict[str, AcceleratorOverride] | None = None
 
     model_config = {"extra": "allow"}
 

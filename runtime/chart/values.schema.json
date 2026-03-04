@@ -3049,10 +3049,37 @@
                   "allowGitClone": {
                     "type": "boolean",
                     "description": "Allow users to clone a Git repository into their home\ndirectory at spawn time. Should be false for course\nresources that already include their own content.\n"
+                  },
+                  "env": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "description": "Per-resource environment variable overrides. Applied after\naccelerator-level env vars. Set a value to empty string \"\"\nto unset an accelerator-inherited variable.\n"
+                  },
+                  "acceleratorOverrides": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "object",
+                      "properties": {
+                        "image": {
+                          "type": "string",
+                          "description": "Override image for this accelerator."
+                        },
+                        "env": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "string"
+                          },
+                          "description": "Environment variable overrides for this accelerator.\nSet a value to empty string \"\" to unset a variable.\n"
+                        }
+                      }
+                    },
+                    "description": "Per-accelerator overrides for image and/or env, keyed by\naccelerator name. Highest priority for env \u2014 applied after\nboth accelerator-level and resource-level env.\n"
                   }
                 }
               },
-              "description": "Resource metadata for spawn UI display.\nDefines how each resource appears in the selection interface.\n\nExample:\n```yaml\nmetadata:\n  Course-DL:\n    group: \"COURSE\"\n    description: \"Deep Learning Course\"\n    subDescription: \"Suitable for DL experiments with GPU\"\n    accelerator: \"GPU\"\n    acceleratorKeys:\n      - strix-halo\n      - dgpu\n```\n"
+              "description": "Resource metadata for spawn UI display.\nDefines how each resource appears in the selection interface.\n\nEnvironment priority (highest wins):\n1. `acceleratorOverrides.<accel>.env` (per-accelerator per-resource)\n2. `env` (per-resource, all accelerators)\n3. `accelerators.<name>.env` (per-accelerator, all resources)\n\nExample:\n```yaml\nmetadata:\n  Course-CV:\n    group: \"COURSE\"\n    description: \"Computer Vision Course\"\n    accelerator: \"GPU\"\n    acceleratorKeys:\n      - strix-halo\n      - phx\n    acceleratorOverrides:\n      phx:\n        image: \"ghcr.io/amdresearch/auplc-cv:v1.3.7\"\n        env:\n          HSA_OVERRIDE_GFX_VERSION: \"11.0.0\"\n```\n"
             }
           }
         },
