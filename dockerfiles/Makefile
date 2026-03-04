@@ -62,6 +62,7 @@ base-rocm:
 		--build-arg GPU_TARGET=$(GPU_TARGET) \
 		$(if $(MIRROR_PREFIX),--build-arg BASE_IMAGE=$(MIRROR_PREFIX)/docker.io/library/ubuntu:24.04,) \
 		-t ghcr.io/amdresearch/auplc-base:latest --file Dockerfile.rocm .
+	docker tag ghcr.io/amdresearch/auplc-base:latest ghcr.io/amdresearch/auplc-base:latest-$(GPU_TARGET)
 
 # Deprecated alias — use base-rocm instead
 base-gfx1151: base-rocm
@@ -88,6 +89,7 @@ cv:
 		echo "-------------------------------------------";
 
 	cd Courses/CV && BASE_IMAGE=$(GPU_BASE_IMAGE) bash ./build.sh
+	docker tag ghcr.io/amdresearch/auplc-cv:latest ghcr.io/amdresearch/auplc-cv:latest-$(GPU_TARGET)
 	$(MAKE) save-image IMAGE=ghcr.io/amdresearch/auplc-cv:latest
 
 dl:
@@ -96,6 +98,7 @@ dl:
 		echo "-------------------------------------------";
 
 	cd Courses/DL && BASE_IMAGE=$(GPU_BASE_IMAGE) bash ./build.sh
+	docker tag ghcr.io/amdresearch/auplc-dl:latest ghcr.io/amdresearch/auplc-dl:latest-$(GPU_TARGET)
 	$(MAKE) save-image IMAGE=ghcr.io/amdresearch/auplc-dl:latest
 
 llm:
@@ -104,6 +107,7 @@ llm:
 		echo "-------------------------------------------";
 
 	cd Courses/LLM && BASE_IMAGE=$(GPU_BASE_IMAGE) bash ./build.sh
+	docker tag ghcr.io/amdresearch/auplc-llm:latest ghcr.io/amdresearch/auplc-llm:latest-$(GPU_TARGET)
 	$(MAKE) save-image IMAGE=ghcr.io/amdresearch/auplc-llm:latest
 
 physim:
@@ -112,6 +116,7 @@ physim:
 		echo "-------------------------------------------";
 
 	cd Courses/PhySim && BASE_IMAGE=$(GPU_BASE_IMAGE) bash ./build.sh
+	docker tag ghcr.io/amdresearch/auplc-physim:latest ghcr.io/amdresearch/auplc-physim:latest-$(GPU_TARGET)
 	$(MAKE) save-image IMAGE=ghcr.io/amdresearch/auplc-physim:latest
 
 # --- Export Images ---
