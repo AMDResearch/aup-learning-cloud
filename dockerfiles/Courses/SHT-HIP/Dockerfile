@@ -17,49 +17,96 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-# Edit for ShanghaiTech CS290W
+# SHT-HIP Course Dockerfile
+# Based on official AMD ROCm Ubuntu 24.04 complete image
+FROM rocm/dev-ubuntu-24.04:7.2-complete
 
-# Use a verified ROCm PyTorch image as base
-ARG BASE_IMAGE=ghcr.io/amdresearch/auplc-base:latest
-FROM ${BASE_IMAGE}
+SHELL ["/bin/bash", "-c"]
 
-# IMPORTANT: base image ends with USER jovyan. pip install as jovyan silently
-# falls back to ~/.local/, which gets masked by the PVC mount at runtime.
-# Always switch to root before pip install to ensure system-wide installation.
-USER root
+ENV DEBIAN_FRONTEND=noninteractive
+ENV ROCM_PATH=/opt/rocm
+ENV PATH="${ROCM_PATH}/bin:${PATH}"
+ENV LD_LIBRARY_PATH="${ROCM_PATH}/lib:${LD_LIBRARY_PATH}"
 
-# Install course-specific packages system-wide
+# Allow pip to install system-wide
+RUN printf '[global]\nbreak-system-packages = true\n' > /etc/pip.conf
+
+# Install system dependencies for HIP development
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    sudo \
+    build-essential \
+    python3-dev \
+    python3-pip \
+    git \
+    curl \
+    wget \
+    file \
+    locales \
+    fonts-liberation \
+    run-one \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python packages for Jupyter environment
 RUN pip3 install --no-cache-dir \
-    transformers \
-    datasets>=2.14.0 \
-    tokenizers>=0.15.0 \
-    accelerate>=0.25.0 \
-    evaluate>=0.4.0 \
-    # Parameter-efficient fine-tuning for L8 and L10
-    peft>=0.7.0 \
-    # Text processing and NLP utilities
-    sentencepiece>=0.1.99 \
-    protobuf>=3.20.0 \
-    # Visualization
-    seaborn>=0.11.0 \
-    plotly>=5.0.0 \
-    kaleido>=0.2.1 \
-    # Graph visualization for L3 neural network fundamentals
-    torchviz>=0.0.2 \
-    graphviz>=0.20.1 \
-    # Image processing
-    Pillow>=8.3.0 \
-    imageio>=2.9.0 \
-    # Additional dependencies for advanced features
-    requests>=2.28.0 \
-    typing-extensions>=4.4.0
+    jupyterhub==4.0.2 \
+    jupyterlab==4.0.9 \
+    notebook==7.0.6 \
+    ipywidgets==8.1.1 \
+    ipykernel==6.27.1 \
+    matplotlib \
+    numpy \
+    Pillow
 
-USER root
+# Remove the default user if it exists (user with ID 1000)
+RUN if getent passwd 1000 > /dev/null; then \
+    userdel -r $(getent passwd 1000 | cut -d: -f1); \
+    fi
 
-# Copy related rocm notebooks into the docker
+# Create jovyan user with UID 1000 for consistency
+RUN useradd -m -s /bin/bash -N -u 1000 -g 100 jovyan && \
+    echo "jovyan ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+
+# Add jovyan to video group for GPU access
+RUN usermod -aG video jovyan \
+    && if getent group render; then \
+        groupmod -g 992 render; \
+    else \
+        groupadd -g 992 render; \
+    fi \
+    && usermod -aG render jovyan
+
+# Create necessary Jupyter directories with correct permissions
+RUN mkdir -p /home/jovyan/.jupyter && \
+    mkdir -p /home/jovyan/.local/share/jupyter/runtime && \
+    chown -R 1000:100 /home/jovyan/.jupyter && \
+    chown -R 1000:100 /home/jovyan/.local
+
+# Create startup script for Jupyter
+RUN echo '#!/bin/bash' > /home/jovyan/start-jupyter.sh && \
+    echo 'export USER=jovyan' >> /home/jovyan/start-jupyter.sh && \
+    echo 'export SHELL=/bin/bash' >> /home/jovyan/start-jupyter.sh && \
+    echo 'exec python3 -m jupyterhub.singleuser --ip=0.0.0.0 --port=8888 "$@"' >> /home/jovyan/start-jupyter.sh && \
+    chmod +x /home/jovyan/start-jupyter.sh && \
+    chown jovyan:100 /home/jovyan/start-jupyter.sh
+
+# Create entrypoint script to set permissions and start services
+RUN echo '#!/bin/bash' > /entrypoint.sh && \
+    echo 'chmod 666 /dev/kfd 2>/dev/null || true' >> /entrypoint.sh && \
+    echo 'chmod 666 /dev/dri/renderD* 2>/dev/null || true' >> /entrypoint.sh && \
+    echo 'export USER=jovyan' >> /entrypoint.sh && \
+    echo 'export SHELL=/bin/bash' >> /entrypoint.sh && \
+    echo 'exec python3 -m jupyterhub.singleuser --ip=0.0.0.0 --port=8888 "$@"' >> /entrypoint.sh && \
+    chmod +x /entrypoint.sh
+
+# Copy course materials
 COPY ./course_data /opt/workspace/SHT-HIP
 
+RUN chown -R jovyan:100 /opt/workspace
 
-RUN chown -R jovyan:1000 /opt/workspace
+EXPOSE 8888
+
 USER jovyan
 WORKDIR /opt/workspace/SHT-HIP
+
+CMD ["/bin/bash", "/entrypoint.sh"]
