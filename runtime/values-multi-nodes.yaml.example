@@ -24,7 +24,7 @@
 #
 # Deploy with:
 #   helm install jupyterhub ./chart -n jupyterhub --create-namespace \
-#     -f values.yaml -f values-multi-nodes.yaml
+#     -f values-multi-nodes.yaml
 
 # ============================================================================
 # Course Management Guide
