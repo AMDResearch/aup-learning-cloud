@@ -10,7 +10,10 @@ For the shortest path, see the [Quick Start](quick-start.md) guide.
 
 ### Hardware Requirements
 
-- **Device**: AMD Ryzen™ AI Halo Device (e.g., AI Max+ 395, AI Max 390)
+- **Device**: Supported AMD GPU or APU — select your device in the Installation section below. Examples:
+  - **Radeon PRO**: AI PRO R9700/R9600D
+  - **Radeon**: RX 9070/9060 series
+  - **Ryzen AI**: Max+ PRO 395, Max PRO 390/385/380, Max+ 395, Max 390/385, 9 HX 375/370, 9 365
 - **Memory**: 32GB+ RAM (64GB recommended for production-like testing)
 - **Storage**: 500GB+ SSD
 - **Network**: Stable internet connection for downloading images
@@ -62,12 +65,10 @@ See [Docker Post-installation Steps](https://docs.docker.com/engine/install/linu
 
 ### 3. Clone the repository and run the installer
 
-```bash
-git clone https://github.com/AMDResearch/aup-learning-cloud.git
-cd aup-learning-cloud && chmod +x auplc-installer
+Select your AMD device family and GPU below. The install commands update to use the correct **GPU_TYPE** for your selection.
 
-# Full installation (K3s, Helm, K9s, ROCm device plugin, images, JupyterHub)
-sudo ./auplc-installer install
+```{eval-rst}
+.. include:: includes/selector-quickstart-gpu.rst
 ```
 
 After installation completes, open <http://localhost:30890> in your browser. The default uses **auto-login** — no credentials required.
