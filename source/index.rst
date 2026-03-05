@@ -25,6 +25,12 @@ AUP Learning Cloud is a tailored JupyterHub deployment designed to provide an in
 
 .. toctree::
    :maxdepth: 2
+   :caption: Learning Toolkits
+
+   learning-toolkits/index
+
+.. toctree::
+   :maxdepth: 2
    :caption: JupyterHub Configuration
 
    jupyterhub/index
