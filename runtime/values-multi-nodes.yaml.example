@@ -76,18 +76,35 @@ custom:
       - github.com
       - gitlab.com
       - bitbucket.org
+    maxCloneTimeout: 300
+    initContainerImage: "alpine/git:2.47.2"
 
   # --------------------------------------------------------------------------
   # Accelerator Configuration
   # --------------------------------------------------------------------------
   accelerators:
-    igpu:
+    phx:
+      displayName: "AMD Radeon™ 780M (Phoenix Point iGPU)"
+      description: "RDNA 3.0 (gfx1103) | Compute Units 12 | 4GB LPDDR5X"
+      nodeSelector:
+        node-type: phx
+      env:
+        HSA_OVERRIDE_GFX_VERSION: "11.0.0"
+      quotaRate: 2
+    strix:
       displayName: "AMD Radeon™ 890M (Strix Point iGPU)"
       description: "RDNA 3.5 (gfx1150) | Compute Units 16 | 4GB LPDDR5X"
       nodeSelector:
         node-type: strix
       env: {}
       quotaRate: 2
+    strix-halo:
+      displayName: "AMD Radeon™ 8060S (Strix Halo iGPU)"
+      description: "RDNA 3.5 (gfx1151) | Compute Units 40 | 64GB LPDDR5X"
+      nodeSelector:
+        node-type: strix-halo
+      env: {}
+      quotaRate: 3
     dgpu:
       displayName: "AMD Radeon™ 9070XT (Desktop GPU)"
       description: "RDNA 4.0 (gfx1201) | Compute Units 64 | 16GB GDDR6"
@@ -95,27 +112,52 @@ custom:
         node-type: dgpu
       env: {}
       quotaRate: 4
+    strix-npu:
+      displayName: "AMD XDNA2 (Strix Point NPU)"
+      description: "AMD XDNA2 NPU with AI acceleration"
+      nodeSelector:
+        type: strix
+      env: {}
+      quotaRate: 1
 
   # --------------------------------------------------------------------------
   # Course Resources
   # --------------------------------------------------------------------------
   resources:
     images:
-      cpu: "ghcr.io/your-org/cpu-notebook:latest"
-      Course-CV: "ghcr.io/your-org/course-cv:latest"
-      Course-DL: "ghcr.io/your-org/course-dl:latest"
+      cpu: "ghcr.io/your-org/auplc-default:latest"
+      gpu: "ghcr.io/your-org/auplc-base:latest"
+      Course-CV: "ghcr.io/your-org/auplc-cv:latest"
+      Course-DL: "ghcr.io/your-org/auplc-dl:latest"
+      Course-LLM: "ghcr.io/your-org/auplc-llm:latest"
+      Course-PhySim: "ghcr.io/your-org/auplc-physim:latest"
 
     requirements:
       cpu:
         cpu: "2"
         memory: "4Gi"
         memory_limit: "6Gi"
+      gpu:
+        cpu: "4"
+        memory: "16Gi"
+        memory_limit: "24Gi"
+        amd.com/gpu: "1"
       Course-CV:
         cpu: "4"
         memory: "16Gi"
         memory_limit: "24Gi"
         amd.com/gpu: "1"
       Course-DL:
+        cpu: "4"
+        memory: "16Gi"
+        memory_limit: "24Gi"
+        amd.com/gpu: "1"
+      Course-LLM:
+        cpu: "4"
+        memory: "16Gi"
+        memory_limit: "24Gi"
+        amd.com/gpu: "1"
+      Course-PhySim:
         cpu: "4"
         memory: "16Gi"
         memory_limit: "24Gi"
@@ -133,39 +175,73 @@ custom:
         accelerator: ""
         acceleratorKeys: []
         allowGitClone: true
+      gpu:
+        group: "CUSTOM REPO"
+        description: "Basic GPU Environment"
+        subDescription: "GPU Accelerated Environment"
+        accelerator: "GPU"
+        acceleratorKeys:
+          - strix-halo
+        allowGitClone: true
       Course-CV:
         group: "COURSE"
         description: "Computer Vision Course"
         subDescription: "Suitable for CV experiments with GPU"
         accelerator: "GPU"
         acceleratorKeys:
-          - igpu
-          - dgpu
+          - strix-halo
+        # acceleratorOverrides: (optional) per-accelerator image and env overrides
+        #   dgpu:
+        #     image: "ghcr.io/your-org/auplc-cv:latest-gfx120X"
+        #     env:
+        #       HSA_OVERRIDE_GFX_VERSION: "11.0.0"
       Course-DL:
         group: "COURSE"
         description: "Deep Learning Course"
         subDescription: "Suitable for DL experiments with GPU"
         accelerator: "GPU"
         acceleratorKeys:
-          - igpu
-          - dgpu
+          - strix-halo
+      Course-LLM:
+        group: "COURSE"
+        description: "Large Language Models Course"
+        subDescription: "Suitable for LLM experiments with GPU"
+        accelerator: "GPU"
+        acceleratorKeys:
+          - strix-halo
+      Course-PhySim:
+        group: "COURSE"
+        description: "Genesis Physical Simulation Course"
+        subDescription: "Suitable for physical simulation experiments with GPU"
+        accelerator: "GPU"
+        acceleratorKeys:
+          - strix-halo
 
   # --------------------------------------------------------------------------
   # Team Permission Configuration
   # --------------------------------------------------------------------------
   teams:
     mapping:
+      cpu:
+        - cpu
       gpu:
+        - gpu
         - Course-CV
         - Course-DL
+        - Course-LLM
+        - Course-PhySim
       official:
         - cpu
+        - gpu
         - Course-CV
         - Course-DL
+        - Course-LLM
+        - Course-PhySim
       native-users:
         - cpu
         - Course-CV
         - Course-DL
+        - Course-LLM
 
   # Local accounts for multi auth mode (pattern supports ranges like {01-50})
   # localAccounts:
@@ -269,18 +345,24 @@ imagePullSecrets:
 # Pre-pull images for faster startup
 prePuller:
   extraImages:
-    aup-cpu-notebook:
-      name: ghcr.io/amdresearch/aup-cpu-notebook
-      tag: v1.0
-    aup-course-cv:
+    auplc-default:
+      name: ghcr.io/amdresearch/auplc-default
+      tag: latest
+    auplc-base:
+      name: ghcr.io/amdresearch/auplc-base
+      tag: latest
+    auplc-cv:
       name: ghcr.io/amdresearch/auplc-cv
-      tag: v1.0
-    aup-course-dl:
+      tag: latest
+    auplc-dl:
       name: ghcr.io/amdresearch/auplc-dl
-      tag: v1.0
-    aup-course-llm:
+      tag: latest
+    auplc-llm:
       name: ghcr.io/amdresearch/auplc-llm
-      tag: v1.0
-    aup-jupyterhub-hub:
+      tag: latest
+    auplc-physim:
+      name: ghcr.io/amdresearch/auplc-physim
+      tag: latest
+    auplc-hub:
       name: ghcr.io/amdresearch/auplc-hub
-      tag: v0.1
+      tag: latest
