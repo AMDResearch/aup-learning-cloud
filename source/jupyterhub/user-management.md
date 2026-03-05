@@ -164,7 +164,7 @@ python scripts/generate_users_template.py --names alice bob charlie --output cus
 
 **Output format (CSV/Excel):**
 
-```csv
+```text
 username,admin
 student01,false
 student02,false
@@ -318,7 +318,7 @@ Both scripts support **CSV** and **Excel** (.xlsx) formats.
 
 **Example CSV:**
 
-```csv
+```text
 username,admin
 student01,false
 student02,false

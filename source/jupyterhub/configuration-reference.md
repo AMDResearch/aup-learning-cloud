@@ -291,9 +291,7 @@ hub:
       client_secret: "TODO"
       allowed_organizations:
         - <YOUR-ORG-NAME>
-      scope:
-        - read:user
-        - read:org
+      scope: []  # GitHub App uses App-level permissions, not OAuth scopes
     KubeSpawner:
       image_pull_policy: IfNotPresent
 ```

@@ -181,48 +181,58 @@ See `deploy/k8s/nfs-provisioner/README.md` for detailed configuration.
 
 ### 8. Build and Import Images
 
-On a build machine (can be the control node):
+**Option A: Use a container registry** (recommended for production):
 
 ```bash
-cd ../../dockerfiles
+# Build images from repo root
+cd /path/to/aup-learning-cloud
+sudo ./auplc-installer img build
 
-# Build all images
-make all
-
-# Save images to tar files
-docker save ghcr.io/amdresearch/auplc-dl:v1.0 -o auplc-dl.tar
-docker save ghcr.io/amdresearch/auplc-llm:v1.0 -o auplc-llm.tar
-# ... for all images
-
-# Import images to cluster nodes
-ansible workers -m copy -a "src=auplc-dl.tar dest=/tmp/"
-ansible workers -m shell -a "docker load -i /tmp/auplc-dl.tar"
+# Push to registry
+docker push ghcr.io/amdresearch/auplc-hub:latest
+docker push ghcr.io/amdresearch/auplc-cv:latest
 # ... for all images
 ```
 
-Or use a container registry (recommended for production).
+**Option B: Import images directly to nodes** (air-gapped environments):
+
+```bash
+# Save images to tar files
+docker save ghcr.io/amdresearch/auplc-dl:latest -o auplc-dl.tar
+
+# Copy and import to cluster nodes (K3s uses containerd)
+ansible workers -m copy -a "src=auplc-dl.tar dest=/tmp/"
+ansible workers -m shell -a "k3s ctr images import /tmp/auplc-dl.tar"
+```
 
 ### 9. Configure JupyterHub
 
-Edit `runtime/values.yaml` for multi-node deployment:
+The multi-node template is a **standalone** configuration file that already includes all required settings (accelerators, courses, teams, storage, network, etc.). Copy it and customize for your environment — no need to layer it on top of `values.yaml`:
 
 ```bash
-cd ../runtime
+cd runtime
+
+# Copy multi-node configuration template
 cp values-multi-nodes.yaml.example values-multi-nodes.yaml
 nano values-multi-nodes.yaml
 ```
 
-Key multi-node specific settings:
-- **High availability**: Multiple hub replicas
-- **Node selectors**: Schedule pods on specific nodes
-- **Storage class**: Use NFS storage class
-- **Ingress**: Configure domain-based access
+Key settings to customize:
+- **Storage class**: `nfs-client` (already set for multi-node)
+- **Ingress**: Configure your domain in the `ingress` section
+- **Authentication**: Fill in GitHub App credentials in `hub.config.GitHubOAuthenticator`
+- **Images**: Update `custom.resources.images` with your registry/org
+- **Admin**: Set `admin_users` and `githubOrgName`
+
+See [Configuration Reference](../jupyterhub/configuration-reference.md) for all available options.
 
 ### 10. Deploy JupyterHub
 
 ```bash
-# Deploy using custom values
-helm upgrade --install jupyterhub ./jupyterhub \
+cd runtime
+
+# Deploy using the multi-node config directly
+helm upgrade --install jupyterhub ./chart \
   -n jupyterhub --create-namespace \
   -f values-multi-nodes.yaml
 ```
@@ -300,8 +310,8 @@ cd deploy/ansible
 # Upgrade K3s
 ansible-playbook playbooks/pb-k3s-upgrade.yml
 
-# Upgrade JupyterHub
-cd ../../runtime
+# Upgrade JupyterHub (from repo root)
+cd /path/to/aup-learning-cloud
 bash scripts/helm_upgrade.bash
 ```
 
@@ -310,6 +320,43 @@ bash scripts/helm_upgrade.bash
 Back up the hub database PVC and NFS storage (if used) before major upgrades. Backup and monitoring guides will be added in a future release.
 
 ## Troubleshooting
+
+### kubectl permission denied error
+
+If you encounter errors like:
+```
+error: error loading config file "/etc/rancher/k3s/k3s.yaml": open /etc/rancher/k3s/k3s.yaml: permission denied
+```
+
+**Solution**:
+Add the following to your `inventory.yml` before running the playbook:
+```yaml
+k3s_cluster:
+  vars:
+    extra_server_args: "--write-kubeconfig-mode=644"
+```
+
+Or manually copy the config:
+```bash
+mkdir -p ~/.kube
+sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
+sudo chown $(id -u):$(id -g) ~/.kube/config
+```
+
+See [K3s Cluster Access](https://docs.k3s.io/cluster-access) for official documentation.
+
+### Helm command not found
+
+If `helm` command is not found, verify the installation:
+```bash
+# Check if helm is in PATH
+which helm
+
+# If not, ensure /usr/local/bin is in PATH
+echo $PATH
+
+# Reinstall helm if needed (see Step 2 above)
+```
 
 ### Node Not Joining Cluster
 

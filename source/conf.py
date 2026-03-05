@@ -7,7 +7,7 @@
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
 project = 'AUP Learning Cloud'
-copyright = '2025, Advanced Micro Devices, Inc. All rights reserved'
+copyright = '2025-2026, Advanced Micro Devices, Inc. All rights reserved'
 author = 'AMD Research'
 
 version = 'v0.3'

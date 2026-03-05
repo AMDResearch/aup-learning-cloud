@@ -10,7 +10,7 @@ The simplest way to deploy AUP Learning Cloud on a single machine in a developme
 - **OS**: Ubuntu 24.04.3 LTS
 - **Docker**: Install Docker and configure for non-root access (see below; skip if already installed)
 
-#### Package dependencies
+### Package dependencies
 
 Install build tools (required for building container images):
 
@@ -18,7 +18,7 @@ Install build tools (required for building container images):
 sudo apt install build-essential
 ```
 
-#### Install Docker
+### Install Docker
 
 :::{dropdown} Install Docker — skip if already installed
 :animate: fade-in

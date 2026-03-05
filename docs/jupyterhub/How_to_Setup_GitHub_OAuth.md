@@ -90,87 +90,103 @@ Teams allow you to organize members and control access to different resources in
 
 5. Repeat this process for all members you want to add to your organization
 
-## Step 4: Create a GitHub OAuth App
+## Step 4: Create a GitHub App
 
-1. Go to your organization settings: `github.com/<your-organization>/settings`
-2. In the left sidebar, scroll down to **Developer settings**
-3. Click **OAuth Apps**
-4. Click **New OAuth App**
+> **Note**: GitHub Apps are the recommended way to integrate with GitHub. They are created under the organization (not a personal account), support fine-grained permissions, and enable private repository access for users.
 
-   ![Developer Settings Navigation](../imgs/github-8.png)
-   ![OAuth Apps Page](../imgs/github-9.png)
+1. Go to your organization's GitHub App creation page:
+   `https://github.com/organizations/<your-organization>/settings/apps/new`
 
-5. Fill in the OAuth application registration form:
-   - **Application name**: Your domain name (e.g., "openhw.io domain")
-   - **Homepage URL**: Your JupyterHub homepage URL (e.g., `https://www.openhw.io/`)
-     - **Important**: Must use HTTPS protocol
-   - **Application description**: Brief description of your application (optional)
-   - **Authorization callback URL**: Your OAuth callback URL
-     - Format: `https://<your-domain>/hub/oauth_callback`
-     - Example: `https://www.openhw.io/hub/oauth_callback`
-     - **Important**: Must use HTTPS protocol
-     - **Note**: The "/github" part in the URL is only needed for Multi-OAuth setups. For simple GitHub OAuth, use the format shown above.
-   - **Enable Device Flow**: Leave unchecked (not needed for JupyterHub)
-   - Click **Register application**
+   ![Organization Settings → Developer settings → GitHub Apps](../imgs/github-app-1.png)
 
-   ![OAuth App Registration Form](../imgs/github-10.png)
+2. Fill in the basic information:
+   - **GitHub App name**: A unique name (e.g., "auplc-hub")
+   - **Homepage URL**: Your JupyterHub URL (e.g., `https://your.domain.com`)
+   - **Callback URL**: Your OAuth callback URL
+     - Single auth: `https://<your-domain>/hub/oauth_callback`
+     - Multi auth: `https://<your-domain>/hub/github/oauth_callback`
 
-6. After registration, you will see your **Client ID** and **Client secrets**:
-   - Copy the **Client ID** - you'll need this for your JupyterHub configuration
-   - Click **Generate a new client secret**
-   - **Important**: Copy the client secret immediately - it will only be shown once!
-   - Store both the Client ID and Client secret securely
+   ![Basic information form](../imgs/github-app-2.png)
 
-   ![Client ID and Secrets](../imgs/github-11.png)
+   - **Expire user authorization tokens**: Check (recommended)
+   - **Request user authorization (OAuth) during installation**: Check
+   - **Webhook → Active**: Uncheck (not needed)
 
-## Step 5: Configure JupyterHub for GitHub OAuth
+   ![Token expiration and webhook settings](../imgs/github-app-3.png)
 
-1. Open your JupyterHub configuration file (typically `jupyterhub_config.py` or `values.yaml` for Helm deployments)
+3. Set permissions:
+   - **Repository permissions**:
+     - `Contents`: Read-only (for cloning private repos)
+     - `Metadata`: Read-only (selected by default)
 
-2. Add the GitHub OAuth configuration:
+   ![Repository permissions](../imgs/github-app-4.png)
+
+   - **Organization permissions**:
+     - `Members`: Read-only (for team-based access control)
+
+   ![Organization permissions](../imgs/github-app-5.png)
+
+4. Installation scope:
+   - **Where can this GitHub App be installed?**: Any account
+   - Click **Create GitHub App**
+
+   ![Installation scope and Create button](../imgs/github-app-6.png)
+
+5. After creation, note down the following:
+   - **Client ID**: Displayed on the App's General page (e.g., `Iv23liXXXXXX`)
+   - **Client secret**: Click **Generate a new client secret** — copy it immediately
+   - **App slug**: The URL-safe name in the App's URL (e.g., `auplc-hub`)
+
+   ![Client ID and secret generation](../imgs/github-app-7.png)
+
+## Step 5: Configure JupyterHub
+
+1. Open your deployment configuration file (`runtime/values.yaml` or environment-specific override)
+
+2. Add the GitHub App configuration:
 
    ```yaml
-   # ---- GitHub OAuth ----
-   # If you are only using GitHub OAuth, not Multi-Auth, the link should be:
-   # https://<Your.domain>/hub/oauth_callback
-   GitHubOAuthenticator:
-     oauth_callback_url: "https://<Your.domain>/hub/oauth_callback"
-     client_id: "YOUR_CLIENT_ID"
-     client_secret: "YOUR_CLIENT_SECRET"
-     allowed_organizations:
-       - <YOUR-ORG-NAME>
-     scope:
-       - read:user
-       - read:org
+   custom:
+     gitClone:
+       githubAppName: "your-app-slug"  # Enables private repo access & repo picker
+
+   hub:
+     config:
+       GitHubOAuthenticator:
+         oauth_callback_url: "https://<Your.domain>/hub/github/oauth_callback"
+         client_id: "<GitHub App Client ID>"
+         client_secret: "<GitHub App Client Secret>"
+         allowed_organizations:
+           - <YOUR-ORG-NAME>
+         scope: []  # GitHub App uses App-level permissions, not OAuth scopes
    ```
 
-   ![JupyterHub OAuth Configuration](../imgs/github-12.png)
+   > **Note**: `scope: []` is correct for GitHub Apps. Permissions (Contents, Members, etc.) are configured in the App settings on GitHub, not via OAuth scopes.
 
-3. Configure team-to-resource mapping on `jupyterhub_config.py`:
+3. Configure team-to-resource mapping in `values.yaml`:
 
-   ```python
-   # TEAM RESOURCE MAPPING
-   # left side is team_name, right side is resource_name
-   # the resource_name should be the same as the key in RESOURCE_IMAGES
-   TEAM_RESOURCE_MAPPING = {
-       "cpu": ["cpu"],
-       "gpu": ["Course-CV", "Course-DL", "Course-LLM"],
-       "official": ["cpu", "Course-CV", "Course-DL", "Course-LLM"],
-       "AUP-IT": ["Course-CV", "Course-DL", "Course-LLM"]
-   }
+   ```yaml
+   custom:
+     teams:
+       mapping:
+         cpu:
+           - cpu
+         gpu:
+           - Course-CV
+           - Course-DL
+           - Course-LLM
+         official:
+           - cpu
+           - Course-CV
+           - Course-DL
+           - Course-LLM
    ```
 
-   ![Team Resource Mapping](../imgs/github-13.png)
+4. Deploy:
 
-4. Update the organization in `jupyterhub_config.py` file
-
-Search for the following line and update the name of your GitHub organization
-
-```python
-team["organization"]["login"] == 
-```
-
-5. Save the configuration file and restart JupyterHub for the changes to take effect
+   ```bash
+   helm upgrade jupyterhub ./chart -n jupyterhub -f values.yaml
+   ```
 
 ## Verification
 
@@ -187,16 +203,63 @@ team["organization"]["login"] ==
 - **Users can't access resources**: Check that users are added to the correct teams in GitHub
 - **Authentication fails**: Verify your Client ID and Client Secret are correct and the secret hasn't expired
 
+## Migrating from OAuth App to GitHub App
+
+If you are currently using a legacy GitHub OAuth App, follow these steps to migrate:
+
+### Why Migrate?
+
+| | OAuth App | GitHub App |
+|---|---|---|
+| **Ownership** | Personal account only | Organization-level |
+| **Permissions** | Coarse OAuth scopes (`repo` = full read/write to ALL repos) | Fine-grained per-permission (e.g. Contents: read-only) |
+| **Private repo access** | Requires `repo` scope (overly broad) | Per-repo authorization by user |
+| **Staff changes** | App lost if owner leaves | Org admins retain control |
+
+### Migration Steps
+
+1. **Create a GitHub App** under your organization (see [Step 4](#step-4-create-a-github-app) above)
+
+2. **Update `values.yaml`** — change 3 fields, add 1:
+
+   ```yaml
+   custom:
+     gitClone:
+       githubAppName: "your-app-slug"          # NEW — add this
+
+   hub:
+     config:
+       GitHubOAuthenticator:
+         client_id: "<GitHub App Client ID>"    # CHANGE — from OAuth App's ID
+         client_secret: "<GitHub App Client Secret>"  # CHANGE — from OAuth App's secret
+         scope: []                               # CHANGE — was [read:user, read:org]
+         # allowed_organizations, oauth_callback_url — keep unchanged
+   ```
+
+3. **Deploy**:
+
+   ```bash
+   helm upgrade jupyterhub ./chart -n jupyterhub -f values.yaml
+   ```
+
+4. **User impact**:
+   - Existing logged-in sessions continue to work
+   - On next login, users go through the new GitHub App OAuth flow (same experience)
+   - Users who want private repo access can authorize repos on the spawn page
+
+5. **Clean up**: Once all users have re-logged, delete the old OAuth App from GitHub (Settings → Developer settings → OAuth Apps)
+
 ## Security Best Practices
 
 1. Always use HTTPS for your JupyterHub deployment
 2. Keep your Client Secret secure and never commit it to version control
 3. Regularly review organization members and their team assignments
 4. Use environment variables or secret management systems for storing OAuth credentials
-5. Limit OAuth scopes to only what's necessary (read:user and read:org)
+5. Create the GitHub App under the organization (not a personal account) so it survives staff changes
+6. Set minimal App permissions — Contents (read-only) and Members (read-only) are sufficient
 
 ## Additional Resources
 
 - [JupyterHub Documentation](https://jupyterhub.readthedocs.io/)
-- [GitHub OAuth Documentation](https://docs.github.com/en/developers/apps/building-oauth-apps)
+- [GitHub Apps Documentation](https://docs.github.com/en/apps)
 - [OAuthenticator Documentation](https://oauthenticator.readthedocs.io/)

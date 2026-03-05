@@ -256,7 +256,7 @@ bash scripts/helm_upgrade.bash
 
 ```bash
 cd runtime
-helm upgrade jupyterhub ./jupyterhub --namespace jupyterhub -f values-local.yaml
+helm upgrade jupyterhub ./chart --namespace jupyterhub -f values-local.yaml
 ```
 
 ### 5. Verify Deployment
@@ -318,7 +318,7 @@ class CustomFirstUseAuthenticator(FirstUseAuthenticator):
 3. **Regenerate credentials**:
    ```bash
    kubectl -n jupyterhub delete secret jupyterhub-admin-credentials
-   helm upgrade jupyterhub ./jupyterhub -n jupyterhub -f values-local.yaml
+   helm upgrade jupyterhub ./chart -n jupyterhub -f values-local.yaml
    ```
 
 ### Issue: Admin not created on install
@@ -428,10 +428,11 @@ python scripts/manage_users.py set-passwords users.csv --generate
    - Use `set-admin` command to manage (auditable)
    - Review admin list regularly
 
-4. **GitHub OAuth**:
+4. **GitHub App**:
+   - Create the App under the organization, not a personal account
    - Keep GitHub organization membership updated
    - Review team permissions regularly
-   - Use GitHub organization SSO if available
+   - Set `scope: []` — permissions are configured in the App settings
 
 ## Additional Resources
 

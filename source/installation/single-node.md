@@ -107,7 +107,7 @@ sudo ./auplc-installer rt reinstall
 
 You can pass environment variables when running the installer:
 
-- **K3S_USE_DOCKER** (default: `1`) — Use host Docker as K3s container runtime so that images built with `make hub` are visible after `rt upgrade`. Set to `0` for containerd mode with image export (offline/portable).
+- **K3S_USE_DOCKER** (default: `1`) — Use host Docker as K3s container runtime so that images built with `img build` are visible after `rt upgrade`. Set to `0` for containerd mode with image export (offline/portable).
 
   ```bash
   K3S_USE_DOCKER=0 sudo ./auplc-installer install
@@ -213,6 +213,24 @@ To rebuild container images after changing Dockerfiles, then reinstall runtime:
 sudo ./auplc-installer img build
 sudo ./auplc-installer rt reinstall
 ```
+
+## Offline / Portable Operation
+
+The installer automatically configures the system for offline and portable operation. When you run `sudo ./auplc-installer install`, it:
+
+1. **Creates a dummy network interface** (`dummy0`) with a stable IP address (`10.255.255.1`)
+2. **Binds K3s to the dummy interface** using `--node-ip` and `--flannel-iface`
+3. **Pre-pulls all required container images** to local storage
+4. **Configures K3s to use local images** from `/var/lib/rancher/k3s/agent/images/`
+
+This ensures the cluster remains fully functional even when:
+- External network is disconnected (network cable unplugged)
+- WiFi network changes (connecting to different access points)
+- No network is available at all
+
+**How it works**: K3s is bound to a stable dummy interface IP instead of the physical network interface. This means K3s doesn't care about external network changes -- it always uses the same internal IP for cluster communication.
+
+**Reference**: [K3s Air-Gap Installation](https://docs.k3s.io/installation/airgap)
 
 ## Uninstalling
 

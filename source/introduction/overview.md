@@ -43,19 +43,18 @@ Dynamic NFS provisioning ensures scalable and persistent storage for user data, 
 
 AUP Learning Cloud offers the following Learning Toolkits:
 
-:::{note}
-Only **Deep Learning** and **Large Language Model from Scratch** are available in the v1.0 release (v1.0 here refers to the learning toolkit release).
-:::
-
 - **Computer Vision** - 10 hands-on labs covering common computer vision concepts and techniques
 - **Deep Learning** - 12 hands-on labs covering common deep learning concepts and techniques
 - **Large Language Model from Scratch** - 9 hands-on labs designed to teach LLM development from scratch
+- **Physics Simulation** - Hands-on labs for physics simulation with GPU acceleration
 
 ## Available Notebook Environments
 
-| Environment | Image | Version | Hardware |
-|------------|-------|---------|----------|
-| Base CPU | `ghcr.io/amdresearch/auplc-default` | v1.0 | CPU |
-| CV COURSE | `ghcr.io/amdresearch/auplc-cv` | v1.0 | GPU (Strix-Halo) |
-| DL COURSE | `ghcr.io/amdresearch/auplc-dl` | v1.0 | GPU (Strix-Halo) |
-| LLM COURSE | `ghcr.io/amdresearch/auplc-llm` | v1.0 | GPU (Strix-Halo) |
+| Environment | Image | Hardware |
+|------------|-------|----------|
+| Base CPU | `ghcr.io/amdresearch/auplc-default` | CPU |
+| Basic GPU | `ghcr.io/amdresearch/auplc-gpu` | GPU |
+| CV Course | `ghcr.io/amdresearch/auplc-cv` | GPU |
+| DL Course | `ghcr.io/amdresearch/auplc-dl` | GPU |
+| LLM Course | `ghcr.io/amdresearch/auplc-llm` | GPU |
+| PhySim Course | `ghcr.io/amdresearch/auplc-physim` | GPU |

@@ -4,13 +4,13 @@ This guide covers the dual authentication system and user management for AUP Lea
 
 ## Table of Contents
 
-- [Overview](#overview)
-- [Authentication Methods](#authentication-methods)
-- [Configuration](#configuration)
-- [Admin Management](#admin-management)
-- [User Management](#user-management)
-- [Deployment](#deployment)
-- [Troubleshooting](#troubleshooting)
+- Overview
+- Authentication Methods
+- Configuration
+- Admin Management
+- User Management
+- Deployment
+- Troubleshooting
 
 ## Overview
 
@@ -45,17 +45,17 @@ AUP Learning Cloud supports **dual authentication** to accommodate different use
 Users see a combined login page with GitHub OAuth button and native login form:
 
 ```
-┌─────────────────────────────────┐
-│  JupyterHub Login               │
-├─────────────────────────────────┤
-│  [ Sign in with GitHub ]        │ ← GitHub OAuth
-│                                 │
-│  ─── Or use local account ───   │
-│                                 │
-│  Username: [____________]       │
-│  Password: [____________]       │ ← Native Auth
-│  [ Sign In ]                    │
-└─────────────────────────────────┘
++-------------------------------+
+|  JupyterHub Login              |
++-------------------------------+
+|  [ Sign in with GitHub ]       | <-- GitHub OAuth
+|                                |
+|  --- Or use local account ---  |
+|                                |
+|  Username: [____________]      |
+|  Password: [____________]      | <-- Native Auth
+|  [ Sign In ]                   |
++-------------------------------+
 ```
 
 ## Configuration
@@ -91,16 +91,27 @@ export JUPYTERHUB_TOKEN=$(kubectl -n jupyterhub get secret jupyterhub-admin-cred
 
 ### Resource Access Mapping
 
-Configure which resources different user groups can access in `jupyterhub_config.py`:
+Configure which resources different user groups can access in `values.yaml`:
 
-```python
-TEAM_RESOURCE_MAPPING = {
-    "cpu": ["cpu"],
-    "gpu": ["Course-CV","Course-DL","Course-LLM"],
-    "official": ["cpu", "Course-CV","Course-DL","Course-LLM"],
-    "AUP": ["Course-CV","Course-DL","Course-LLM"],
-    "native-users": ["Course-CV","Course-DL","Course-LLM"]
-}
+```yaml
+custom:
+  teams:
+    mapping:
+      cpu:
+        - cpu
+      gpu:
+        - Course-CV
+        - Course-DL
+        - Course-LLM
+      official:
+        - cpu
+        - Course-CV
+        - Course-DL
+        - Course-LLM
+      native-users:
+        - Course-CV
+        - Course-DL
+        - Course-LLM
 ```
 
 ### Native Authenticator Settings
@@ -201,8 +212,8 @@ python scripts/manage_users.py delete remove_list.csv
 Via JupyterHub Admin Panel (`/hub/admin`):
 
 1. **Add single user**: Click "Add Users" button
-2. **Delete user**: Click username → "Delete User"
-3. **Make admin**: Click username → Check "Admin" → "Save"
+2. **Delete user**: Click username -> "Delete User"
+3. **Make admin**: Click username -> Check "Admin" -> "Save"
 4. **Stop user server**: Click "Stop Server" button
 
 ## Deployment
@@ -214,7 +225,7 @@ The Hub Docker image must include the `jupyterhub-nativeauthenticator` dependenc
 **File**: `dockerfiles/Hub/Dockerfile`
 
 ```dockerfile
-RUN pip install jupyterhub-multiauthenticator jupyterhub-nativeauthenticator
+RUN pip install jupyterhub-multiauthenticator jupyterhub-firstuseauthenticator
 ```
 
 ### 2. Rebuild Hub Image
@@ -224,8 +235,8 @@ cd dockerfiles/Hub
 ./build.sh
 
 # Or manually:
-docker build -t ghcr.io/amdresearch/aup-jupyterhub-hub:v1.4.0-dual-auth .
-docker push ghcr.io/amdresearch/aup-jupyterhub-hub:v1.4.0-dual-auth
+docker build -t ghcr.io/amdresearch/auplc-hub:latest .
+docker push ghcr.io/amdresearch/auplc-hub:latest
 ```
 
 ### 3. Update Helm Values
@@ -239,24 +250,21 @@ custom:
 
 hub:
   image:
-    name: ghcr.io/amdresearch/aup-jupyterhub-hub
-    tag: v1.4.0-dual-auth
+    name: ghcr.io/amdresearch/auplc-hub
+    tag: latest
 ```
 
 ### 4. Deploy or Upgrade
 
-**Production (K3s)**:
-
 ```bash
 cd runtime
-bash scripts/helm_upgrade.bash
+helm upgrade jupyterhub ./chart -n jupyterhub -f values.yaml
 ```
 
-**Local Development (Docker Desktop)**:
+Or using the installer:
 
 ```bash
-cd runtime
-helm upgrade jupyterhub ./jupyterhub --namespace jupyterhub -f values-local.yaml
+sudo ./auplc-installer rt upgrade
 ```
 
 ### 5. Verify Deployment
@@ -300,7 +308,7 @@ class CustomFirstUseAuthenticator(FirstUseAuthenticator):
 
 **Symptoms**:
 ```
-❌ Connection failed with status 403
+Connection failed with status 403
 ```
 
 **Solutions**:
@@ -318,7 +326,7 @@ class CustomFirstUseAuthenticator(FirstUseAuthenticator):
 3. **Regenerate credentials**:
    ```bash
    kubectl -n jupyterhub delete secret jupyterhub-admin-credentials
-   helm upgrade jupyterhub ./jupyterhub -n jupyterhub -f values-local.yaml
+   helm upgrade jupyterhub ./chart -n jupyterhub -f values.yaml
    ```
 
 ### Issue: Admin not created on install
@@ -348,23 +356,17 @@ class CustomFirstUseAuthenticator(FirstUseAuthenticator):
 
 **Symptoms**: User sees courses they shouldn't access, or missing expected courses.
 
-**Solution**: Check resource mapping in `jupyterhub_config.py`:
+**Solution**: Check resource mapping in `values.yaml`:
 
-```python
-# Verify user's group assignment in CustomFirstUseAuthenticator
-async def authenticate(self, handler, data):
-    result = await super().authenticate(handler, data)
-    if result:
-        username = result.get("name", "").strip().upper()
-        if "AUP" in username:
-            result["group"] = "AUP"
-        # ...
-
-# Verify group has correct resources
-TEAM_RESOURCE_MAPPING = {
-    "AUP": ["Course-CV","Course-DL","Course-LLM"],
-    # ...
-}
+```yaml
+custom:
+  teams:
+    mapping:
+      gpu:
+        - Course-CV
+        - Course-DL
+        - Course-LLM
+      # Verify user's team membership in GitHub org
 ```
 
 ### Issue: Users created but can't login
@@ -387,7 +389,7 @@ python scripts/manage_users.py set-passwords users.csv --generate
 
 **Symptoms**:
 ```
-❌ Connection error: Connection refused
+Connection error: Connection refused
 ```
 
 **Solutions**:
@@ -428,10 +430,11 @@ python scripts/manage_users.py set-passwords users.csv --generate
    - Use `set-admin` command to manage (auditable)
    - Review admin list regularly
 
-4. **GitHub OAuth**:
+4. **GitHub App**:
+   - Create the App under the organization, not a personal account
    - Keep GitHub organization membership updated
    - Review team permissions regularly
-   - Use GitHub organization SSO if available
+   - Set `scope: []` -- permissions are configured in the App settings
 
 ## Additional Resources
 
