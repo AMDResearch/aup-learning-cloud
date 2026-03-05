@@ -209,7 +209,7 @@ kubectl -n jupyterhub logs -l app.kubernetes.io/component=quota-refresh --tail=5
 
 The Admin Panel provides a graphical interface for quota management. Access it at `/hub/admin/users`.
 
-![Users Page with Quota](../../_static/images/jupyterhub/quota-1-users-page.png)
+![Users Page with Quota](../_static/images/jupyterhub/quota-1-users-page.png)
 
 #### Quota Column
 
@@ -222,21 +222,21 @@ Click directly on a user's quota value to edit:
 - Press **Escape** to cancel
 - Enter `-1`, `∞`, or `unlimited` to grant unlimited status
 
-![Inline Quota Editing](../../_static/images/jupyterhub/quota-2-inline-edit.png)
+![Inline Quota Editing](../_static/images/jupyterhub/quota-2-inline-edit.png)
 
 #### Batch Operations
 
 1. Select multiple users using checkboxes
 2. Click "Set Quota" button (appears when users are selected)
 
-![Batch Select Users](../../_static/images/jupyterhub/quota-3-batch-select.png)
+![Batch Select Users](../_static/images/jupyterhub/quota-3-batch-select.png)
 
 3. Enter the quota value:
    - A number (e.g., `500`) to set exact balance
    - `-1`, `∞`, or `unlimited` to grant unlimited status
 4. Click "Apply" to update all selected users
 
-![Batch Quota Modal](../../_static/images/jupyterhub/quota-4-batch-modal.png)
+![Batch Quota Modal](../_static/images/jupyterhub/quota-4-batch-modal.png)
 
 ### REST API Endpoints
 
@@ -422,7 +422,7 @@ python scripts/manage_users.py set-quota -f users_with_quota.csv
 ```
 
 **File format (users_with_quota.csv):**
-```csv
+```text
 username,quota
 student01,500
 student02,1000
