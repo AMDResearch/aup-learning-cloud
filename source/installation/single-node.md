@@ -106,21 +106,35 @@ sudo ./auplc-installer rt reinstall
 
 ### 5. Runtime and mirror configuration
 
-You can pass environment variables when running the installer:
+The installer supports `--flag=value` options (or equivalent environment variables):
 
-- **K3S_USE_DOCKER** (default: `1`) — Use host Docker as K3s container runtime so that images built with `img build` are visible after `rt upgrade`. Set to `0` for containerd mode with image export (offline/portable).
+| Flag | Env variable | Default | Description |
+|---|---|---|---|
+| `--gpu=TYPE` | `GPU_TYPE` | auto-detect | GPU type: `phx`, `strix`, `strix-halo` |
+| `--docker=0\|1` | `K3S_USE_DOCKER` | `1` | Container runtime: `1` = Docker, `0` = containerd |
+| `--mirror=HOST` | `MIRROR_PREFIX` | — | Registry mirror host (e.g. `mirror.example.com`) |
+| `--mirror-pip=URL` | `MIRROR_PIP` | — | PyPI mirror URL |
+| `--mirror-npm=URL` | `MIRROR_NPM` | — | npm registry URL |
 
-  ```bash
-  K3S_USE_DOCKER=0 sudo ./auplc-installer install
-  ```
+Examples:
 
-- **MIRROR_PREFIX** — Registry mirror host (e.g. `mirror.example.com`) for container images.
+```bash
+# Specify GPU type explicitly
+sudo ./auplc-installer install --gpu=strix-halo
 
-  ```bash
-  MIRROR_PREFIX="mirror.example.com" sudo ./auplc-installer install
-  ```
+# Use containerd runtime instead of Docker
+sudo ./auplc-installer install --docker=0
 
-- **MIRROR_PIP** / **MIRROR_NPM** — Package mirrors for image builds (e.g. `img build`).
+# Use registry and PyPI mirrors
+sudo ./auplc-installer install --mirror=mirror.example.com --mirror-pip=https://pypi.tuna.tsinghua.edu.cn/simple
+
+# Flags can be combined and placed anywhere
+sudo ./auplc-installer install --gpu=phx --docker=0 --mirror=mirror.example.com
+```
+
+**Docker mode** (default, `--docker=1`): images built with `make hub` are immediately visible to K3s after `rt upgrade`, no export needed. Requires Docker installed on the host.
+
+**containerd mode** (`--docker=0`): images are exported to K3s image directory for offline/portable deployments.
 
 ### 6. Configure runtime (optional)
 
