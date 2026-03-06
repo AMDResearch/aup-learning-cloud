@@ -110,7 +110,7 @@ The installer supports `--flag=value` options (or equivalent environment variabl
 
 | Flag | Env variable | Default | Description |
 |---|---|---|---|
-| `--gpu=TYPE` | `GPU_TYPE` | auto-detect | GPU type: `phx`, `strix`, `strix-halo` |
+| `--gpu=TYPE` | `GPU_TYPE` | auto-detect | GPU type: `phx`, `strix`, `strix-halo`, `rdna4` |
 | `--docker=0\|1` | `K3S_USE_DOCKER` | `1` | Container runtime: `1` = Docker, `0` = containerd |
 | `--mirror=HOST` | `MIRROR_PREFIX` | — | Registry mirror host (e.g. `mirror.example.com`) |
 | `--mirror-pip=URL` | `MIRROR_PIP` | — | PyPI mirror URL |

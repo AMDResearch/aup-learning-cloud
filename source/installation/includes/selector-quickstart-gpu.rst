@@ -108,6 +108,7 @@
       :width: 3
 
 .. container:: rocm-docs-install-commands
+   :show-when: family=radeon-pro,family=radeon
 
    .. code-block:: bash
 
@@ -115,3 +116,13 @@
       cd aup-learning-cloud && chmod +x auplc-installer
 
       sudo ./auplc-installer install --gpu=rdna4
+
+.. container:: rocm-docs-install-commands
+   :show-when: family=ryzen-ai
+
+   .. code-block:: bash
+
+      git clone https://github.com/AMDResearch/aup-learning-cloud.git
+      cd aup-learning-cloud && chmod +x auplc-installer
+
+      sudo ./auplc-installer install --gpu=strix-halo
