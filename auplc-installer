@@ -599,36 +599,43 @@ Commands:
 
   detect-gpu            Show detected GPU configuration
 
-GPU Configuration:
-  GPU_TYPE    Override auto-detected GPU type (phx, strix, strix-halo)
-              Auto-detection uses rocminfo or KFD topology.
+Options (can also be set via environment variables):
+  --gpu=TYPE        Override auto-detected GPU type (phx, strix, strix-halo)
+                    Auto-detection uses rocminfo or KFD topology.
+                    Env: GPU_TYPE
+
+  --docker=0|1      Use host Docker as K3s container runtime (default: 1).
+                    1 = Docker mode: images visible to K3s immediately.
+                    0 = containerd mode: images exported for offline use.
+                    Env: K3S_USE_DOCKER
+
+  --mirror=PREFIX   Registry mirror (e.g. mirror.example.com)
+                    Env: MIRROR_PREFIX
+  --mirror-pip=URL  PyPI mirror URL.  Env: MIRROR_PIP
+  --mirror-npm=URL  npm registry URL. Env: MIRROR_NPM
 
   Examples:
-    GPU_TYPE=strix ./auplc-installer install
-    GPU_TYPE=phx  ./auplc-installer img build base-rocm
-
-Runtime Configuration:
-  K3S_USE_DOCKER  Use host Docker as K3s container runtime (default: 1).
-                  1 = Docker mode: images built with "make hub" are visible to K3s
-                      immediately after "rt upgrade", no export needed.
-                      Requires Docker to be installed on the host.
-                  0 = containerd mode: images are exported to K3s image dir
-                      (K3S_IMAGES_DIR) for offline/portable deployments.
-
-  Examples:
-    ./auplc-installer install                    # Docker mode (default)
-    K3S_USE_DOCKER=0 ./auplc-installer install   # containerd + export mode
-
-Mirror Configuration:
-  MIRROR_PREFIX   Registry mirror (e.g. mirror.example.com)
-  MIRROR_PIP      PyPI mirror URL
-  MIRROR_NPM      npm registry URL
-
-  Example:
-    MIRROR_PREFIX="mirror.example.com" ./auplc-installer install
+    ./auplc-installer install --gpu=strix-halo
+    ./auplc-installer install --gpu=phx --docker=0
+    ./auplc-installer img build base-rocm --gpu=strix
+    ./auplc-installer install --mirror=mirror.example.com
 
 EOF
 }
+
+# Parse global options (--key=value flags override environment variables)
+args=()
+for arg in "$@"; do
+    case "$arg" in
+        --gpu=*)          GPU_TYPE="${arg#--gpu=}" ;;
+        --docker=*)       K3S_USE_DOCKER="${arg#--docker=}" ;;
+        --mirror=*)       MIRROR_PREFIX="${arg#--mirror=}" ;;
+        --mirror-pip=*)   MIRROR_PIP="${arg#--mirror-pip=}" ;;
+        --mirror-npm=*)   MIRROR_NPM="${arg#--mirror-npm=}" ;;
+        *)                args+=("$arg") ;;
+    esac
+done
+set -- "${args[@]}"
 
 if [[ $# -eq 0 ]]; then
     show_help
