@@ -114,5 +114,4 @@
       git clone https://github.com/AMDResearch/aup-learning-cloud.git
       cd aup-learning-cloud && chmod +x auplc-installer
 
-      export GPU_TYPE=rdna4
-      sudo -E ./auplc-installer install
+      sudo ./auplc-installer install --gpu=rdna4

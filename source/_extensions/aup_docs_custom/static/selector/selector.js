@@ -13,7 +13,7 @@ const HIDDEN_CLASS = "rocm-docs-hidden";
 const SELECTED_CLASS = "rocm-docs-selected";
 const STORAGE_KEY = "aup-docs-selector-state";
 
-/** GPU value -> GPU_TYPE for Quick Start install commands (single code block) */
+/** GPU value -> --gpu= value for Quick Start install commands (single code block) */
 const GPU_TO_GPU_TYPE = {
   "ai-r9700": "rdna4",
   "ai-r9600d": "rdna4",
@@ -298,11 +298,11 @@ function updateInstallCommandsGpuType() {
   const gpu = state.gpu;
   const gpuType = (gpu && GPU_TO_GPU_TYPE[gpu]) || "rdna4";
   const text = pre.textContent || "";
-  const newText = text.replace(/export GPU_TYPE=\S+/m, `export GPU_TYPE=${gpuType}`);
+  const newText = text.replace(/--gpu=\S+/m, `--gpu=${gpuType}`);
   if (newText === text && pre.querySelector(".rocm-docs-gpu-type-value")) return;
   const withHighlight = newText.replace(
-    /export GPU_TYPE=(\S+)/m,
-    'export GPU_TYPE=<span class="rocm-docs-gpu-type-value">$1</span>'
+    /--gpu=(\S+)/m,
+    '--gpu=<span class="rocm-docs-gpu-type-value">$1</span>'
   );
   pre.innerHTML = withHighlight;
 }

@@ -137,7 +137,7 @@ html[data-theme="dark"] {
   display: block;
 }
 
-/* GPU_TYPE value in install code block — highlight so it stands out when it changes */
+/* --gpu= value in install code block — highlight so it stands out when it changes */
 .rocm-docs-install-commands .rocm-docs-gpu-type-value {
   color: var(--rocm-docs-selector-accent-color);
   font-weight: 600;
