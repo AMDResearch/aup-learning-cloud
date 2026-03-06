@@ -137,9 +137,14 @@ function resolve_gpu_config() {
             GPU_TARGET="gfx1151"
             ACCEL_ENV=""
             ;;
+        gfx1201|gfx1200|rdna4|dgpu)
+            ACCEL_KEY="dgpu"
+            GPU_TARGET="gfx120x"
+            ACCEL_ENV=""
+            ;;
         *)
             echo "Error: Unsupported GPU type: $input" >&2
-            echo "Supported: phx (gfx1100-1103), strix (gfx1150), strix-halo (gfx1151)" >&2
+            echo "Supported: phx (gfx1100-1103), strix (gfx1150), strix-halo (gfx1151), rdna4 (gfx1201)" >&2
             exit 1
             ;;
     esac
@@ -600,7 +605,7 @@ Commands:
   detect-gpu            Show detected GPU configuration
 
 Options (can also be set via environment variables):
-  --gpu=TYPE        Override auto-detected GPU type (phx, strix, strix-halo)
+  --gpu=TYPE        Override auto-detected GPU type (phx, strix, strix-halo, rdna4)
                     Auto-detection uses rocminfo or KFD topology.
                     Env: GPU_TYPE
 
