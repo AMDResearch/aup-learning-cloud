@@ -184,43 +184,31 @@ custom:
     # Define resource quotas for each course
     requirements:
       cpu:
-        cpu: "2"
-        memory: "4Gi"
-        memory_limit: "6Gi"
+        cpu: "0"
+        memory: "0Gi"
       gpu:
-        cpu: "4"
-        memory: "16Gi"
-        memory_limit: "24Gi"
+        cpu: "0"
+        memory: "0Gi"
         amd.com/gpu: "1"
       Course-CV:
-        cpu: "4"
-        memory: "16Gi"
-        memory_limit: "24Gi"
+        cpu: "0"
+        memory: "0Gi"
         amd.com/gpu: "1"
       Course-DL:
-        cpu: "4"
-        memory: "16Gi"
-        memory_limit: "24Gi"
+        cpu: "0"
+        memory: "0Gi"
         amd.com/gpu: "1"
       Course-LLM:
-        cpu: "4"
-        memory: "16Gi"
-        memory_limit: "24Gi"
+        cpu: "0"
+        memory: "0Gi"
         amd.com/gpu: "1"
       Course-PhySim:
-        cpu: "4"
-        memory: "16Gi"
-        memory_limit: "24Gi"
+        cpu: "0"
+        memory: "0Gi"
         amd.com/gpu: "1"
-      # Custom-URL:
-      #   cpu: "4"
-      #   memory: "16Gi"
-      #   memory_limit: "24Gi"
-      #   amd.com/gpu: "1"
       none:
-        cpu: "2"
-        memory: "4Gi"
-        memory_limit: "6Gi"
+        cpu: "0"
+        memory: "0Gi"
 
     # Course Metadata (for spawn UI)
     # Defines display information for each course

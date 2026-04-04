@@ -850,6 +850,67 @@ function remove_aup_learning_cloud_runtime() {
 }
 
 # ============================================================
+# Dev Mode (fast frontend/hub iteration)
+# ============================================================
+
+DEV_VALUES_PATH="runtime/values-dev.yaml"
+
+function dev_get_helm_args() {
+    local args=(-f "${VALUES_PATH}" -f "${DEV_VALUES_PATH}" -f "${OVERLAY_PATH}")
+    echo "${args[@]}"
+}
+
+function dev_deploy() {
+    echo "Deploying AUP Learning Cloud Runtime (dev mode)..."
+
+    local helm_args
+    helm_args=$(dev_get_helm_args)
+
+    # shellcheck disable=SC2086
+    helm install jupyterhub "${CHART_PATH}" --namespace jupyterhub \
+        --create-namespace ${helm_args}
+
+    echo "Waiting for JupyterHub deployments to be ready..."
+    kubectl wait --namespace jupyterhub \
+        --for=condition=available --timeout=600s \
+        deployment/hub deployment/proxy deployment/user-scheduler
+
+    kubectl label "$(kubectl get nodes -o name)" node-type="${ACCEL_KEY}" --overwrite
+
+    echo ""
+    echo "Dev deployment ready.  Admin UI: http://localhost:30890/hub/admin/users"
+}
+
+function dev_upgrade() {
+    detect_and_configure_gpu
+    get_runtime_paths
+    generate_values_overlay
+
+    local helm_args
+    helm_args=$(dev_get_helm_args)
+
+    # shellcheck disable=SC2086
+    helm upgrade jupyterhub "${CHART_PATH}" --namespace jupyterhub \
+        --create-namespace ${helm_args}
+}
+
+function dev_quick() {
+    echo "==========================================="
+    echo "Dev quick cycle: build hub → restart pod"
+    echo "==========================================="
+
+    detect_and_configure_gpu
+    local_image_build hub
+
+    echo "Restarting hub pod to pick up new image..."
+    kubectl rollout restart deployment/hub --namespace jupyterhub
+    kubectl rollout status  deployment/hub --namespace jupyterhub --timeout=120s
+
+    echo ""
+    echo "Hub restarted.  Admin UI: http://localhost:30890/hub/admin/users"
+}
+
+# ============================================================
 # Deployment Orchestration
 # ============================================================
 
@@ -1175,6 +1236,11 @@ Commands:
   uninstall             Remove everything (K3s + runtime)
   install-tools         Install helm and k9s
 
+  dev                   Quick dev cycle: rebuild hub image + restart hub pod
+  dev deploy            Full deploy with dev overlay (student=admin, pullPolicy=Never)
+  dev upgrade           Helm upgrade with dev overlay (for values changes)
+  dev reinstall         Remove + redeploy with dev overlay
+
   rt install            Deploy JupyterHub runtime only
   rt reinstall          Reinstall JupyterHub runtime (for container image changes)
   rt upgrade            Upgrade JupyterHub runtime (for values.yaml changes)
@@ -1268,6 +1334,27 @@ case "$1" in
     uninstall) remove_all_components ;;
     install-tools) install_tools ;;
     detect-gpu) detect_and_configure_gpu ;;
+    dev)
+        case "${2:-}" in
+            deploy)
+                detect_and_configure_gpu
+                get_runtime_paths
+                generate_values_overlay
+                dev_deploy
+                ;;
+            upgrade) dev_upgrade ;;
+            reinstall)
+                remove_aup_learning_cloud_runtime || true
+                sleep 0.5
+                detect_and_configure_gpu
+                get_runtime_paths
+                generate_values_overlay
+                dev_deploy
+                ;;
+            "") dev_quick ;;
+            *) echo "Usage: $0 dev {deploy|upgrade|reinstall} or just '$0 dev' for quick rebuild"; exit 1 ;;
+        esac
+        ;;
     rt)
         case "${2:-}" in
             install)

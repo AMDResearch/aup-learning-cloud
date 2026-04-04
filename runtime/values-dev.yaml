@@ -1,0 +1,30 @@
+# AUP Learning Cloud - Development Overlay
+#
+# Dev-friendly settings for local development and UI iteration.
+# Layered on top of values.yaml:
+#
+#   helm install ... -f values.yaml -f values-dev.yaml -f values.local.yaml
+#
+# Or use the installer shorthand:
+#   ./auplc-installer dev deploy    # full deploy with dev settings
+#   ./auplc-installer dev           # rebuild hub image + restart pod
+#   ./auplc-installer dev upgrade   # upgrade with dev settings (values changes only)
+
+# Grant admin privileges to the auto-login user so the Admin UI
+# is accessible at /hub/admin/users without switching auth modes.
+hub:
+  config:
+    Authenticator:
+      admin_users:
+        - student
+
+  # Use local Docker images directly — never pull from registry.
+  image:
+    pullPolicy: Never
+
+# Disable prePuller in dev (faster deploys, images are local).
+prePuller:
+  hook:
+    enabled: false
+  continuous:
+    enabled: false
