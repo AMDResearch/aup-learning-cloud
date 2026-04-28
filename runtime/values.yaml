@@ -69,6 +69,18 @@ custom:
     allowedOrigins: []
 
   # ============================================================================
+  # Public Scheme (TLS termination outside the chart)
+  # ============================================================================
+  # When TLS is terminated by an external component (Cloudflare tunnel,
+  # external ingress / HTTPS load balancer) instead of the chart's autohttps
+  # (proxy.https.enabled=true), set publicScheme="https" so the Hub marks the
+  # _xsrf cookie Secure. Leave unset (or "http") for the default single-node
+  # HTTP install — browsers reject Secure cookies received over HTTP and
+  # POST /hub/spawn would 403 (see AUPPM-64).
+  # security:
+  #   publicScheme: "https"
+
+  # ============================================================================
   # Git Repository Cloning
   # ============================================================================
   # Users can provide an optional Git URL on the spawn form; the repo will be

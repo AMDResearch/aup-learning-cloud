@@ -40,6 +40,9 @@ The simplest way to deploy AUP Learning Cloud on a single machine in a developme
 - **Docker**: Install Docker and configure for non-root access
 
 ```bash
+# Install OEM kernel for AMD Ryzen AI Halo hardware support (reboot required after install)
+sudo apt update && sudo apt install linux-image-6.14.0-1018-oem
+
 # Install Docker
 curl -fsSL https://get.docker.com | sh
 

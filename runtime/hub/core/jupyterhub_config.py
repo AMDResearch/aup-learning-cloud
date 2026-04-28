@@ -124,13 +124,29 @@ c.JupyterHub.tornado_settings = _BASE_TORNADO_SETTINGS
 # JupyterHub.cookie_options only affects Hub session cookies; the _xsrf cookie
 # is managed directly by Tornado and requires xsrf_cookie_kwargs in
 # tornado_settings to set Secure and SameSite.
-# - Secure: safe because HSTS is enforced site-wide via Cloudflare.
-# - SameSite=Lax: blocks cross-site POST CSRF while allowing OAuth top-level redirects.
-# - HttpOnly is intentionally omitted: JupyterHub's frontend JS must read _xsrf
-#   to include it in form submissions.
+#
+# Secure is conditional: browsers reject Secure cookies received over HTTP
+# (RFC 6265 §5.4) for non-loopback origins, which would break POST /hub/spawn
+# on the default `auplc-installer install` (NodePort + HTTP). Set Secure only
+# when the public origin actually uses HTTPS:
+#   - proxy.https.enabled=true   -> chart terminates TLS itself (autohttps)
+#   - custom.security.publicScheme="https" -> opt-in for external TLS
+#     terminators (Cloudflare tunnel, external HTTPS ingress / LB)
+# SameSite=Lax is always safe and blocks cross-site POST CSRF while still
+# allowing OAuth top-level redirects.
+# HttpOnly is intentionally omitted: JupyterHub's frontend JS must read
+# _xsrf to include it in form submissions.
+_proxy_https_enabled = bool(z2jh.get_config("proxy.https.enabled", False))
+_public_scheme = str(z2jh.get_config("custom.security.publicScheme") or "").strip().lower()
+_use_secure_cookies = _proxy_https_enabled or _public_scheme == "https"
+
+_xsrf_cookie_kwargs: dict = {"samesite": "Lax"}
+if _use_secure_cookies:
+    _xsrf_cookie_kwargs["secure"] = True
+
 c.JupyterHub.tornado_settings = {
     **c.JupyterHub.tornado_settings,
-    "xsrf_cookie_kwargs": {"secure": True, "samesite": "Lax"},
+    "xsrf_cookie_kwargs": _xsrf_cookie_kwargs,
 }
 
 # Inject platform identity into every Jinja template context so that
