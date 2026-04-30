@@ -1,68 +1,90 @@
 # Overview
 
-AUP Learning Cloud is a tailored JupyterHub deployment designed to provide an intuitive and hands-on AI learning experience. It features a comprehensive suite of AI toolkits running on AMD hardware acceleration, enabling users to learn and experiment with ease.
+AUP Learning Cloud is a JupyterHub-based learning platform for curated course environments, custom repositories, and shared GPU-enabled workspaces on Kubernetes.
 
 ```{image} ../_static/images/software-stack.png
 :alt: Software Architecture
 :align: center
 ```
 
-## What is AUP Learning Cloud?
+## What It Provides
 
-AUP Learning Cloud provides a multi-user Jupyter notebook environment optimized for AI and machine learning education on AMD hardware platforms.
+### Resource Selection At Spawn Time
 
-## Key Features
+Users do not launch into a single fixed notebook image. The platform presents a resource picker that can expose:
 
-### Hardware Acceleration
+- course environments such as CV, DL, LLM, and PhySim
+- generic CPU or GPU environments
+- accelerator-specific options defined by the deployment
+- optional Git repository cloning on startup
 
-- **AMD GPU**: Leverage ROCm on AMD Ryzen™ AI iGPUs (Strix Halo, Strix) and AMD Radeon™ RDNA 4 discrete GPUs (RX 9070 XT, AI Pro R9700) for high-performance deep learning and AI workloads
-- **AMD CPU**: Support for general-purpose CPU-based computations
+What each user can see is controlled by JupyterHub group membership and `custom.teams.mapping`.
 
-### Flexible Deployment
+### Multiple Authentication Modes
 
-Kubernetes provides a robust infrastructure for deploying and managing JupyterHub. We support both single-node and multi-node K3s cluster deployments, and produce offline install bundles for air-gapped environments.
+The Hub currently supports four authentication modes:
 
-### Custom URL Launcher
+- `auto-login`
+- `dummy`
+- `github`
+- `multi`
 
-We provide a basic **ROCm + PyTorch** environment; you can clone your own Git repository into this environment at server start (via URL and branch or by selecting a repo from your GitHub account). Private repositories are supported via a GitHub App or a pre-configured default access token. Your code is then available in the workspace so you can run it immediately.
+`multi` combines GitHub OAuth and native local accounts on one login page. In GitHub-backed deployments, GitHub team membership can be synchronized into JupyterHub groups and used for resource access control.
 
-### Authentication
+### Admin Console
 
-Seamless integration with GitHub Single Sign-On (SSO) and Native Authenticator for secure and efficient user authentication:
+The built-in admin console at `/hub/admin` includes:
 
-- **Auto-admin on install**: Initial admin created automatically with random password
-- **Dual login**: GitHub OAuth + Native accounts on single login page
-- **GitHub Teams → Groups sync**: GitHub team membership is mapped to JupyterHub groups for resource access control
-- **Batch user management**: CSV/Excel-based bulk operations via scripts
+- a **Users** view for creating users, resetting passwords, managing quotas, and starting or stopping servers
+- a **Groups** view for reviewing group membership and group-to-resource mappings
+- a **Dashboard** view for usage analytics, active sessions, pending spawns, and resource distribution
 
-### Admin Dashboard
+### Quota And Usage Tracking
 
-A dedicated React-based admin dashboard (under `/hub/admin/`) provides user/group management and a live usage view — daily active users, active sessions (via Server-Sent Events), pending spawns, idle-session warnings, and course/accelerator usage breakdowns. Quotas can be applied and reset in batch.
+When quota is enabled, the platform tracks usage sessions, enforces minimum balance before spawn, supports unlimited users, and can apply scheduled refresh rules with Kubernetes CronJobs.
 
-### Observability
+### Monitoring And Metrics
 
-Optional Prometheus + Grafana integration exposes Hub and single-user metrics. Two preset Grafana dashboards ship with the chart (`grafana-dashboard-aup-hub-ops.json`, `grafana-dashboard-aup-hub-resources.json`).
+The chart can expose Hub metrics to Prometheus and optionally install ServiceMonitor, PrometheusRule, and Grafana dashboard resources.
 
-### Storage Management and Security
+## Deployment Modes
 
-Dynamic NFS provisioning ensures scalable and persistent storage for user data, while Traefik ingress with automated TLS certificate management guarantees secure and reliable communication.
+### Single-Node
+
+The primary workstation/developer flow uses `./auplc-installer` to install K3s, prepare runtime values, and deploy the Hub.
+
+The checked-in default values in this repository currently describe a local deployment with:
+
+- NodePort access on `30890`
+- `local-path` storage
+- ingress disabled
+- prePuller disabled
+
+### Multi-Node
+
+Cluster deployments use the Ansible playbooks in `deploy/ansible/` plus Helm deployment with `runtime/values-multi-nodes.yaml.example` as the starting point.
+
+NFS storage, ingress, TLS, and other production-oriented components are deployment choices, not mandatory defaults.
 
 ## Learning Solutions
 
-AUP Learning Cloud offers the following Learning Toolkits:
+AUP Learning Cloud currently ships the following learning toolkits:
 
-- **Computer Vision** - 10 hands-on labs covering common computer vision concepts and techniques
-- **Deep Learning** - 12 hands-on labs covering common deep learning concepts and techniques
-- **Large Language Model from Scratch** - 9 hands-on labs designed to teach LLM development from scratch
-- **Physics Simulation** - Hands-on labs for physics simulation with GPU acceleration
+- **Computer Vision**
+- **Deep Learning**
+- **Large Language Models**
+- **Physics Simulation**
 
-## Available Notebook Environments
+## Acknowledgment
 
-| Environment | Image | Hardware |
-|------------|-------|----------|
-| Base CPU | `ghcr.io/amdresearch/auplc-default` | CPU |
-| GPU Base | `ghcr.io/amdresearch/auplc-base` | GPU |
-| CV Course | `ghcr.io/amdresearch/auplc-cv` | GPU |
-| DL Course | `ghcr.io/amdresearch/auplc-dl` | GPU |
-| LLM Course | `ghcr.io/amdresearch/auplc-llm` | GPU |
-| PhySim Course | `ghcr.io/amdresearch/auplc-physim` | GPU |
+AUP would like to thank the following universities and professors. This learning solution was made possible through the joint efforts of these partners.
+
+| University | Professors and Labs | Toolkits |
+|---|---|---|
+| National Taiwan University | [Prof. Chun-Yi Lee](https://www.csie.ntu.edu.tw/en/member/Faculty/Chun-Yi-Lee-67240464), [ELSA Lab](https://elsalab.ai/) | DL, CV |
+| Nanjing University | [Prof. Jingwei Xu](https://njudeepengine.github.io/jingweixu/), [NJUDeepEngine](https://github.com/NJUDeepEngine) | LLM |
+
+The following repositories and icons are used in AUP Learning Cloud, either in close to original form or as an inspiration:
+
+- [Genesis](https://github.com/Genesis-Embodied-AI/Genesis)
+- [Flaticon](https://www.flaticon.com): deployment (Prashanth Rapolu 15, Freepik), team and user (Freepik), machine learning (Becris)
