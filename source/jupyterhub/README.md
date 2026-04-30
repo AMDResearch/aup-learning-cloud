@@ -2,187 +2,112 @@
 
 ## Documentation
 
-- [Authentication Guide](./authentication-guide.md) - Setup GitHub OAuth and native authentication
-- [User Management Guide](./user-management.md) - Batch user operations with scripts
-- [User Quota System](./quota-system.md) - Resource usage tracking and quota management
-- [GitHub App Setup](./github-oauth-setup.md) - Step-by-step GitHub App configuration
-- [Configuration Reference](./configuration-reference.md) - Complete `runtime/values.yaml` reference
+- [Authentication Guide](./authentication-guide.md) - Authentication modes, GitHub org sync, native accounts, and admin bootstrap
+- [User Management Guide](./user-management.md) - Admin console and CLI-based user operations
+- [User Quota System](./quota-system.md) - Quota balances, rates, refresh rules, and admin actions
+- [GitHub App Setup](./github-oauth-setup.md) - Optional GitHub App integration for private repository access
+- [Configuration Reference](./configuration-reference.md) - Detailed `runtime/values.yaml` and chart configuration
 
 ---
 
 ## Configuration Files Overview
 
-The Helm chart uses a layered configuration approach:
+The Hub runtime is configured through layered Helm values.
 
 | File | Purpose |
 |------|---------|
-| `runtime/chart/values.yaml` | Chart defaults (accelerators, resources, teams, quota settings) |
-| `runtime/values.yaml` | Deployment overrides (environment-specific settings) |
-| `runtime/values.local.yaml` | Local development overrides (gitignored) |
+| `runtime/chart/values.yaml` | Chart defaults and full schema |
+| `runtime/values.yaml` | Current single-node oriented deployment defaults in this repository |
+| `runtime/values.local.yaml` | Optional local overrides (typically gitignored) |
+| `runtime/values-multi-nodes.yaml.example` | Standalone multi-node example values file |
 
 ### Helm Merge Behavior
 
-- **Maps/Objects**: Deep merge (new keys added, same keys override)
-- **Arrays/Lists**: Complete replacement
+- **Maps / objects** are merged.
+- **Arrays / lists** are replaced.
 
-Deploy with:
-```bash
-# Production
-helm upgrade jupyterhub ./chart -n jupyterhub -f values.yaml
-
-# Local development
-helm upgrade jupyterhub ./chart -n jupyterhub -f values.yaml -f values.local.yaml
-```
+That means overriding `custom.teams.mapping.gpu` replaces the whole list, not just one item.
 
 ---
 
-## Custom Configuration
+## Current Platform Surfaces
 
-All custom settings are under the `custom` section. Chart defaults are in `runtime/chart/values.yaml`.
+### Authentication
 
-### Authentication Mode
+The current Hub supports four auth modes via `custom.authMode`:
 
-```yaml
-custom:
-  authMode: "auto-login"  # auto-login | dummy | github | multi
-```
+- `auto-login` - Automatically logs everyone in as a shared user for simple installs
+- `dummy` - Accepts any username/password for testing only
+- `github` - GitHub OAuth only
+- `multi` - GitHub OAuth plus native local accounts on a single login page
 
-| Mode | Description |
-|------|-------------|
-| `auto-login` | No credentials, auto-login as 'student' (single-node dev) |
-| `dummy` | Accept any username/password (testing) |
-| `github` | GitHub OAuth only |
-| `multi` | GitHub OAuth + Local accounts |
+In GitHub-backed modes, the Hub can also sync GitHub team membership into JupyterHub groups and use those groups for resource visibility.
 
-### Admin User Auto-Creation
+### Spawn Experience
 
-```yaml
-custom:
-  adminUser:
-    enabled: true  # Generate admin credentials on install
-```
+The spawn page is no longer just an image chooser. It can present:
 
-When enabled, credentials are stored in a Kubernetes secret:
-```bash
-# Get admin password
-kubectl -n jupyterhub get secret jupyterhub-admin-credentials \
-  -o jsonpath='{.data.admin-password}' | base64 -d
+- grouped resources from `custom.resources.metadata`
+- accelerator-specific options from `custom.accelerators`
+- team-filtered resource visibility from `custom.teams.mapping`
+- quota-aware runtime limits
+- optional Git URL validation and clone-at-start behavior
+- GitHub App repo picker support when `custom.gitClone.githubAppName` is configured
 
-# Get API token
-kubectl -n jupyterhub get secret jupyterhub-admin-credentials \
-  -o jsonpath='{.data.api-token}' | base64 -d
-```
+### Admin Console
 
-### Accelerators (GPU/NPU)
+The React admin console under `/hub/admin` has three main areas:
 
-Define available hardware accelerators:
+- **Users** - Create users, reset passwords, edit quota, start/stop servers, inspect usage
+- **Groups** - Manage manually controlled groups, inspect GitHub-synced groups, review resource mappings
+- **Dashboard** - View summary cards, resource usage, top users, active sessions, and pending spawns
 
-```yaml
-custom:
-  accelerators:
-    phx:
-      displayName: "AMD Radeon 780M (Phoenix Point iGPU)"
-      description: "RDNA 3.0 (gfx1103) | Compute Units 12 | 4GB LPDDR5X"
-      nodeSelector:
-        node-type: phx
-      env:
-        HSA_OVERRIDE_GFX_VERSION: "11.0.0"
-      quotaRate: 2
-    my-custom-gpu:
-      displayName: "My Custom GPU"
-      nodeSelector:
-        node-type: my-gpu
-      quotaRate: 3
-```
+### Announcements and Onboarding
 
-### Resources (Images & Requirements)
+Announcements can be injected through `hub.extraFiles.announcement.txt`. The home page also includes a dismissible onboarding flow backed by Hub APIs.
 
-Define container images and resource requirements:
+### Monitoring
 
-```yaml
-custom:
-  resources:
-    images:
-      cpu: "ghcr.io/amdresearch/auplc-default:latest"
-      Course-CV: "ghcr.io/amdresearch/auplc-cv:latest"
-      my-course: "my-registry/my-image:latest"
-
-    requirements:
-      cpu:
-        cpu: "2"
-        memory: "4Gi"
-        memory_limit: "6Gi"
-      Course-CV:
-        cpu: "4"
-        memory: "16Gi"
-        memory_limit: "24Gi"
-        amd.com/gpu: "1"
-      my-course:
-        cpu: "4"
-        memory: "8Gi"
-```
-
-### Teams Mapping
-
-Map teams to allowed resources:
-
-```yaml
-custom:
-  teams:
-    mapping:
-      cpu:
-        - cpu
-      gpu:
-        - Course-CV
-        - Course-DL
-      native-users:
-        - cpu
-        - Course-CV
-```
-
-:::{note}
-Arrays are completely replaced when overriding. If you override `teams.mapping.gpu`, the entire list is replaced, not merged.
-:::
-
-### Quota System
-
-```yaml
-custom:
-  quota:
-    enabled: null        # null = auto-detect based on authMode
-    cpuRate: 1           # Quota rate for CPU-only containers
-    minimumToStart: 10   # Minimum quota to start a container
-    defaultQuota: 0      # Default quota for new users
-
-    refreshRules:
-      daily-topup:
-        enabled: true
-        schedule: "0 0 * * *"
-        action: add
-        amount: 100
-        maxBalance: 500
-        targets:
-          includeUnlimited: false
-          balanceBelow: 400
-```
-
-See [quota-system.md](./quota-system.md) for detailed documentation.
+The chart supports Prometheus metrics, ServiceMonitor, PrometheusRule, and Grafana dashboard installation through the `monitoring.*` values.
 
 ---
 
-## Hub Configuration
+## Current Deployment Defaults In This Repository
 
-### Hub Image
+The checked-in `runtime/values.yaml` currently describes a simple local deployment:
 
-```yaml
-hub:
-  image:
-    name: ghcr.io/amdresearch/auplc-hub
-    tag: latest
-    pullPolicy: IfNotPresent
+- `proxy.service.type: NodePort`
+- `proxy.service.nodePorts.http: 30890`
+- `ingress.enabled: false`
+- `hub.db.pvc.storageClassName: local-path`
+- `singleuser.storage.dynamic.storageClass: local-path`
+- `prePuller.hook.enabled: false`
+- `prePuller.continuous.enabled: false`
+
+So the default local workflow in this repository is HTTP + NodePort + local-path storage, not ingress + TLS + NFS.
+
+---
+
+## Common Workflows
+
+### Apply Configuration Changes
+
+**Single-node:**
+
+```bash
+sudo ./auplc-installer rt upgrade
 ```
 
-### Login Page Announcement
+**Multi-node / manual Helm:**
+
+```bash
+cd runtime
+helm upgrade --install jupyterhub ./chart \
+  -n jupyterhub --create-namespace \
+  -f values-multi-nodes.yaml
+```
+
+### Edit Login / Home Announcement
 
 ```yaml
 hub:
@@ -190,176 +115,31 @@ hub:
     announcement.txt:
       mountPath: /usr/local/share/jupyterhub/static/announcement.txt
       stringData: |
-        <div class="announcement-box" style="padding: 1em; border: 1px solid #ccc;">
-          <h3>Welcome!</h3>
+        <div class="announcement-box">
+          <h3>Welcome</h3>
           <p>Your announcement here.</p>
         </div>
 ```
 
-### GitHub Authentication
-
-GitHub authentication uses a [GitHub App](https://docs.github.com/en/apps) for login and optional private repository access.
+### Enable Git Clone With GitHub App Support
 
 ```yaml
 custom:
   gitClone:
-    githubAppName: "your-app-slug"  # Enables private repo access & repo picker
-
-hub:
-  config:
-    GitHubOAuthenticator:
-      oauth_callback_url: "https://<Your.domain>/hub/github/oauth_callback"
-      client_id: "<GitHub App Client ID>"
-      client_secret: "<GitHub App Client Secret>"
-      allowed_organizations:
-        - YOUR-ORG-NAME
-      scope: []  # GitHub App uses App-level permissions, not OAuth scopes
-```
-
-See [GitHub App Setup](./github-oauth-setup.md) for setup instructions.
-
-### Git Repository Cloning
-
-Resources with `allowGitClone: true` show a Git URL input on the spawn page. Users can clone a repository at container startup.
-
-```yaml
-custom:
-  gitClone:
+    githubAppName: "your-app-slug"
     allowedProviders:
       - github.com
       - gitlab.com
-    maxCloneTimeout: 300
+      - bitbucket.org
 ```
 
-#### Private Repository Access
-
-Two independent mechanisms (can be used together):
-
-**1. GitHub App** -- for GitHub OAuth users
-
-Set `githubAppName` (see above). Users authorize per-repo read-only access via the GitHub App UI. A repo picker appears on the spawn page showing authorized repositories.
-
-**2. Default Access Token** -- for all users including auto-login
-
-```yaml
-custom:
-  gitClone:
-    defaultAccessToken: "ghp_xxxx"  # Bot/service account PAT
-```
-
-Admin-configured PAT applied transparently to all users. Helm auto-creates a K8s Secret. Useful for classroom / single-node setups where everyone needs access to the same private repos without GitHub login.
-
-Token priority: OAuth token (GitHub App) > defaultAccessToken > none (public only)
+For GitHub App setup details, see [GitHub App Setup](./github-oauth-setup.md).
 
 ---
 
-## Network Settings
+## Recommended Reading Order
 
-### NodePort Access
-
-```yaml
-proxy:
-  service:
-    type: NodePort
-    nodePorts:
-      http: 30890
-
-ingress:
-  enabled: false
-```
-
-Access via `http://<node-ip>:30890`
-
-### Domain Access with Ingress
-
-```yaml
-proxy:
-  service:
-    type: ClusterIP
-
-ingress:
-  enabled: true
-  ingressClassName: traefik
-  hosts:
-    - your.domain.com
-  tls:
-    - hosts:
-        - your.domain.com
-      secretName: jupyter-tls-cert
-```
-
----
-
-## Storage Settings
-
-### NFS Storage (Production)
-
-```yaml
-hub:
-  db:
-    pvc:
-      storageClassName: nfs-client
-
-singleuser:
-  storage:
-    dynamic:
-      storageClass: nfs-client
-```
-
-### Local Storage (Development)
-
-```yaml
-hub:
-  db:
-    pvc:
-      storageClassName: hostpath
-
-singleuser:
-  storage:
-    dynamic:
-      storageClass: hostpath
-```
-
----
-
-## PrePuller Settings
-
-Pre-download images to all nodes for faster container startup:
-
-```yaml
-prePuller:
-  hook:
-    enabled: true
-  continuous:
-    enabled: true
-  extraImages:
-    aup-cpu-notebook:
-      name: ghcr.io/amdresearch/auplc-default
-      tag: latest
-```
-
-For faster deployment (images pulled on-demand):
-
-```yaml
-prePuller:
-  hook:
-    enabled: false
-  continuous:
-    enabled: false
-```
-
----
-
-## Applying Changes
-
-After modifying configuration:
-
-```bash
-helm upgrade jupyterhub ./chart -n jupyterhub -f values.yaml
-```
-
-Or use the installer:
-
-```bash
-sudo ./auplc-installer rt upgrade
-```
+1. Start with [Configuration Reference](./configuration-reference.md)
+2. Then read [Authentication Guide](./authentication-guide.md)
+3. For operational tasks, use [User Management Guide](./user-management.md)
+4. For quota-enabled deployments, read [User Quota System](./quota-system.md)
