@@ -1,74 +1,74 @@
-# Configuration Reference: runtime/values.yaml
+# Configuration Reference: `runtime/values.yaml`
 
-This page describes how to configure the main deployment file **`runtime/values.yaml`**. This file is the environment-specific override used when deploying with Helm; all available options and defaults are defined in **`runtime/chart/values.yaml`**.
+This page describes the main configuration surfaces used by AUP Learning Cloud.
 
-:::{important}
-**File location**: The primary configuration file is **`runtime/values.yaml`** (in the repo under the `runtime/` directory; there is no `runtime/core/values.yml` path — the "core" config is this file). The Helm chart defaults live in **`runtime/chart/values.yaml`**. When you run `helm install` or `helm upgrade`, you pass `-f values.yaml` from the `runtime/` directory.
-:::
+The most important distinction is:
 
-## Quick reference
+- `runtime/chart/values.yaml` defines chart defaults and the full supported schema
+- `runtime/values.yaml` provides the repository's current deployment defaults
+- `runtime/values-multi-nodes.yaml.example` is a standalone starting point for multi-node installs
+
+## Quick Reference
+
+### Single-Node Runtime Update
 
 ```bash
-# Deploy from repository root (develop branch)
-cd runtime
-helm install jupyterhub ./chart -n jupyterhub --create-namespace -f values.yaml
+sudo ./auplc-installer rt upgrade
+```
 
-# Upgrade after editing values
-helm upgrade jupyterhub ./chart -n jupyterhub -f values.yaml
+### Direct Helm Upgrade
+
+```bash
+cd runtime
+helm upgrade --install jupyterhub ./chart \
+  -n jupyterhub --create-namespace \
+  -f values.yaml
 ```
 
 ---
 
-## 1. `custom` — AUP-specific configuration
-
-All AUP Learning Cloud–specific behavior is under **`custom`**. These values are passed to the hub pod and used by the custom JupyterHub image.
-
-### 1.1 `custom.authMode`
-
-Authentication mode for the hub.
-
-| Value | Description |
-|-------|-------------|
-| `auto-login` | No credentials; everyone is logged in as a single user (e.g. `student`). Best for single-node dev/demo. |
-| `dummy` | Accept any username/password. For testing only. |
-| `github` | GitHub OAuth only. |
-| `multi` | GitHub OAuth + local (native) accounts on one login page. |
-
-**Example:**
+## 1. `custom.authMode`
 
 ```yaml
 custom:
-  authMode: "auto-login"   # or "github", "multi", "dummy"
+  authMode: "auto-login"
 ```
 
-### 1.2 `custom.adminUser`
+Supported values:
 
-Optionally create an admin user and credentials on first install.
+| Value | Meaning |
+|------|---------|
+| `auto-login` | Shared no-credential local mode |
+| `dummy` | Testing-only any-user mode |
+| `github` | GitHub OAuth only |
+| `multi` | GitHub OAuth plus native accounts |
+
+## 2. `custom.adminUser`
 
 ```yaml
 custom:
   adminUser:
-    enabled: false   # Set true to auto-create admin + jupyterhub-admin-credentials secret
+    enabled: false
 ```
 
-When `enabled: true`, a random admin password and API token are stored in the `jupyterhub-admin-credentials` secret. See [Authentication Guide](authentication-guide.md).
+If enabled, the chart creates the `jupyterhub-admin-credentials` secret and bootstraps the `admin` user. This is optional and currently disabled in the checked-in defaults.
 
-### 1.3 `custom.gitClone` — Git repository cloning
+## 3. `custom.githubOrgName`
 
-Controls optional Git URL on the spawn form; the repo is cloned into the user's home at container start via an init container.
+```yaml
+custom:
+  githubOrgName: "your-github-org"
+```
 
-**Private repo access (two options, can be combined):**
+Used by the Hub's GitHub team synchronization logic. This is especially relevant in `github` and `multi` auth modes.
 
-- **GitHub App** (`githubAppName`): For GitHub OAuth users; token comes from OAuth. Requires migrating from OAuth App to GitHub App (see comments in `runtime/values.yaml`).
-- **Default access token** (`defaultAccessToken`): A single PAT used for all users (including auto-login). Good for classroom/single-node when everyone needs the same private repos.
-
-**Token priority:** OAuth token (GitHub App) &gt; `defaultAccessToken` &gt; none (public only).
+## 4. `custom.gitClone`
 
 ```yaml
 custom:
   gitClone:
-    githubAppName: ""           # e.g. "aup-learning-cloud" — GitHub App slug
-    defaultAccessToken: ""      # Bot PAT for all users (K8s Secret created by Helm)
+    githubAppName: ""
+    defaultAccessToken: ""
     allowedProviders:
       - github.com
       - gitlab.com
@@ -77,193 +77,172 @@ custom:
     initContainerImage: "alpine/git:2.47.2"
 ```
 
-### 1.4 `custom.accelerators` — GPU/NPU node types
+Key behavior:
 
-Defines accelerator types shown in the spawn UI and used for scheduling and quota.
+- `githubAppName` enables GitHub App install / repo picker flows for GitHub-authenticated users
+- `defaultAccessToken` provides a fallback private-repo token for all users
+- token priority is GitHub OAuth token first, then `defaultAccessToken`
+- a resource must also opt in with `metadata.allowGitClone: true`
 
-Each key (e.g. `strix-halo`, `dgpu`) is an accelerator **key**. Each entry can set:
-
-- **displayName**, **description**: Shown in the UI.
-- **nodeSelector**: Must match node labels so user pods land on the right hardware.
-- **env**: Environment variables for the user container (e.g. `HSA_OVERRIDE_GFX_VERSION`).
-- **quotaRate**: Quota consumed per minute when using this accelerator.
-
-**Example:**
+## 5. `custom.accelerators`
 
 ```yaml
 custom:
   accelerators:
-    strix-halo:
-      displayName: "AMD Radeon™ 8060S (Strix Halo iGPU)"
-      description: "RDNA 3.5 (gfx1151) | Compute Units 40 | 64GB LPDDR5X"
+    r9700:
+      displayName: "AMD Radeon™ AI Pro R9700 (Workstation GPU)"
+      description: "RDNA 4.0 (gfx1201) | Compute Units 64 | 32GB GDDR6"
       nodeSelector:
-        node-type: strix-halo
-      env: {}
-      quotaRate: 3
-    dgpu:
-      displayName: "AMD Radeon™ 9070XT (Desktop GPU)"
-      description: "RDNA 4.0 (gfx1201) | ..."
-      nodeSelector:
-        node-type: dgpu
+        amd.com/gpu.product-name: "AMD_Radeon_AI_PRO_R9700"
       env: {}
       quotaRate: 4
 ```
 
-Ensure your nodes are labeled (e.g. `kubectl label nodes <name> node-type=strix-halo`).
+Supported fields:
 
-### 1.5 `custom.resources` — Course images and options
+- `displayName`
+- `description`
+- `nodeSelector`
+- `env`
+- `quotaRate`
 
-Three sub-sections: **images**, **requirements**, **metadata**.
+For current single-node installs, selectors are typically derived from ROCm labeller keys such as `amd.com/gpu.product-name`, not legacy `node-type` labels.
 
-**`custom.resources.images`**  
-Maps logical names (e.g. `cpu`, `Course-CV`) to container images.
+## 6. `custom.resources`
+
+### Images
 
 ```yaml
 custom:
   resources:
     images:
       cpu: "ghcr.io/amdresearch/auplc-default:latest"
-      gpu: "ghcr.io/amdresearch/base-gfx1151:v0.1-full"
+      gpu: "ghcr.io/amdresearch/auplc-base:latest"
       Course-CV: "ghcr.io/amdresearch/auplc-cv:latest"
-      Course-DL: "ghcr.io/amdresearch/auplc-dl:latest"
-      Course-LLM: "ghcr.io/amdresearch/auplc-llm:latest"
-      Course-PhySim: "ghcr.io/amdresearch/auplc-physim:latest"
 ```
 
-**`custom.resources.requirements`**  
-Kubernetes resource requests/limits per profile (same keys as `images`).
+### Requirements
 
 ```yaml
 custom:
   resources:
     requirements:
-      cpu:
-        cpu: "2"
-        memory: "4Gi"
-        memory_limit: "6Gi"
       gpu:
-        cpu: "4"
-        memory: "16Gi"
-        memory_limit: "24Gi"
+        cpu: "0"
+        memory: "0Gi"
         amd.com/gpu: "1"
-      Course-CV:
-        cpu: "4"
-        memory: "16Gi"
-        memory_limit: "24Gi"
-        amd.com/gpu: "1"
-      # ... same pattern for other courses
-      none:
-        cpu: "2"
-        memory: "4Gi"
-        memory_limit: "6Gi"
 ```
 
-**`custom.resources.metadata`**  
-UI text and behavior for each profile (group, description, which accelerators, allow Git clone).
+Recognized fields include:
+
+- `cpu`
+- `memory`
+- `memory_limit`
+- `amd.com/gpu`
+- `amd.com/npu`
+
+### Metadata
 
 ```yaml
 custom:
   resources:
     metadata:
-      cpu:
+      gpu:
         group: "CUSTOM REPO"
-        description: "Basic Python Environment"
-        subDescription: "CPU Only Environment"
-        accelerator: ""
-        acceleratorKeys: []
-        allowGitClone: true
-      Course-CV:
-        group: "COURSE"
-        description: "Computer Vision Course"
-        subDescription: "Suitable for CV experiments with GPU"
+        description: "Basic GPU Environment"
+        subDescription: "GPU Accelerated Environment"
         accelerator: "GPU"
         acceleratorKeys:
           - strix-halo
-        allowGitClone: true   # if applicable
+        allowGitClone: true
+        env: {}
 ```
 
-### 1.6 `custom.teams.mapping` — Team → course access
+Supported metadata fields:
 
-Maps **team names** (from auth, e.g. GitHub teams or native groups) to a list of **resource keys** (from `custom.resources.images` / `metadata`).
+- `group`
+- `description`
+- `subDescription`
+- `accelerator`
+- `acceleratorKeys`
+- `allowGitClone`
+- `env`
+- `acceleratorOverrides`
+
+`acceleratorOverrides` can override image and env per accelerator key:
+
+```yaml
+custom:
+  resources:
+    metadata:
+      Course-CV:
+        acceleratorOverrides:
+          r9700:
+            image: "ghcr.io/example/auplc-cv:latest-gfx120x"
+            env:
+              HSA_OVERRIDE_GFX_VERSION: ""
+```
+
+## 7. `custom.teams.mapping`
 
 ```yaml
 custom:
   teams:
     mapping:
-      cpu:
-        - cpu
-      gpu:
-        - Course-CV
-        - Course-DL
-        - Course-LLM
-        - Course-PhySim
-      official:
+      github-users:
         - cpu
         - gpu
-        - Course-CV
-        - Course-DL
-        - Course-LLM
-        - Course-PhySim
-      AUP:
-        - Course-CV
-        - Course-DL
-        - Course-LLM
-        - Course-PhySim
       native-users:
+        - cpu
         - Course-CV
-        - Course-DL
-        - Course-LLM
 ```
 
-Users in a team only see and can spawn the listed profiles.
+This mapping controls which resources a user can see, based on JupyterHub group membership.
 
-### 1.7 `custom.quota` — Quota system
-
-See [User Quota System](quota-system.md) for full detail. Summary:
+## 8. `custom.quota`
 
 ```yaml
 custom:
   quota:
-    enabled: null        # null = auto (on for github/multi, off for auto-login/dummy)
-    cpuRate: 1           # Quota per minute for CPU-only
-    minimumToStart: 10   # Minimum balance to start any container
-    defaultQuota: 0      # Initial quota for new users (0 = none)
-    refreshRules: {}     # CronJobs for periodic top-up/reset (see quota-system.md)
+    enabled: null
+    cpuRate: 1
+    minimumToStart: 10
+    defaultQuota: 0
+    refreshRules: {}
 ```
 
----
+Important behavior:
 
-## 2. `hub` — JupyterHub pod
+- when `enabled` is `null`, quota auto-disables for `auto-login` and `dummy`
+- accelerator-specific `quotaRate` values come from `custom.accelerators.*`
+- `refreshRules` create CronJob-based balance refresh behavior
 
-### 2.1 Database and image
+## 9. `custom.hub.allowedOrigins` and `custom.notebook.allowedOrigins`
 
 ```yaml
-hub:
-  db:
-    pvc:
-      storageClassName: local-path   # Use K3s local-path (single-node) or your StorageClass
-  image:
-    name: ghcr.io/amdresearch/auplc-hub
-    tag: latest
-    pullPolicy: IfNotPresent
+custom:
+  hub:
+    allowedOrigins: []
+  notebook:
+    allowedOrigins: []
 ```
 
-### 2.2 `hub.extraConfig`
+- `custom.hub.allowedOrigins` adds Hub CORS headers
+- `custom.notebook.allowedOrigins` is applied to notebook server startup arguments
 
-Additional Python config (snippets) executed after the core setup. Use for one-off JupyterHub/traitlets settings.
+## 10. `custom.security.publicScheme`
+
+When TLS is terminated outside the chart, you can tell the Hub to treat the public origin as HTTPS:
 
 ```yaml
-hub:
-  extraConfig: {}
-  # Example:
-  # extraConfig:
-  #   myconfig: |
-  #     c.JupyterHub.some_setting = "value"
+custom:
+  security:
+    publicScheme: "https"
 ```
 
-### 2.3 `hub.extraFiles`
+This affects secure handling of `_xsrf` cookies.
 
-Inject files into the hub container (e.g. announcement HTML, custom templates).
+## 11. `hub.extraFiles`
 
 ```yaml
 hub:
@@ -271,88 +250,54 @@ hub:
     announcement.txt:
       mountPath: /usr/local/share/jupyterhub/static/announcement.txt
       stringData: |
-        <div class="announcement-box">...</div>
+        <div class="announcement-box">Notice</div>
 ```
 
-### 2.4 `hub.config` — JupyterHub and authenticator config
+Used for login / home announcements and other injected files.
 
-This is the main place for **JupyterHub**, **Authenticator**, **KubeSpawner**, and **GitHub OAuth** settings. Keys are class names; values are traitlets.
+## 12. `monitoring`
 
-**Typical sections:**
+```yaml
+monitoring:
+  enabled: false
+  hubMetrics:
+    enabled: false
+    allowUnauthenticatedScrape: false
+  serviceMonitor:
+    enabled: false
+  grafana:
+    dashboard:
+      enabled: false
+  prometheusRule:
+    enabled: false
+```
+
+This controls Prometheus scraping and optional Grafana / alerting resources.
+
+## 13. Local Deployment Defaults In `runtime/values.yaml`
+
+The repository's current local defaults are:
 
 ```yaml
 hub:
-  config:
-    Authenticator:
-      allow_all: true   # For dummy/auto-login
-    GitHubOAuthenticator:
-      oauth_callback_url: "https://<Your.domain>/hub/github/oauth_callback"
-      client_id: "TODO"
-      client_secret: "TODO"
-      allowed_organizations:
-        - <YOUR-ORG-NAME>
-      scope: []  # GitHub App uses App-level permissions, not OAuth scopes
-    KubeSpawner:
-      image_pull_policy: IfNotPresent
-```
+  db:
+    pvc:
+      storageClassName: local-path
 
-See [GitHub OAuth Setup](github-oauth-setup.md) and [Authentication Guide](authentication-guide.md).
-
----
-
-## 3. `singleuser` — User notebook pods
-
-### 3.1 Storage
-
-User home directory persistence. For single-node K3s, `local-path` is typical.
-
-```yaml
 singleuser:
   storage:
     dynamic:
       storageClass: local-path
-```
 
-For multi-node or NFS, set `storageClass` to your provisioner (e.g. `nfs-client`).
-
----
-
-## 4. `proxy` — Access (NodePort or LoadBalancer)
-
-**NodePort (single-node / dev):**
-
-```yaml
 proxy:
   service:
     type: NodePort
     nodePorts:
       http: 30890
-```
 
-Access at `http://<node-ip>:30890`.
-
-**LoadBalancer / Ingress:** Use `type: LoadBalancer` or leave default and use `ingress` below.
-
----
-
-## 5. `ingress`
-
-For NodePort-only access, disable ingress:
-
-```yaml
 ingress:
   enabled: false
-```
 
-For domain-based access, enable and set hosts/TLS; see [README](README.md) network examples.
-
----
-
-## 6. `prePuller` — Image pre-pulling
-
-Pre-pulling can speed up first spawn; for dev it’s often disabled to speed up deploy.
-
-```yaml
 prePuller:
   hook:
     enabled: false
@@ -360,36 +305,4 @@ prePuller:
     enabled: false
 ```
 
-To pre-pull images, set `hook.enabled` and/or `continuous.enabled` to `true` and (if needed) add `prePuller.extraImages` with the same image list you use in `custom.resources.images`.
-
----
-
-## 7. Suggested workflow for editing `runtime/values.yaml`
-
-1. **Auth**: Set `custom.authMode` and, for GitHub, `hub.config.GitHubOAuthenticator` (and optionally `custom.gitClone.githubAppName`).
-2. **Admin**: Set `custom.adminUser.enabled` if you want auto-created admin credentials.
-3. **Courses**: Add or change entries in `custom.resources.images`, `requirements`, and `metadata`, and ensure `custom.teams.mapping` grants the right teams access.
-4. **Accelerators**: Match `custom.accelerators` to your node labels and quota; set `quotaRate` per accelerator.
-5. **Quota**: Tune `custom.quota` and, if needed, `refreshRules` (see [quota-system](quota-system.md)).
-6. **Storage**: Set `hub.db.pvc.storageClassName` and `singleuser.storage.dynamic.storageClass` (e.g. `local-path` for K3s).
-7. **Access**: Choose NodePort (`proxy.service.type: NodePort`, `ingress.enabled: false`) or domain + ingress.
-8. **Announcement / branding**: Edit `hub.extraFiles.announcement.txt` (or add more `extraFiles`).
-
-After any change, run from `runtime/`:
-
-```bash
-helm upgrade jupyterhub ./chart -n jupyterhub -f values.yaml
-```
-
----
-
-## 8. Recommendations and best practices
-
-- **Version images explicitly**: Prefer tags like `v1.0` over `latest` in `custom.resources.images` and `hub.image.tag` for reproducible deployments.
-- **Secrets**: Do not commit real `client_secret`, `defaultAccessToken`, or passwords. Use a separate `values-local.yaml` or `--set` / sealed secrets / external secrets.
-- **Quota**: For production with real users, enable quota (`custom.quota.enabled: true` if not using auto-login/dummy) and set `defaultQuota` or use `refreshRules` so users receive allocations.
-- **Node labels**: Ensure every GPU/NPU node has the labels referenced in `custom.accelerators.*.nodeSelector` so scheduling works.
-- **Teams**: Keep `custom.teams.mapping` in sync with your GitHub org/teams or native group naming so users see the correct course list.
-- **Backup**: Back up the hub DB PVC (and any NFS storage) before major upgrades or config changes.
-
-For more detail on auth, quotas, and OAuth, see the other guides in this section.
+Treat NFS, ingress, TLS, and pre-pulling as opt-in deployment features unless you explicitly configure them.

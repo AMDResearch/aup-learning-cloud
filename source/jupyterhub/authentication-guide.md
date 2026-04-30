@@ -1,445 +1,158 @@
 # Authentication Guide
 
-This guide covers the dual authentication system and user management for AUP Learning Cloud.
-
-## Table of Contents
-
-- Overview
-- Authentication Methods
-- Configuration
-- Admin Management
-- User Management
-- Deployment
-- Troubleshooting
+This guide describes the current authentication behavior of AUP Learning Cloud, including auth modes, GitHub team sync, native accounts, and admin bootstrap.
 
 ## Overview
 
-AUP Learning Cloud supports **dual authentication** to accommodate different user types:
+Authentication is controlled by `custom.authMode`.
 
-1. **GitHub OAuth**: For technical teams and organization members
-2. **Native Authenticator**: For students and external users (admin-managed accounts)
+Supported modes:
 
-### Key Features
+| Mode | Meaning |
+|------|---------|
+| `auto-login` | Shared local mode with no credentials |
+| `dummy` | Testing mode that accepts any username/password |
+| `github` | GitHub OAuth only |
+| `multi` | GitHub OAuth plus native local accounts |
 
-- **Auto-admin on install**: Initial admin created automatically with random password
-- **No self-registration**: Only admins can create native accounts
-- **Individual passwords**: Each user has their own password (can be changed)
-- **Unified admin panel**: All users managed in `/hub/admin`
-- **Batch operations**: CSV/Excel-based bulk user management
-- **Script-based admin management**: Use `set-admin` command
+The current checked-in single-node defaults use `auto-login`.
 
-## Authentication Methods
+## Admin Bootstrap
 
-### Comparison
-
-| Feature | GitHub OAuth | Native Authenticator |
-|---------|--------------|---------------------|
-| **User Type** | Technical teams, org members | Students, external users |
-| **Account Creation** | GitHub organization invite | Admin creates manually |
-| **Password** | Managed by GitHub | User-defined (changeable) |
-| **Access Control** | Based on GitHub teams | Based on username patterns or groups |
-| **Best For** | Staff, developers, researchers | Course students, temporary users |
-
-### Login Flow
-
-Users see a combined login page with GitHub OAuth button and native login form:
-
-```
-+-------------------------------+
-|  JupyterHub Login              |
-+-------------------------------+
-|  [ Sign in with GitHub ]       | <-- GitHub OAuth
-|                                |
-|  --- Or use local account ---  |
-|                                |
-|  Username: [____________]      |
-|  Password: [____________]      | <-- Native Auth
-|  [ Sign In ]                   |
-+-------------------------------+
-```
-
-## Configuration
-
-### Enable Auto-Admin (Recommended)
-
-In `runtime/values.yaml` or `runtime/values-local.yaml`:
-
-```yaml
-custom:
-  adminUser:
-    enabled: true    # Auto-create admin on helm install
-```
-
-This automatically:
-1. Generates random API token and admin password
-2. Creates `jupyterhub-admin-credentials` secret
-3. Configures `admin` user with admin privileges on hub startup
-
-The API token is associated with the `admin` user for script operations.
-
-### Get Credentials After Install
-
-```bash
-# Get admin password
-kubectl -n jupyterhub get secret jupyterhub-admin-credentials \
-  -o go-template='{{index .data "admin-password" | base64decode}}'
-
-# Get API token for scripts
-export JUPYTERHUB_TOKEN=$(kubectl -n jupyterhub get secret jupyterhub-admin-credentials \
-  -o go-template='{{index .data "api-token" | base64decode}}')
-```
-
-### Resource Access Mapping
-
-Configure which resources different user groups can access in `values.yaml`:
-
-```yaml
-custom:
-  teams:
-    mapping:
-      cpu:
-        - cpu
-      gpu:
-        - Course-CV
-        - Course-DL
-        - Course-LLM
-      official:
-        - cpu
-        - Course-CV
-        - Course-DL
-        - Course-LLM
-      native-users:
-        - Course-CV
-        - Course-DL
-        - Course-LLM
-```
-
-### Native Authenticator Settings
-
-The `CustomFirstUseAuthenticator` class settings:
-
-```python
-class CustomFirstUseAuthenticator(FirstUseAuthenticator):
-    service_name = "Native"
-    create_users = False  # Only admin-created users can login
-```
-
-**Important**: `create_users = False` prevents users from creating accounts themselves. Users must be created by an admin first.
-
-## Admin Management
-
-### Initial Admin
-
-Created automatically on `helm install` when `custom.adminUser.enabled: true`.
-
-### Adding More Admins
-
-Use the `set-admin` command (NOT config files):
-
-```bash
-# Grant admin to users
-python scripts/manage_users.py set-admin teacher01 teacher02
-
-# Grant admin from file
-python scripts/manage_users.py set-admin -f new_admins.csv
-
-# Revoke admin
-python scripts/manage_users.py set-admin --revoke student01
-```
-
-Or via Admin Panel (`/hub/admin`):
-1. Click username
-2. Check "Admin" checkbox
-3. Save
-
-### Admin Users Summary
-
-| Method | When to Use |
-|--------|-------------|
-| `custom.adminUser.enabled: true` | Initial admin on install |
-| `manage_users.py set-admin` | Add/remove admins later |
-| Admin Panel `/hub/admin` | Quick single-user changes |
-
-## User Management
-
-### Prerequisites
-
-Install required dependencies:
-
-```bash
-pip install pandas openpyxl requests
-```
-
-Set environment variables:
-
-```bash
-export JUPYTERHUB_URL="http://localhost:30890"  # Or your hub URL
-export JUPYTERHUB_TOKEN=$(kubectl -n jupyterhub get secret jupyterhub-admin-credentials \
-  -o go-template='{{index .data "api-token" | base64decode}}')
-```
-
-### Batch User Operations
-
-For detailed batch user management, see [User Management Guide](user-management.md).
-
-**Quick Reference**:
-
-```bash
-# Generate user template
-python scripts/generate_users_template.py --prefix student --count 50 --output users.csv
-
-# Create users from file
-python scripts/manage_users.py create users.csv
-
-# List all users
-python scripts/manage_users.py list
-
-# Grant admin privileges
-python scripts/manage_users.py set-admin teacher01 teacher02
-
-# Revoke admin privileges
-python scripts/manage_users.py set-admin --revoke student01
-
-# Export/backup users
-python scripts/manage_users.py export backup.xlsx
-
-# Delete users
-python scripts/manage_users.py delete remove_list.csv
-```
-
-### Manual User Management
-
-Via JupyterHub Admin Panel (`/hub/admin`):
-
-1. **Add single user**: Click "Add Users" button
-2. **Delete user**: Click username -> "Delete User"
-3. **Make admin**: Click username -> Check "Admin" -> "Save"
-4. **Stop user server**: Click "Stop Server" button
-
-## Deployment
-
-### 1. Update Hub Image
-
-The Hub Docker image must include the `jupyterhub-nativeauthenticator` dependency.
-
-**File**: `dockerfiles/Hub/Dockerfile`
-
-```dockerfile
-RUN pip install jupyterhub-multiauthenticator jupyterhub-firstuseauthenticator
-```
-
-### 2. Rebuild Hub Image
-
-```bash
-cd dockerfiles/Hub
-./build.sh
-
-# Or manually:
-docker build -t ghcr.io/amdresearch/auplc-hub:latest .
-docker push ghcr.io/amdresearch/auplc-hub:latest
-```
-
-### 3. Update Helm Values
-
-**File**: `runtime/values.yaml`
+Admin bootstrap is optional.
 
 ```yaml
 custom:
   adminUser:
     enabled: true
-
-hub:
-  image:
-    name: ghcr.io/amdresearch/auplc-hub
-    tag: latest
 ```
 
-### 4. Deploy or Upgrade
+When enabled, the Hub creates the `jupyterhub-admin-credentials` secret and bootstraps the `admin` user.
+
+Retrieve credentials with:
 
 ```bash
-cd runtime
-helm upgrade jupyterhub ./chart -n jupyterhub -f values.yaml
-```
-
-Or using the installer:
-
-```bash
-sudo ./auplc-installer rt upgrade
-```
-
-### 5. Verify Deployment
-
-```bash
-# Check hub pod is running
-kubectl --namespace=jupyterhub get pods
-
-# Check hub logs for admin setup
-kubectl --namespace=jupyterhub logs deployment/hub | grep -i admin
-
-# Get admin password
 kubectl -n jupyterhub get secret jupyterhub-admin-credentials \
   -o jsonpath='{.data.admin-password}' | base64 -d && echo
+
+kubectl -n jupyterhub get secret jupyterhub-admin-credentials \
+  -o jsonpath='{.data.api-token}' | base64 -d && echo
 ```
 
-## Troubleshooting
+## GitHub OAuth
 
-### Issue: "Module 'nativeauthenticator' not found"
+GitHub OAuth configuration lives under `hub.config.GitHubOAuthenticator`.
 
-**Cause**: Hub image doesn't have `jupyterhub-nativeauthenticator` installed.
+```yaml
+custom:
+  githubOrgName: "your-github-org"
 
-**Solution**:
-```bash
-# Rebuild Hub image with updated Dockerfile
-cd dockerfiles/Hub
-./build.sh
+hub:
+  config:
+    GitHubOAuthenticator:
+      oauth_callback_url: "https://your.domain.com/hub/github/oauth_callback"
+      client_id: "TODO"
+      client_secret: "TODO"
+      allowed_organizations:
+        - your-github-org
+      scope:
+        - read:user
+        - read:org
 ```
 
-### Issue: Users can self-register
+### GitHub Team Sync
 
-**Cause**: `create_users` is not set to `False`.
+In GitHub-backed deployments, the Hub can:
 
-**Solution**: Verify in `jupyterhub_config.py`:
-```python
-class CustomFirstUseAuthenticator(FirstUseAuthenticator):
-    create_users = False
+- fetch the user's team memberships during login
+- refresh team memberships again at spawn time
+- map those teams into JupyterHub groups
+- use group membership to control visible resources
+
+The org name used for synchronization comes from `custom.githubOrgName`.
+
+## GitHub App Integration For Repositories
+
+GitHub App integration is optional and is related to private repository cloning, not to basic OAuth login itself.
+
+```yaml
+custom:
+  gitClone:
+    githubAppName: "your-app-slug"
 ```
 
-### Issue: API token authentication fails
+When configured, GitHub-authenticated users can install or authorize the app and use repo-picker flows on the spawn page.
 
-**Symptoms**:
-```
-Connection failed with status 403
-```
+For setup instructions, see [GitHub App Setup](github-oauth-setup.md).
 
-**Solutions**:
+## Native Accounts
 
-1. **Verify secret exists**:
-   ```bash
-   kubectl -n jupyterhub get secret jupyterhub-admin-credentials
-   ```
+Native accounts are used in `multi` mode.
 
-2. **Check token is loaded**:
-   ```bash
-   kubectl -n jupyterhub logs deployment/hub | grep "API token"
-   ```
+Important behavior:
 
-3. **Regenerate credentials**:
-   ```bash
-   kubectl -n jupyterhub delete secret jupyterhub-admin-credentials
-   helm upgrade jupyterhub ./chart -n jupyterhub -f values.yaml
-   ```
+- users cannot self-register arbitrarily
+- admins can create users from the web admin console or CLI scripts
+- native passwords can be reset by admins
+- users can be forced to change password on next login
 
-### Issue: Admin not created on install
+## Group-Based Resource Access
 
-**Symptoms**: No admin user after helm install.
-
-**Solutions**:
-
-1. **Verify config**:
-   ```yaml
-   custom:
-     adminUser:
-       enabled: true  # Must be true
-   ```
-
-2. **Check hub logs**:
-   ```bash
-   kubectl -n jupyterhub logs deployment/hub | grep -i "admin"
-   ```
-
-3. **Restart hub**:
-   ```bash
-   kubectl -n jupyterhub rollout restart deployment/hub
-   ```
-
-### Issue: Wrong resource permissions
-
-**Symptoms**: User sees courses they shouldn't access, or missing expected courses.
-
-**Solution**: Check resource mapping in `values.yaml`:
+Resource visibility is controlled by `custom.teams.mapping`.
 
 ```yaml
 custom:
   teams:
     mapping:
-      gpu:
+      github-users:
+        - cpu
+        - gpu
+      native-users:
+        - cpu
         - Course-CV
-        - Course-DL
-        - Course-LLM
-      # Verify user's team membership in GitHub org
 ```
 
-### Issue: Users created but can't login
+GitHub-synced groups and system-managed groups have protection rules in the admin surface.
 
-**Cause**: Native users must set password on first login.
+## Recommended Operational Flow
 
-**Solution**:
+### Single-Node
 
-1. User should go to login page
-2. Enter username created by admin
-3. Enter desired password
-4. Password is saved for future logins
+After editing auth-related values, redeploy with:
 
-**Alternative**: Set passwords via script:
 ```bash
-python scripts/manage_users.py set-passwords users.csv --generate
+sudo ./auplc-installer rt upgrade
 ```
 
-### Issue: Batch script fails to connect
+### Manual / Multi-Node Helm
 
-**Symptoms**:
+```bash
+cd runtime
+helm upgrade --install jupyterhub ./chart \
+  -n jupyterhub --create-namespace \
+  -f values-multi-nodes.yaml
 ```
-Connection error: Connection refused
-```
 
-**Solutions**:
+## Troubleshooting
 
-1. **Verify JupyterHub URL**:
-   ```bash
-   # For local dev
-   export JUPYTERHUB_URL="http://localhost:30890"
+### GitHub Users Do Not See Expected Resources
 
-   # For production
-   export JUPYTERHUB_URL="https://your-domain.com"
-   ```
+Check:
 
-2. **Check if hub is accessible**:
-   ```bash
-   curl $JUPYTERHUB_URL/hub/api/
-   ```
+- `custom.githubOrgName`
+- `hub.config.GitHubOAuthenticator.allowed_organizations`
+- `custom.teams.mapping`
 
-3. **Verify namespace and port forwarding** (if using kubectl):
-   ```bash
-   kubectl --namespace=jupyterhub port-forward service/hub 8081:8081
-   export JUPYTERHUB_URL="http://localhost:8081"
-   ```
+### No Admin User Was Created
 
-## Security Best Practices
+Confirm that `custom.adminUser.enabled: true` is set, then restart or upgrade the runtime.
 
-1. **Protect API tokens**:
-   - Tokens are stored in Kubernetes secrets
-   - Never commit tokens to git
-   - Rotate tokens by deleting and recreating the secret
+### Native Users Cannot Log In
 
-2. **User password policy**:
-   - Encourage strong passwords
-   - Consider adding password complexity requirements
+Confirm the deployment is using `multi` mode and that the user was created by an administrator.
 
-3. **Admin accounts**:
-   - Limit number of admin users
-   - Use `set-admin` command to manage (auditable)
-   - Review admin list regularly
+## Related Documentation
 
-4. **GitHub App**:
-   - Create the App under the organization, not a personal account
-   - Keep GitHub organization membership updated
-   - Review team permissions regularly
-   - Set `scope: []` -- permissions are configured in the App settings
-
-## Additional Resources
-
-- [User Management Guide](user-management.md) - Batch user operations and scripts
-- [JupyterHub Documentation](https://jupyterhub.readthedocs.io/)
-- [NativeAuthenticator Documentation](https://native-authenticator.readthedocs.io/)
-- [JupyterHub REST API](https://jupyterhub.readthedocs.io/en/stable/reference/rest-api.html)
-- [OAuthenticator Documentation](https://oauthenticator.readthedocs.io/)
+- [GitHub App Setup](github-oauth-setup.md)
+- [User Management Guide](user-management.md)
+- [Configuration Reference](configuration-reference.md)
