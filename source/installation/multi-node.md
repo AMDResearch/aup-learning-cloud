@@ -1,517 +1,157 @@
 # Multi-Node Cluster Deployment
 
-This guide provides instructions for deploying AUP Learning Cloud on a multi-node Kubernetes cluster using Ansible. This deployment is suitable for production environments requiring high availability and scalability.
+This guide covers the current Ansible + Helm workflow for deploying AUP Learning Cloud on a multi-node K3s cluster.
 
-## Overview
+Unlike the single-node path, multi-node deployment is not driven by `./auplc-installer install`. The main flow is:
 
-Multi-node deployment provides:
-- **High Availability**: Redundancy across multiple nodes
-- **Scalability**: Distribute workload across cluster
-- **Resource Isolation**: Separate control plane and worker nodes
-- **Production Ready**: Suitable for production environments
-
-## Architecture
-
-A typical multi-node setup consists of:
-- **Control Plane Nodes** (1-3 nodes): Run Kubernetes control plane components
-- **Worker Nodes** (2+ nodes): Run user workloads and JupyterHub services
-- **Storage Node** (optional): Dedicated NFS storage server
+1. build the cluster with Ansible
+2. prepare the multi-node values file
+3. deploy the chart with Helm
 
 ## Prerequisites
 
-### Hardware Requirements
+### Controller / Ansible Host
 
-**Per Node**:
-- AMD Ryzen™ AI Halo Device (or compatible AMD hardware)
-- 32GB+ RAM (64GB recommended for worker nodes)
-- 500GB+ SSD (1TB+ for storage nodes)
-- 1Gbps+ network connectivity
-
-**Recommended Cluster**:
-- 1 control plane node
-- 3+ worker nodes
-- 1 dedicated NFS storage node (optional)
-
-### Software Requirements
-
-**All Nodes**:
-- Ubuntu 24.04.3 LTS
-- SSH access configured
-- Root/sudo privileges
-
-**Control Node** (Ansible runner):
-- Ansible 2.9 or later
+- Ansible available
 - SSH key access to all nodes
-- Python 3.8+
+- ability to connect as `root` or the configured `ansible_user`
 
-### Network Requirements
+### Cluster Nodes
 
-- All nodes must be on the same network or have connectivity
-- Fixed IP addresses or DHCP with MAC reservation
-- Firewall rules configured for Kubernetes ports
+- Ubuntu 24.04
+- consistent hostname resolution across the fleet
+- AMD GPU-capable nodes if you want accelerator-backed resources
 
-## Installation Steps
+Current inventory defaults are defined in `deploy/ansible/inventory.yml`, including the pinned `k3s_version`.
 
-### 1. Prepare Control Node
+## 1. Configure Inventory
 
-Install Ansible on your control machine:
-
-```bash
-# Install Ansible
-sudo apt update
-sudo apt install ansible python3-pip
-
-# Verify installation
-ansible --version
-```
-
-### 2. Configure SSH Access
-
-Set up passwordless SSH access to all nodes:
+Edit the Ansible inventory:
 
 ```bash
-# Generate SSH key (if not already exists)
-ssh-keygen -t rsa -b 4096
-
-# Copy SSH key to all nodes
-ssh-copy-id user@node1
-ssh-copy-id user@node2
-ssh-copy-id user@node3
-# ... for all nodes
-
-# Test SSH access
-ssh user@node1 "hostname"
+cd deploy/ansible
+nano inventory.yml
 ```
 
-### 3. Clone Repository
+Key items to set:
 
-```bash
-git clone https://github.com/AMDResearch/aup-learning-cloud.git
-cd aup-learning-cloud/deploy/ansible
-```
+- server and agent hostnames
+- `ansible_user`
+- cluster token
+- `api_endpoint`
 
-### 4. Configure Inventory
-
-Edit `deploy/ansible/inventory.yml` with your cluster node information. The `server` is the control-plane node (also the Ansible control host); `agent` entries are the worker nodes:
-
-```yaml
----
-k3s_cluster:
-  children:
-    server:
-      hosts:
-        <YOUR-SERVER-HOSTNAME>:
-    agent:
-      hosts:
-        <YOUR-AGENT-HOSTNAME-1>:
-        <YOUR-AGENT-HOSTNAME-2>:
-        <YOUR-AGENT-HOSTNAME-3>:
-
-  vars:
-    ansible_port: 22
-    ansible_user: root
-    k3s_version: v1.32.3+k3s1
-    # Generate a random token:  openssl rand -base64 64
-    token: "changeme!"
-    api_endpoint: "{{ hostvars[groups['server'][0]]['ansible_host'] | default(groups['server'][0]) }}"
-```
-
-> **Important**: All nodes must have consistent `/etc/hosts` entries so they can resolve each other by hostname. The server node must also have root SSH key access to all agent nodes. See `deploy/scripts/setup_ssh_root_access.sh` for a helper script.
-
-### 5. Run Base Setup
-
-Install basic requirements on all nodes:
+## 2. Build The Cluster
 
 ```bash
 cd deploy/ansible
 
-# Install base packages and configure hosts
+# Base OS / package preparation
 sudo ansible-playbook playbooks/pb-base.yml
 
 # Deploy K3s cluster
 sudo ansible-playbook playbooks/pb-k3s-site.yml
-```
 
-### 6. Install GPU / NPU Drivers
-
-Install ROCm on all GPU nodes:
-
-```bash
+# Install ROCm on accelerator nodes
 sudo ansible-playbook playbooks/pb-rocm.yml
 ```
 
-Verify GPU detection:
+Useful related playbooks:
 
 ```bash
-rocminfo
-rocm-smi
+# Upgrade cluster
+sudo ansible-playbook playbooks/pb-k3s-upgrade.yml
+
+# Reset cluster
+sudo ansible-playbook playbooks/pb-k3s-reset.yml
 ```
 
-**Official documentation**: https://rocm.docs.amd.com/projects/install-on-linux/en/latest/install/quick-start.html
+## 3. GPU Device Plugin And Labels
 
-### 7. Install Helm and K9s
-
-```bash
-# Install Helm
-wget https://get.helm.sh/helm-v3.17.2-linux-amd64.tar.gz -O /tmp/helm-linux-amd64.tar.gz
-cd /tmp && tar -zxvf helm-linux-amd64.tar.gz
-sudo mv /tmp/linux-amd64/helm /usr/local/bin/helm
-rm /tmp/helm-linux-amd64.tar.gz
-
-# Install K9s (optional but recommended)
-wget https://github.com/derailed/k9s/releases/latest/download/k9s_linux_amd64.deb
-sudo apt install ./k9s_linux_amd64.deb
-rm k9s_linux_amd64.deb
-```
-
-### 8. Deploy GPU Device Plugin and Label Nodes
-
-Deploy the AMD GPU Kubernetes device plugin:
+For manual cluster setup, deploy the ROCm device plugin and node labeller:
 
 ```bash
 kubectl create -f https://raw.githubusercontent.com/ROCm/k8s-device-plugin/master/k8s-ds-amdgpu-dp.yaml
+kubectl create -f https://raw.githubusercontent.com/ROCm/k8s-device-plugin/master/k8s-ds-amdgpu-labeller.yaml
 ```
 
-Verify GPU is detected:
+Verify labels:
 
 ```bash
 kubectl describe node <node-name> | grep amd.com/gpu
 ```
 
-Label each node based on GPU architecture:
+### About `node-type` Labels
+
+The single-node installer now relies on the ROCm labeller and generated selectors such as `amd.com/gpu.product-name`.
+
+For multi-node deployments, the sample file `runtime/values-multi-nodes.yaml.example` still uses legacy `node-type` labels for administrator-controlled placement. If you use that sample file unchanged, you must label nodes manually:
 
 ```bash
-# Label nodes by GPU type
-kubectl label nodes <NODE_NAME> node-type=<TYPE>
+kubectl label nodes <NODE_NAME> node-type=strix-halo
 ```
 
-| Node Group | node-type Label | Hardware Description |
-| ---------- | --------------- | -------------------- |
-| phx        | `phx`           | Phoenix (AMD 7940HS / 7640HS) |
-| dgpu       | `dgpu`          | Discrete GPU (Radeon 7900XTX, 9070XT, W9700) |
-| strix      | `strix`         | Strix (AMD AI 370 / 350) |
-| strix-halo | `strix-halo`    | Strix-Halo (AMD AI MAX 395) |
+That legacy label model is a multi-node sample-file convention, not the canonical single-node behavior.
 
-Verify labels:
+## 4. Storage
 
-```bash
-kubectl get nodes --show-labels | grep node-type
-```
+Multi-node deployments usually need a shared storage class. The example values file assumes `nfs-client`.
 
-### 9. Configure NFS Storage
-
-#### Set up the NFS Server
-
-On the controller node (or a dedicated storage node):
-
-```bash
-# Install NFS server
-sudo apt install nfs-kernel-server
-
-# Create NFS share
-sudo mkdir -p /nfs
-sudo chown -R nobody:nogroup /nfs
-sudo chmod 777 /nfs
-
-# Configure exports
-echo "/nfs <Your-Subnet/24>(rw,sync,no_subtree_check,no_root_squash,insecure)" | sudo tee -a /etc/exports
-
-# Restart NFS server
-sudo systemctl restart nfs-kernel-server
-```
-
-Install NFS client on all agent nodes (the `pb-base.yml` playbook does this automatically):
-
-```bash
-sudo apt install nfs-common
-```
-
-#### Deploy NFS Provisioner
+If you use the included NFS provisioner example:
 
 ```bash
 helm repo add nfs-subdir-external-provisioner https://kubernetes-sigs.github.io/nfs-subdir-external-provisioner/
 helm repo update
 
 helm install nfs-subdir-external-provisioner nfs-subdir-external-provisioner/nfs-subdir-external-provisioner \
-    --namespace nfs-provisioner \
-    --create-namespace \
-    -f deploy/k8s/nfs-provisioner/values.yaml
+  --namespace nfs-provisioner \
+  --create-namespace \
+  -f deploy/k8s/nfs-provisioner/values.yaml
 ```
 
-Set as default StorageClass:
+## 5. Prepare The Multi-Node Values File
 
-```bash
-kubectl patch storageclass nfs-client -p '{"metadata": {"annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}'
-kubectl get storageclass
-```
-
-### 10. Build and Import Images
-
-**Option A: Use a container registry** (recommended for production):
-
-```bash
-# Build images from repo root
-cd /path/to/aup-learning-cloud
-sudo ./auplc-installer img build
-
-# Push to registry
-docker push ghcr.io/amdresearch/auplc-hub:latest
-docker push ghcr.io/amdresearch/auplc-cv:latest
-# ... for all images
-```
-
-**Option B: Import images directly to nodes** (air-gapped environments):
-
-```bash
-# Save images to tar files
-docker save ghcr.io/amdresearch/auplc-dl:latest -o auplc-dl.tar
-
-# Copy and import to cluster nodes (K3s uses containerd)
-ansible workers -m copy -a "src=auplc-dl.tar dest=/tmp/"
-ansible workers -m shell -a "k3s ctr images import /tmp/auplc-dl.tar"
-```
-
-### 11. Configure JupyterHub
-
-The multi-node template is a **standalone** configuration file that already includes all required settings (accelerators, courses, teams, storage, network, etc.). Copy it and customize for your environment — no need to layer it on top of `values.yaml`:
+The repository includes a standalone example file for multi-node deployments:
 
 ```bash
 cd runtime
-
-# Copy multi-node configuration template
 cp values-multi-nodes.yaml.example values-multi-nodes.yaml
 nano values-multi-nodes.yaml
 ```
 
-Key settings to customize:
-- **Storage class**: `nfs-client` (already set for multi-node)
-- **Ingress**: Configure your domain in the `ingress` section
-- **Authentication**: Fill in GitHub App credentials in `hub.config.GitHubOAuthenticator`
-- **Images**: Update `custom.resources.images` with your registry/org
-- **Admin**: Set `admin_users` and `githubOrgName`
+Review at least these sections:
 
-See [Configuration Reference](../jupyterhub/configuration-reference.md) for all available options.
+- `custom.authMode`
+- `custom.githubOrgName`
+- `custom.accelerators`
+- `custom.resources.images`
+- `custom.resources.requirements`
+- `custom.teams.mapping`
+- `hub.config.GitHubOAuthenticator`
+- `hub.db.pvc.storageClassName`
+- `singleuser.storage.dynamic.storageClass`
+- `proxy.service`
+- `ingress`
 
-### 12. Deploy JupyterHub
+## 6. Deploy JupyterHub
 
 ```bash
 cd runtime
-
-# Deploy using the multi-node config directly
 helm upgrade --install jupyterhub ./chart \
   -n jupyterhub --create-namespace \
   -f values-multi-nodes.yaml
 ```
 
-### 13. Verify Deployment
+## 7. Verify Deployment
 
 ```bash
-# Get kubeconfig from control plane node
-scp user@master1:~/.kube/config ~/.kube/config
-
-# Check nodes
 kubectl get nodes
-
-# Check all pods
 kubectl get pods -n jupyterhub
-
-# Check storage
 kubectl get pvc -n jupyterhub
-kubectl get storageclass
-```
-
-## Access JupyterHub
-
-Configure ingress for domain-based access:
-
-```bash
-# Check ingress
 kubectl get ingress -n jupyterhub
-
-# Access via domain
-https://your-domain.com
 ```
 
-## High Availability Configuration
+## Notes On Scope
 
-For production high availability:
-
-1. **Multiple Control Plane Nodes** (3 recommended):
-   - Edit inventory to include multiple control plane nodes
-   - K3s will automatically configure HA etcd
-
-2. **Load Balancer**:
-   - Use external load balancer for control plane
-   - Configure in K3s server installation
-
-3. **Multiple Hub Replicas**:
-   ```yaml
-   hub:
-     replicas: 2
-     db:
-       type: postgres  # Use external database
-   ```
-
-## Monitoring and Maintenance
-
-### Check Cluster Health
-
-```bash
-# Node status
-kubectl get nodes
-
-# Pod status across namespaces
-kubectl get pods -A
-
-# Resource usage
-kubectl top nodes
-kubectl top pods -n jupyterhub
-```
-
-### Upgrade Cluster
-
-```bash
-cd deploy/ansible
-
-# Upgrade K3s
-ansible-playbook playbooks/pb-k3s-upgrade.yml
-
-# Upgrade JupyterHub (from repo root)
-cd /path/to/aup-learning-cloud
-bash scripts/helm_upgrade.bash
-```
-
-### Backup and Restore
-
-Back up the hub database PVC and NFS storage (if used) before major upgrades. Backup and monitoring guides will be added in a future release.
-
-## Troubleshooting
-
-### kubectl permission denied error
-
-If you encounter errors like:
-```
-error: error loading config file "/etc/rancher/k3s/k3s.yaml": open /etc/rancher/k3s/k3s.yaml: permission denied
-```
-
-**Solution**:
-Add the following to your `inventory.yml` before running the playbook:
-```yaml
-k3s_cluster:
-  vars:
-    extra_server_args: "--write-kubeconfig-mode=644"
-```
-
-Or manually copy the config:
-```bash
-mkdir -p ~/.kube
-sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
-sudo chown $(id -u):$(id -g) ~/.kube/config
-```
-
-See [K3s Cluster Access](https://docs.k3s.io/cluster-access) for official documentation.
-
-### Helm command not found
-
-If `helm` command is not found, verify the installation:
-```bash
-# Check if helm is in PATH
-which helm
-
-# If not, ensure /usr/local/bin is in PATH
-echo $PATH
-
-# Reinstall helm if needed (see Step 2 above)
-```
-
-### Ansible halts at "Enable and check K3s service"
-
-Check if the K3s agent service is running on the problematic node:
-
-```bash
-ssh <agent_node>
-sudo systemctl status k3s-agent.service
-```
-
-If the service is running but shows connection errors to the server, verify that `/etc/hosts` on the agent node resolves the server hostname correctly.
-
-### Node Not Joining Cluster
-
-```bash
-# Check K3s service on problem node
-ssh <node> "systemctl status k3s-agent"
-
-# Check K3s logs
-ssh <node> "journalctl -u k3s-agent -n 100"
-
-# Verify network connectivity
-ssh <node> "ping <server-hostname>"
-```
-
-### Storage Issues
-
-```bash
-# Check NFS mount
-kubectl exec -it <pod-name> -n jupyterhub -- df -h
-
-# Check NFS provisioner logs
-kubectl logs -n kube-system -l app=nfs-provisioner
-```
-
-### Networking Issues
-
-```bash
-# Check CNI pods
-kubectl get pods -n kube-system
-
-# Test pod-to-pod networking
-kubectl run test-pod --image=busybox --rm -it -- ping <pod-ip>
-```
-
-## Scaling
-
-### Add Worker Nodes
-
-1. Add new hostnames to the `agent` section in `deploy/ansible/inventory.yml`
-2. Run the K3s playbook:
-   ```bash
-   cd deploy/ansible
-   sudo ansible-playbook playbooks/pb-k3s-site.yml
-   ```
-
-### Remove Worker Nodes
-
-```bash
-# Drain node
-kubectl drain <node-name> --ignore-daemonsets --delete-emptydir-data
-
-# Delete from cluster
-kubectl delete node <node-name>
-
-# Uninstall K3s on the node
-ssh <node-name> "/usr/local/bin/k3s-agent-uninstall.sh"
-```
-
-### Reset Cluster
-
-To reset the entire K3s cluster (all data and config will be removed):
-
-```bash
-cd deploy/ansible
-sudo ansible-playbook playbooks/pb-k3s-reset.yml
-```
-
-To reset a single node only:
-
-```bash
-sudo ansible-playbook playbooks/pb-k3s-reset.yml --limit <node_name>
-```
-
-After resetting, remove the `~/.kube` directory.
-
-## Next Steps
-
-- [Configure JupyterHub](../jupyterhub/index.md)
-- [Set up Authentication](../jupyterhub/authentication-guide.md)
-- [Manage Users](../jupyterhub/user-management.md)
-- [Configure Quotas](../jupyterhub/quota-system.md)
+- The sample multi-node values file is a starting point, not a promise that every advanced topology is turnkey.
+- High-availability choices such as external databases, multiple Hub replicas, or production ingress/TLS should be treated as explicit operator decisions on top of the base chart deployment.
+- If you want the simplest local install, use the single-node installer flow instead of this guide.

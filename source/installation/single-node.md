@@ -1,269 +1,191 @@
 # Single-Node Deployment
 
-This guide describes single-node deployment of AUP Learning Cloud using the **auplc-installer** script on the **develop** branch. This deployment is suitable for development, testing, and demo environments.
+This guide covers the current single-node workflow driven by `./auplc-installer`.
 
 :::{seealso}
-For the shortest path, see the [Quick Start](quick-start.md) guide.
+For the shortest path, see [Quick Start](quick-start.md).
 :::
+
+## What The Installer Does
+
+`./auplc-installer install` is the canonical workstation deployment path. It can:
+
+- detect supported AMD GPU families and SKUs
+- install K3s and supporting tools
+- deploy the ROCm GPU device plugin and node labeller
+- generate a local values overlay
+- build or pull required images
+- deploy the Hub runtime from `runtime/chart`
 
 ## Prerequisites
 
-### Hardware Requirements
-
-- **Device**: Supported AMD GPU or APU — select your device in the Installation section below. Examples:
-  - **Radeon PRO**: AI PRO R9700/R9600D
-  - **Radeon**: RX 9070/9060 series
-  - **Ryzen AI**: Max+ PRO 395, Max PRO 390/385/380, Max+ 395, Max 390/385, 9 HX 375/370, 9 365
-- **Memory**: 32GB+ RAM (64GB recommended for production-like testing)
-- **Storage**: 500GB+ SSD
-- **Network**: Stable internet connection for downloading images
-
-### Software Requirements
-
-- **Operating System**: Ubuntu 24.04.3 LTS
-- **Docker**: Version 20.10 or later (required when using default Docker-as-runtime mode)
-- **Root/Sudo Access**: Required to run the installer
-
-## Installation with auplc-installer
-
-On the **develop** branch, single-node installation is done with the **auplc-installer** script at the repository root.
-
-### 1. Package dependency
-
-Install build tools (required for building container images):
+- Ubuntu 24.04
+- sudo access
+- Docker installed if you are using the default Docker-backed runtime path
+- `build-essential`
 
 ```bash
 sudo apt install build-essential
 ```
 
-### 2. Install Docker
-
-By default, Docker is used as the K3s container runtime (backend).
-
-:::{dropdown} Install Docker — skip if already installed
-:animate: fade-in
-
-If Docker is already installed and your user is in the `docker` group, skip this section.
+Optional Docker installation:
 
 ```bash
-# Install Docker
 curl -fsSL https://get.docker.com | sh
-
-# Add current user to docker group
 sudo usermod -aG docker $USER
-
-# Apply group changes (or logout/login)
 newgrp docker
-
-# Verify installation
 docker --version
 ```
 
-See [Docker Post-installation Steps](https://docs.docker.com/engine/install/linux-postinstall/) for detailed configuration.
-
-:::
-
-### 3. Clone the repository and run the installer
-
-Select your AMD device family and GPU below. The install commands update to use the correct **GPU_TYPE** for your selection.
-
-```{eval-rst}
-.. include:: includes/selector-quickstart-gpu.rst
-```
-
-After installation completes, open <http://localhost:30890> in your browser. The default uses **auto-login** — no credentials required.
-
-### 4. auplc-installer commands
-
-| Command | Description |
-|---------|-------------|
-| `install` | Full installation (K3s, tools, GPU plugin, images, JupyterHub) |
-| `uninstall` | Remove K3s and all components |
-| `install-tools` | Install Helm and K9s only |
-| `rt install` | Deploy JupyterHub runtime only |
-| `rt upgrade` | Upgrade JupyterHub (e.g. after editing `runtime/values.yaml`) |
-| `rt remove` | Remove JupyterHub runtime only |
-| `rt reinstall` | Remove and reinstall JupyterHub (e.g. after image changes) |
-| `img build` | Build all custom container images |
-| `img build [target...]` | Build specific images (e.g. `img build hub`, `img build hub cv`) |
-| `img pull` | Pull external images for offline use |
-
-Legacy long-form commands are still supported: `install-runtime`, `remove-runtime`, `upgrade-runtime`, `build-images`, `pull-images`.
-
-**Examples:**
+## Standard Install
 
 ```bash
-# Upgrade JupyterHub after changing runtime/values.yaml
+git clone https://github.com/AMDResearch/aup-learning-cloud.git
+cd aup-learning-cloud
+sudo ./auplc-installer install
+```
+
+After installation, access the Hub at <http://localhost:30890>.
+
+## Important Defaults In This Repository
+
+The current checked-in `runtime/values.yaml` is oriented to simple local deployment:
+
+- `custom.authMode: auto-login`
+- `custom.adminUser.enabled: false`
+- `hub.db.pvc.storageClassName: local-path`
+- `singleuser.storage.dynamic.storageClass: local-path`
+- `proxy.service.type: NodePort`
+- `proxy.service.nodePorts.http: 30890`
+- `ingress.enabled: false`
+- `prePuller.hook.enabled: false`
+- `prePuller.continuous.enabled: false`
+
+That means NFS, ingress, TLS, and auto-created admin credentials are optional configuration choices, not default behavior.
+
+## Installer Command Matrix
+
+### Core Lifecycle
+
+```bash
+sudo ./auplc-installer install
+sudo ./auplc-installer uninstall
+sudo ./auplc-installer detect-gpu
+sudo ./auplc-installer install-tools
+```
+
+### Runtime Lifecycle
+
+```bash
+sudo ./auplc-installer rt install
 sudo ./auplc-installer rt upgrade
-
-# Rebuild images and reinstall runtime after Dockerfile changes
-sudo ./auplc-installer img build
+sudo ./auplc-installer rt remove
 sudo ./auplc-installer rt reinstall
-
-# Show all options
-./auplc-installer help
 ```
 
-### 5. Runtime and mirror configuration
-
-The installer supports `--flag=value` options (or equivalent environment variables):
-
-| Flag | Env variable | Default | Description |
-|---|---|---|---|
-| `--gpu=TYPE` | `GPU_TYPE` | auto-detect | GPU type: `phx`, `strix`, `strix-halo`, `rdna4` |
-| `--docker=0\|1` | `K3S_USE_DOCKER` | `1` | Container runtime: `1` = Docker, `0` = containerd |
-| `--mirror=HOST` | `MIRROR_PREFIX` | — | Registry mirror host (e.g. `mirror.example.com`) |
-| `--mirror-pip=URL` | `MIRROR_PIP` | — | PyPI mirror URL |
-| `--mirror-npm=URL` | `MIRROR_NPM` | — | npm registry URL |
-
-Examples:
+### Image Lifecycle
 
 ```bash
-# Specify GPU type explicitly
+sudo ./auplc-installer img build
+sudo ./auplc-installer img build hub cv
+sudo ./auplc-installer img pull
+```
+
+### Development Workflow
+
+```bash
+sudo ./auplc-installer dev
+sudo ./auplc-installer dev deploy
+sudo ./auplc-installer dev upgrade
+sudo ./auplc-installer dev reinstall
+```
+
+## Common Install Flags
+
+```bash
+# Pull prebuilt custom images instead of building them locally
+sudo ./auplc-installer install --pull
+
+# Explicitly set GPU family / target
 sudo ./auplc-installer install --gpu=strix-halo
 
-# Use containerd runtime instead of Docker
+# Use containerd mode instead of Docker-backed mode
 sudo ./auplc-installer install --docker=0
 
-# Use registry and PyPI mirrors
-sudo ./auplc-installer install --mirror=mirror.example.com --mirror-pip=https://pypi.tuna.tsinghua.edu.cn/simple
-
-# Flags can be combined and placed anywhere
-sudo ./auplc-installer install --gpu=phx --docker=0 --mirror=mirror.example.com
+# Use registry / package mirrors
+sudo ./auplc-installer install \
+  --mirror=mirror.example.com \
+  --mirror-pip=https://pypi.example.com/simple \
+  --mirror-npm=https://registry.npmmirror.com
 ```
 
-**Docker mode** (default, `--docker=1`): images built with `make hub` are immediately visible to K3s after `rt upgrade`, no export needed. Requires Docker installed on the host.
+Supported install-time flags map to these environment variables:
 
-**containerd mode** (`--docker=0`): images are exported to K3s image directory for offline/portable deployments.
+| Flag | Environment Variable | Meaning |
+|------|----------------------|---------|
+| `--gpu=TYPE` | `GPU_TYPE` | Force GPU type / family |
+| `--docker=0\|1` | `K3S_USE_DOCKER` | Choose Docker or containerd path |
+| `--mirror=HOST` | `MIRROR_PREFIX` | Container registry mirror prefix |
+| `--mirror-pip=URL` | `MIRROR_PIP` | Python package mirror |
+| `--mirror-npm=URL` | `MIRROR_NPM` | npm registry mirror |
 
-### 6. Configure runtime (optional)
+## Offline And Portable Workflows
 
-To customize auth, images, storage, network, and other options, edit **`runtime/values.yaml`**. For all available settings and recommended workflow, see the [Configuration Reference: runtime/values.yaml](../jupyterhub/configuration-reference.md).
+### Containerd / Portable-Oriented Local Install
 
-After editing, run:
+```bash
+sudo ./auplc-installer install --docker=0
+```
+
+This path exports images into K3s image storage and is better suited for portable or partially disconnected use than the default Docker-backed path.
+
+### Offline Bundle Workflow
+
+Create an offline bundle on a connected machine:
+
+```bash
+./auplc-installer pack
+
+# Or build bundle from local images/artifacts
+./auplc-installer pack --local
+```
+
+Transfer the bundle to the target machine, unpack it, then run:
+
+```bash
+sudo ./auplc-installer install
+```
+
+The installer auto-detects the bundle via `manifest.json` and switches into offline mode.
+
+## Local Configuration Files
+
+- `runtime/values.yaml` - repository default deployment values
+- `runtime/values.local.yaml` - installer-generated local overlay
+
+The installer-generated overlay captures detected accelerator selectors and image tags for the local machine. Prefer editing `runtime/values.yaml` for intentional site configuration, then redeploy with:
 
 ```bash
 sudo ./auplc-installer rt upgrade
 ```
 
-### 7. Verify deployment
+## Verification
 
 ```bash
-# Check all pods are running
 kubectl get pods -n jupyterhub
-
-# Check services
 kubectl get svc -n jupyterhub
+kubectl get pvc -n jupyterhub
+```
 
-# Get admin credentials (if auto-admin is enabled)
+If you explicitly enabled admin bootstrap:
+
+```bash
 kubectl -n jupyterhub get secret jupyterhub-admin-credentials \
-  -o go-template='{{index .data "admin-password" | base64decode}}'
+  -o jsonpath='{.data.admin-password}' | base64 -d && echo
 ```
 
-## Access JupyterHub
+## Troubleshooting Notes
 
-- **NodePort (default)**: <http://localhost:30890> or <http://node-ip:30890>
-- **Domain**: <https://your-domain.com> (if configured)
-
-## Post-Installation
-
-### Configure Authentication
-
-See [Authentication Guide](../jupyterhub/authentication-guide.md) to set up:
-- GitHub OAuth
-- Native Authenticator
-- User management
-
-### Configure Resource Quotas
-
-See [User Quota System](../jupyterhub/quota-system.md) to configure resource limits and tracking.
-
-### Manage Users
-
-See [User Management Guide](../jupyterhub/user-management.md) for batch user operations.
-
-## Troubleshooting
-
-### Pods Not Starting
-
-```bash
-# Check pod status
-kubectl describe pod <pod-name> -n jupyterhub
-
-# Check logs
-kubectl logs <pod-name> -n jupyterhub
-```
-
-### Image Pull Errors
-
-```bash
-# Check events
-kubectl get events -n jupyterhub
-
-# Verify images are available
-docker images | grep ghcr.io/amdresearch
-```
-
-### Connection Issues
-
-```bash
-# Check service status
-kubectl get svc -n jupyterhub
-
-# Check ingress (if using domain)
-kubectl get ingress -n jupyterhub
-```
-
-## Upgrading
-
-To upgrade JupyterHub after editing `runtime/values.yaml`:
-
-```bash
-sudo ./auplc-installer rt upgrade
-```
-
-To rebuild container images after changing Dockerfiles, then reinstall runtime:
-
-```bash
-sudo ./auplc-installer img build
-sudo ./auplc-installer rt reinstall
-```
-
-## Offline / Portable Operation
-
-The installer automatically configures the system for offline and portable operation. When you run `sudo ./auplc-installer install`, it:
-
-1. **Creates a dummy network interface** (`dummy0`) with a stable IP address (`10.255.255.1`)
-2. **Binds K3s to the dummy interface** using `--node-ip` and `--flannel-iface`
-3. **Pre-pulls all required container images** to local storage
-4. **Configures K3s to use local images** from `/var/lib/rancher/k3s/agent/images/`
-
-This ensures the cluster remains fully functional even when:
-- External network is disconnected (network cable unplugged)
-- WiFi network changes (connecting to different access points)
-- No network is available at all
-
-**How it works**: K3s is bound to a stable dummy interface IP instead of the physical network interface. This means K3s doesn't care about external network changes -- it always uses the same internal IP for cluster communication.
-
-**Reference**: [K3s Air-Gap Installation](https://docs.k3s.io/installation/airgap)
-
-## Uninstalling
-
-To remove JupyterHub runtime only (keeps K3s and other components):
-
-```bash
-sudo ./auplc-installer rt remove
-```
-
-To remove everything (K3s, JupyterHub, and installer-managed resources):
-
-```bash
-sudo ./auplc-installer uninstall
-```
-
-## Next Steps
-
-- [Configure JupyterHub](../jupyterhub/index.md)
-- [Set up Authentication](../jupyterhub/authentication-guide.md)
-- [Manage Users](../jupyterhub/user-management.md)
-- [Configure Quotas](../jupyterhub/quota-system.md)
+- If you changed `runtime/values.yaml`, use `sudo ./auplc-installer rt upgrade`.
+- If you changed container images or Dockerfiles, use `sudo ./auplc-installer img build` followed by `sudo ./auplc-installer rt reinstall`.
+- If you need cluster-specific storage, ingress, or TLS behavior, those are configuration changes on top of the default single-node setup, not built-in assumptions.
