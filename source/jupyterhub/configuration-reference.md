@@ -106,7 +106,7 @@ Supported fields:
 - `env`
 - `quotaRate`
 
-For current single-node installs, selectors are typically derived from ROCm labeller keys such as `amd.com/gpu.product-name`, not legacy `node-type` labels.
+Current checked-in values use ROCm labeller keys such as `amd.com/gpu.product-name` rather than a separate legacy `node-type` label model.
 
 ## 6. `custom.resources`
 
@@ -169,18 +169,16 @@ Supported metadata fields:
 - `env`
 - `acceleratorOverrides`
 
-`acceleratorOverrides` can override image and env per accelerator key:
+`acceleratorOverrides` can override images per accelerator key, and may also override env when a deployment needs that level of control:
 
 ```yaml
 custom:
   resources:
-    metadata:
-      Course-CV:
-        acceleratorOverrides:
-          r9700:
-            image: "ghcr.io/example/auplc-cv:latest-gfx120x"
-            env:
-              HSA_OVERRIDE_GFX_VERSION: ""
+      metadata:
+        Course-CV:
+          acceleratorOverrides:
+            r9700:
+              image: "ghcr.io/your-org/auplc-cv:<tag-for-r9700>"
 ```
 
 ## 7. `custom.teams.mapping`

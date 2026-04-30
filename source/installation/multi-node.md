@@ -80,17 +80,11 @@ Verify labels:
 kubectl describe node <node-name> | grep amd.com/gpu
 ```
 
-### About `node-type` Labels
+### About Accelerator Selectors
 
-The single-node installer now relies on the ROCm labeller and generated selectors such as `amd.com/gpu.product-name`.
+The sample file `runtime/values-multi-nodes.yaml.example` now follows `runtime/values.yaml` and uses ROCm labeller keys such as `amd.com/gpu.product-name` directly.
 
-For multi-node deployments, the sample file `runtime/values-multi-nodes.yaml.example` still uses legacy `node-type` labels for administrator-controlled placement. If you use that sample file unchanged, you must label nodes manually:
-
-```bash
-kubectl label nodes <NODE_NAME> node-type=strix-halo
-```
-
-That legacy label model is a multi-node sample-file convention, not the canonical single-node behavior.
+That means multi-node deployments should rely on the device plugin plus labeller output, not on a separate manual `node-type` labelling convention.
 
 ## 4. Storage
 
