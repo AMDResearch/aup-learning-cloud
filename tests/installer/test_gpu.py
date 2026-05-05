@@ -105,9 +105,9 @@ class DetectAndConfigureGpuTests(unittest.TestCase):
             patch.object(gpu, "detect_driver_gpu_inventory", return_value=[]),
             patch.object(gpu, "detect_gpu_product_names", return_value=[]),
             patch.object(gpu, "detect_gpu_gfx_family", return_value=None),
+            self.assertRaises(InstallerError),
         ):
-            with self.assertRaises(InstallerError):
-                gpu.detect_and_configure_gpu(cfg)
+            gpu.detect_and_configure_gpu(cfg)
 
     def test_manifest_pinned_target_survives_missing_host_detection(self) -> None:
         cfg = GpuConfig(accel_key="strix-halo", gpu_target="gfx1151", accel_env="")

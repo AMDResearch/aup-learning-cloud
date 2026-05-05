@@ -422,9 +422,8 @@ def _sku_entry_from_row(
 def _row_for_detected_gpu(product_name: str, detected_gfx: str | None) -> SkuRow:
     if product_name:
         return sku_for_product_name(product_name)
-    if detected_gfx:
-        if row := _GFX_FALLBACK.get(detected_gfx):
-            return row
+    if detected_gfx and (row := _GFX_FALLBACK.get(detected_gfx)):
+        return row
     return ("amd-gpu", detected_gfx or "gfx120x", "", 4, "AMD GPU")
 
 
