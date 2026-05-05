@@ -607,10 +607,7 @@ def detect_and_configure_gpu(cfg: GpuConfig, gpu_type_override: str = "") -> Non
                     if row := _GFX_FALLBACK.get(key):
                         _, _, _, rate, row_display = row
                         display = row_display or display
-                    log(
-                        "GPU not detected; using manifest-pinned GPU config "
-                        f"({key}/{pinned_target})."
-                    )
+                    log(f"GPU not detected; using manifest-pinned GPU config ({key}/{pinned_target}).")
                     cfg.append(
                         SkuEntry(
                             accel_key=key,
