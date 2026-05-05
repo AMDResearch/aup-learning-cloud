@@ -39,6 +39,10 @@ _RESOURCE_IMAGE_BASE: dict[str, str] = {
 GPU_RESOURCE_KEYS: tuple[str, ...] = tuple(_RESOURCE_IMAGE_BASE.keys())
 
 
+def _yaml_string(value: str) -> str:
+    return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
 def emit_overlay(
     cfg: GpuConfig,
     *,
@@ -69,40 +73,48 @@ def emit_overlay(
     # --- accelerators ---
     any_accel_emitted = False
     for sku in cfg.skus:
+        display_text = sku.display_name or (sku.product_name.replace("_", " ") if sku.product_name else "")
+        if not display_text:
+            display_text = f"AMD GPU ({sku.accel_key})"
+        description_text = sku.description or f"Auto-detected ({sku.gpu_target})"
+
         if is_curated_sku(sku.accel_key):
             # Only emit an override when there's a non-trivial reason:
             #   - product name was detected (pin nodeSelector to the real SKU)
             #   - HSA_OVERRIDE_GFX_VERSION applies (phx family)
-            if not sku.product_name and not sku.accel_env:
+            #   - driver metadata was detected (displayName/description)
+            if not sku.product_name and not sku.accel_env and not sku.description:
                 continue
             if not any_accel_emitted:
                 buf.write("  accelerators:\n")
                 any_accel_emitted = True
             buf.write(f"    {sku.accel_key}:\n")
+            if sku.description:
+                buf.write(f'      displayName: "{_yaml_string(display_text)}"\n')
+                buf.write(f'      description: "{_yaml_string(description_text)}"\n')
             if sku.product_name:
                 buf.write("      nodeSelector:\n")
-                buf.write(f'        amd.com/gpu.product-name: "{sku.product_name}"\n')
+                buf.write(f'        amd.com/gpu.product-name: "{_yaml_string(sku.product_name)}"\n')
             if sku.accel_env:
                 buf.write("      env:\n")
-                buf.write(f'        HSA_OVERRIDE_GFX_VERSION: "{sku.accel_env}"\n')
+                buf.write(f'        HSA_OVERRIDE_GFX_VERSION: "{_yaml_string(sku.accel_env)}"\n')
+            if sku.description:
+                buf.write(f"      quotaRate: {sku.quota_rate}\n")
         else:
             if not any_accel_emitted:
                 buf.write("  accelerators:\n")
                 any_accel_emitted = True
-            display_text = sku.display_name or (sku.product_name.replace("_", " ") if sku.product_name else "")
-            if not display_text:
-                display_text = f"AMD GPU ({sku.accel_key})"
             selector_product = sku.product_name or sku.accel_key
             buf.write(f"    # SKU '{sku.accel_key}' is not curated in values.yaml; stanza injected by installer.\n")
             buf.write("    # For production / multi-node deployments, copy this block into values.yaml.\n")
             buf.write(f"    {sku.accel_key}:\n")
-            buf.write(f'      displayName: "{display_text}"\n')
-            buf.write(f'      description: "Auto-detected ({sku.gpu_target})"\n')
+            buf.write(f'      displayName: "{_yaml_string(display_text)}"\n')
+            buf.write(f'      description: "{_yaml_string(description_text)}"\n')
             buf.write("      nodeSelector:\n")
-            buf.write(f'        amd.com/gpu.product-name: "{selector_product}"\n')
+            buf.write(f'        amd.com/gpu.product-name: "{_yaml_string(selector_product)}"\n')
             if sku.accel_env:
                 buf.write("      env:\n")
-                buf.write(f'        HSA_OVERRIDE_GFX_VERSION: "{sku.accel_env}"\n')
+                buf.write(f'        HSA_OVERRIDE_GFX_VERSION: "{_yaml_string(sku.accel_env)}"\n')
             else:
                 buf.write("      env: {}\n")
             buf.write(f"      quotaRate: {sku.quota_rate}\n")

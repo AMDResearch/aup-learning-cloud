@@ -81,6 +81,25 @@ class OverlayDefaultSelectionTests(unittest.TestCase):
             "AMD_Radeon_8060S_Graphics",
         )
 
+    def test_curated_sku_with_driver_metadata_emits_display_description(self) -> None:
+        cfg = GpuConfig()
+        cfg.append(
+            SkuEntry(
+                accel_key="strix-halo",
+                product_name="",
+                gpu_target="gfx1151",
+                accel_env="",
+                quota_rate=3,
+                display_name="AMD Radeon 8060S (Strix Halo iGPU)",
+                description="gfx1151 | VRAM 64 GiB | Visible VRAM 64 GiB | GTT 31 GiB",
+            )
+        )
+        _, parsed = _render(cfg, courses=CourseSelection.default())
+        accel = parsed["custom"]["accelerators"]["strix-halo"]
+        self.assertEqual(accel["displayName"], "AMD Radeon 8060S (Strix Halo iGPU)")
+        self.assertEqual(accel["description"], "gfx1151 | VRAM 64 GiB | Visible VRAM 64 GiB | GTT 31 GiB")
+        self.assertEqual(accel["quotaRate"], 3)
+
 
 class OverlayBasicSelectionTests(unittest.TestCase):
     def test_basic_emits_filtered_teams_mapping(self) -> None:
@@ -152,10 +171,28 @@ class OverlayUncuratedSkuTests(unittest.TestCase):
         self.assertEqual(accel["quotaRate"], 4)
         self.assertIn("displayName", accel)
         self.assertIn("description", accel)
+        self.assertEqual(accel["description"], "Auto-detected (gfx120x)")
         self.assertEqual(
             accel["nodeSelector"]["amd.com/gpu.product-name"],
             "AMD_Some_Future_GPU",
         )
+
+    def test_uncurated_sku_uses_live_driver_description_when_present(self) -> None:
+        cfg = GpuConfig()
+        cfg.append(
+            SkuEntry(
+                accel_key="amd-future",
+                product_name="AMD_Future_GPU",
+                gpu_target="gfx120x",
+                accel_env="",
+                quota_rate=4,
+                display_name="AMD Future GPU",
+                description="gfx1201 | VRAM 48 GiB | GTT 64 GiB",
+            )
+        )
+        _, parsed = _render(cfg, courses=CourseSelection.default())
+        accel = parsed["custom"]["accelerators"]["amd-future"]
+        self.assertEqual(accel["description"], "gfx1201 | VRAM 48 GiB | GTT 64 GiB")
 
 
 class OverlayMixedTargetsTests(unittest.TestCase):

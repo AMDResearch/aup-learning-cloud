@@ -3,15 +3,14 @@
 
 """AMD GPU detection and SKU resolution.
 
-Mirrors the bash version's behavior bit-for-bit:
-  1. Try ``rocminfo`` for marketing names of GPU agents (filtered by
+The installer combines live AMDGPU driver inventory with ROCm/KFD fallbacks:
+  1. Read current driver metadata from ``/sys/class/drm/card*/device``.
+  2. Try ``rocminfo`` for marketing names of GPU agents (filtered by
      "Device Type: GPU" so AMD CPUs do not bleed in).
-  2. Fall back to ``/sys/class/drm/card*/device/product_name`` from the
-     amdgpu driver.
-  3. If both fail, derive a gfx target from rocminfo or KFD topology
-     (handling both hex-packed and decimal encodings).
-  4. After helm install, re-read ROCm labeller node labels for the
-     authoritative product names.
+  3. Derive a gfx target from rocminfo or KFD topology when product names are
+     absent (handling both hex-packed and decimal encodings).
+  4. After helm install, re-read ROCm labeller node labels for authoritative
+     scheduler product names, while preserving local driver descriptions.
 """
 
 from __future__ import annotations
@@ -20,7 +19,10 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from auplc_installer.util import command_exists, log, run_capture
+from auplc_installer.util import InstallerError, command_exists, log, run_capture
+
+SYS_DRM_ROOT = Path("/sys/class/drm")
+KFD_TOPOLOGY_ROOT = Path("/sys/class/kfd/kfd/topology/nodes")
 
 # ---------------------------------------------------------------------------
 # Curated SKU table  — keep accel_key in sync with runtime/values.yaml
@@ -50,6 +52,15 @@ PRODUCT_NAME_TO_SKU: dict[str, SkuRow] = {
 # minimal accelerator stanza so helm install succeeds without values.yaml
 # edits (useful for ad-hoc SKUs like 9600gre).
 GPU_CURATED_SKU_KEYS = ("phx", "strix", "strix-halo", "9070xt", "r9700")
+
+_ACCEL_KEY_DISPLAY_NAMES: dict[str, str] = {
+    "phx": "AMD Radeon 780M (Phoenix Point iGPU)",
+    "strix": "AMD Radeon 890M (Strix Point iGPU)",
+    "strix-halo": "AMD Radeon 8060S (Strix Halo iGPU)",
+    "9070xt": "AMD Radeon RX 9070 XT",
+    "r9700": "AMD Radeon AI PRO R9700",
+    "9600gre": "AMD Radeon RX 9600 GRE",
+}
 
 
 def is_curated_sku(key: str) -> bool:
@@ -91,8 +102,6 @@ def resolve_gpu_config(input_key: str) -> SkuRow:
 
     Raises :class:`InstallerError` for unsupported inputs.
     """
-    from auplc_installer.util import InstallerError
-
     row = _GFX_FALLBACK.get(input_key)
     if row is None:
         raise InstallerError(
@@ -121,6 +130,108 @@ def normalise_product_name(raw: str) -> str:
     return s.strip("_")
 
 
+def _read_text(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
+def _read_int(path: Path) -> int | None:
+    text = _read_text(path)
+    if not text:
+        return None
+    try:
+        return int(text, 0)
+    except ValueError:
+        return None
+
+
+def format_gpu_memory(bytes_value: int | None) -> str:
+    """Format driver byte counts into stable GiB labels."""
+    if bytes_value is None or bytes_value <= 0:
+        return ""
+    gib = bytes_value / 1024 / 1024 / 1024
+    if gib >= 10 or gib.is_integer():
+        return f"{gib:.0f} GiB"
+    return f"{gib:.1f} GiB"
+
+
+def build_gpu_description(
+    gfx: str | None,
+    *,
+    vram_bytes: int | None,
+    visible_vram_bytes: int | None,
+    gtt_bytes: int | None,
+) -> str:
+    """Build the UI-facing accelerator description from live driver data."""
+    parts: list[str] = []
+    if gfx:
+        parts.append(gfx)
+    if vram := format_gpu_memory(vram_bytes):
+        parts.append(f"VRAM {vram}")
+    if visible_vram := format_gpu_memory(visible_vram_bytes):
+        parts.append(f"Visible VRAM {visible_vram}")
+    if gtt := format_gpu_memory(gtt_bytes):
+        parts.append(f"GTT {gtt}")
+    return " | ".join(parts) if parts else "Auto-detected AMD GPU"
+
+
+def detect_rocminfo_gpu_marketing_names() -> list[str]:
+    """Raw GPU marketing names from rocminfo, excluding CPU agents."""
+    if not command_exists("rocminfo"):
+        return []
+    try:
+        res = run_capture(["rocminfo"], check=False, stderr_to_stdout=True)
+        text = res.stdout or ""
+    except Exception:
+        text = ""
+
+    names: list[str] = []
+    seen: set[str] = set()
+    marketing = ""
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        m = re.match(r"^Marketing Name:\s*(.*)$", line)
+        if m:
+            marketing = m.group(1).strip()
+            continue
+        m = re.match(r"^Device Type:\s*(.*)$", line)
+        if not m:
+            continue
+        devtype = m.group(1).strip()
+        if devtype == "GPU" and marketing and marketing not in seen:
+            seen.add(marketing)
+            names.append(marketing)
+        marketing = ""
+    return names
+
+
+def _read_dmesg_gpu_memory_bytes(field: str) -> int | None:
+    """Fallback parser for VRAM/GTT boot messages when sysfs files are absent."""
+    if not command_exists("dmesg"):
+        return None
+    try:
+        res = run_capture(["dmesg"], check=False, stderr_to_stdout=True)
+    except Exception:
+        return None
+    text = res.stdout or ""
+
+    if field == "gtt":
+        pattern = r"amdgpu:\s+(\d+)M of GTT memory ready"
+    elif field == "vram":
+        pattern = r"amdgpu:\s+(\d+)M of VRAM memory ready"
+    elif field == "visible_vram":
+        pattern = r"Detected VRAM RAM=\d+M,\s+BAR=(\d+)M"
+    else:
+        return None
+
+    m = re.search(pattern, text, flags=re.IGNORECASE)
+    if not m:
+        return None
+    return int(m.group(1)) * 1024 * 1024
+
+
 def detect_gpu_product_names() -> list[str]:
     """All distinct AMD GPU product names on this host (labeller-normalised)."""
     out: list[str] = []
@@ -128,31 +239,14 @@ def detect_gpu_product_names() -> list[str]:
 
     # 1. rocminfo: track the most recent "Marketing Name" before each
     #    "Device Type"; commit only when device type is GPU.
-    if command_exists("rocminfo"):
-        try:
-            res = run_capture(["rocminfo"], check=False, stderr_to_stdout=True)
-            text = res.stdout or ""
-        except Exception:
-            text = ""
-        marketing = ""
-        for raw_line in text.splitlines():
-            line = raw_line.strip()
-            m = re.match(r"^Marketing Name:\s*(.*)$", line)
-            if m:
-                marketing = m.group(1).strip()
-                continue
-            m = re.match(r"^Device Type:\s*(.*)$", line)
-            if m:
-                devtype = m.group(1).strip()
-                if devtype == "GPU" and marketing:
-                    name = normalise_product_name(marketing)
-                    if name and name not in seen:
-                        seen.add(name)
-                        out.append(name)
-                marketing = ""
+    for marketing in detect_rocminfo_gpu_marketing_names():
+        name = normalise_product_name(marketing)
+        if name and name not in seen:
+            seen.add(name)
+            out.append(name)
 
     # 2. amdgpu sysfs (no ROCm dependency).
-    for f in sorted(Path("/sys/class/drm").glob("card*/device/product_name")):
+    for f in sorted(SYS_DRM_ROOT.glob("card*/device/product_name")):
         try:
             raw = f.read_text(encoding="utf-8").strip()
         except OSError:
@@ -188,7 +282,7 @@ def detect_gpu_gfx_family() -> str | None:
     # Hex-packed values for any GPU (major≥9) start at 0x090000 = 589824;
     # the largest decimal value for current GPUs is ~120201. We pick 200000
     # as the threshold to disambiguate.
-    for prop_path in sorted(Path("/sys/class/kfd/kfd/topology/nodes").glob("*/properties")):
+    for prop_path in sorted(KFD_TOPOLOGY_ROOT.glob("*/properties")):
         try:
             text = prop_path.read_text(encoding="utf-8")
         except OSError:
@@ -229,6 +323,7 @@ class SkuEntry:
     accel_env: str
     quota_rate: int
     display_name: str  # may be empty for curated rows
+    description: str = ""  # live driver metadata, when available
 
 
 @dataclass
@@ -255,6 +350,12 @@ class GpuConfig:
     def append(self, entry: SkuEntry) -> None:
         for existing in self.skus:
             if existing.accel_key == entry.accel_key:
+                if entry.product_name and not existing.product_name:
+                    existing.product_name = entry.product_name
+                if entry.display_name:
+                    existing.display_name = entry.display_name
+                if entry.description:
+                    existing.description = entry.description
                 return
         self.skus.append(entry)
         if not self.accel_key:
@@ -295,21 +396,156 @@ def sku_for_product_name(product: str) -> SkuRow:
     return PRODUCT_NAME_TO_SKU.get(product) or _synthesise_uncurated_row(product)
 
 
-def append_product(cfg: GpuConfig, product: str) -> None:
+def _display_name_for_accel_key(accel_key: str) -> str:
+    return _ACCEL_KEY_DISPLAY_NAMES.get(accel_key, f"AMD GPU ({accel_key})")
+
+
+def _sku_entry_from_row(
+    row: SkuRow,
+    *,
+    product_name: str = "",
+    display_name: str = "",
+    description: str = "",
+) -> SkuEntry:
+    accel_key, gpu_target, env, rate, row_display = row
+    return SkuEntry(
+        accel_key=accel_key,
+        product_name=product_name,
+        gpu_target=gpu_target,
+        accel_env=env,
+        quota_rate=rate,
+        display_name=display_name or row_display,
+        description=description,
+    )
+
+
+def _row_for_detected_gpu(product_name: str, detected_gfx: str | None) -> SkuRow:
+    if product_name:
+        return sku_for_product_name(product_name)
+    if detected_gfx:
+        if row := _GFX_FALLBACK.get(detected_gfx):
+            return row
+    return ("amd-gpu", detected_gfx or "gfx120x", "", 4, "AMD GPU")
+
+
+def append_product(cfg: GpuConfig, product: str, *, display_name: str = "", description: str = "") -> None:
     """Resolve a product name and append it as an SKU entry."""
     if not product:
         return
-    accel_key, gpu_target, env, rate, display = sku_for_product_name(product)
     cfg.append(
-        SkuEntry(
-            accel_key=accel_key,
+        _sku_entry_from_row(
+            sku_for_product_name(product),
             product_name=product,
-            gpu_target=gpu_target,
-            accel_env=env,
-            quota_rate=rate,
-            display_name=display,
+            display_name=display_name,
+            description=description,
         )
     )
+
+
+def detect_driver_gpu_inventory() -> list[SkuEntry]:
+    """Build SKU entries from the AMDGPU driver inventory.
+
+    The driver sysfs memory files are authoritative for descriptions because
+    BIOS RAM allocation and installed hardware can change between installer
+    runs. Product names may be absent on some iGPU systems; in that case the
+    entry still carries a display name resolved from the detected gfx family.
+    """
+    rocminfo_names = detect_rocminfo_gpu_marketing_names()
+    marketing_index = 0
+    detected_gfx = detect_gpu_gfx_family()
+    entries: list[SkuEntry] = []
+    seen: set[tuple[str, str]] = set()
+
+    for card in sorted(SYS_DRM_ROOT.glob("card[0-9]*")):
+        device_dir = card / "device"
+        if not device_dir.is_dir():
+            continue
+        vendor = _read_text(device_dir / "vendor").lower()
+        if vendor != "0x1002":
+            continue
+
+        driver_link = device_dir / "driver"
+        if driver_link.exists():
+            try:
+                driver = driver_link.resolve().name
+            except OSError:
+                driver = ""
+            if driver and driver != "amdgpu":
+                continue
+
+        raw_display_name = _read_text(device_dir / "product_name")
+        if not raw_display_name and marketing_index < len(rocminfo_names):
+            raw_display_name = rocminfo_names[marketing_index]
+            marketing_index += 1
+        product_name = normalise_product_name(raw_display_name) if raw_display_name else ""
+
+        vram_bytes = _read_int(device_dir / "mem_info_vram_total")
+        visible_vram_bytes = _read_int(device_dir / "mem_info_vis_vram_total")
+        gtt_bytes = _read_int(device_dir / "mem_info_gtt_total")
+        if vram_bytes is None:
+            vram_bytes = _read_dmesg_gpu_memory_bytes("vram")
+        if visible_vram_bytes is None:
+            visible_vram_bytes = _read_dmesg_gpu_memory_bytes("visible_vram")
+        if gtt_bytes is None:
+            gtt_bytes = _read_dmesg_gpu_memory_bytes("gtt")
+
+        description = build_gpu_description(
+            detected_gfx,
+            vram_bytes=vram_bytes,
+            visible_vram_bytes=visible_vram_bytes,
+            gtt_bytes=gtt_bytes,
+        )
+        row = _row_for_detected_gpu(product_name, detected_gfx)
+        entry = _sku_entry_from_row(
+            row,
+            product_name=product_name,
+            display_name=raw_display_name,
+            description=description,
+        )
+        if not entry.display_name:
+            entry.display_name = _display_name_for_accel_key(entry.accel_key)
+
+        key = (entry.accel_key, product_name or str(device_dir))
+        if key in seen:
+            continue
+        seen.add(key)
+        entries.append(entry)
+
+    if not entries and rocminfo_names:
+        for raw_display_name in rocminfo_names:
+            product_name = normalise_product_name(raw_display_name)
+            description = build_gpu_description(
+                detected_gfx,
+                vram_bytes=None,
+                visible_vram_bytes=None,
+                gtt_bytes=None,
+            )
+            entries.append(
+                _sku_entry_from_row(
+                    _row_for_detected_gpu(product_name, detected_gfx),
+                    product_name=product_name,
+                    display_name=raw_display_name,
+                    description=description,
+                )
+            )
+
+    return entries
+
+
+def apply_driver_metadata_to_config(cfg: GpuConfig) -> None:
+    """Enrich already-resolved SKU entries with local driver descriptions."""
+    for entry in detect_driver_gpu_inventory():
+        for existing in cfg.skus:
+            if existing.accel_key != entry.accel_key:
+                continue
+            if entry.product_name and existing.product_name and existing.product_name != entry.product_name:
+                continue
+            if entry.product_name:
+                existing.product_name = entry.product_name
+            if entry.display_name:
+                existing.display_name = entry.display_name
+            if entry.description:
+                existing.description = entry.description
 
 
 # ---------------------------------------------------------------------------
@@ -339,12 +575,21 @@ def detect_and_configure_gpu(cfg: GpuConfig, gpu_type_override: str = "") -> Non
     cfg.accel_env = ""
     cfg.gpu_product_name = ""
 
-    names = detect_gpu_product_names()
-    if names:
-        log("Detected GPU product name(s) from host:")
-        for name in names:
-            log(f"  - {name}")
-            append_product(cfg, name)
+    entries = detect_driver_gpu_inventory()
+    if entries:
+        log("Detected AMD GPU(s) from driver:")
+        for entry in entries:
+            log(f"  - {entry.display_name or _display_name_for_accel_key(entry.accel_key)}")
+            log(f"    {entry.description}")
+            cfg.append(entry)
+
+    if not cfg.skus:
+        names = detect_gpu_product_names()
+        if names:
+            log("Detected GPU product name(s) from host:")
+            for name in names:
+                log(f"  - {name}")
+                append_product(cfg, name)
 
     if not cfg.skus:
         if gpu_type_override:
@@ -356,19 +601,32 @@ def detect_and_configure_gpu(cfg: GpuConfig, gpu_type_override: str = "") -> Non
                 log(f"Detected GPU: {gfx}")
                 input_key = gfx
             else:
-                input_key = "strix-halo"
-                log("GPU not detected, defaulting to strix-halo (gfx1151)")
-        accel_key, gpu_target, env, rate, display = resolve_gpu_config(input_key)
-        cfg.append(
-            SkuEntry(
-                accel_key=accel_key,
-                product_name="",
-                gpu_target=gpu_target,
-                accel_env=env,
-                quota_rate=rate,
-                display_name=display,
-            )
-        )
+                if pinned_target:
+                    key = pinned_key or pinned_target
+                    rate = 4
+                    display = _display_name_for_accel_key(key)
+                    if row := _GFX_FALLBACK.get(key):
+                        _, _, _, rate, row_display = row
+                        display = row_display or display
+                    log(
+                        "GPU not detected; using manifest-pinned GPU config "
+                        f"({key}/{pinned_target})."
+                    )
+                    cfg.append(
+                        SkuEntry(
+                            accel_key=key,
+                            product_name="",
+                            gpu_target=pinned_target,
+                            accel_env=pinned_env,
+                            quota_rate=rate,
+                            display_name=display,
+                        )
+                    )
+                    input_key = ""
+                else:
+                    raise InstallerError("GPU not detected. Re-run with --gpu=TYPE if you need to force a target.")
+        if input_key:
+            cfg.append(_sku_entry_from_row(resolve_gpu_config(input_key)))
 
     # Restore manifest-pinned primary if it diverged from host detection.
     if pinned_target and pinned_target != cfg.gpu_target:
@@ -467,6 +725,7 @@ def refine_gpu_config_from_node_labels(cfg: GpuConfig) -> None:
     cfg.reset()
     for n in names:
         append_product(cfg, n)
+    apply_driver_metadata_to_config(cfg)
 
     log("Refreshed GPU SKUs from node labels (ROCm labeller is authoritative):")
     log("  product names    : " + ", ".join(names))

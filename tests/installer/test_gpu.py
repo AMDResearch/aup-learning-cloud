@@ -1,17 +1,16 @@
 # Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
 # Portions of this file consist of AI-generated content.
 
-"""Tests for :mod:`auplc_installer.gpu` SKU resolution.
-
-Avoids hitting the host (no rocminfo, no ``/sys/class/drm`` reads); instead
-exercises the curated/fallback tables and the dataclasses that the rest of
-the installer reads from.
-"""
+"""Tests for :mod:`auplc_installer.gpu` detection and SKU resolution."""
 
 from __future__ import annotations
 
+import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
+from auplc_installer import gpu
 from auplc_installer.gpu import (
     _GFX_FALLBACK,
     GPU_CURATED_SKU_KEYS,
@@ -25,6 +24,103 @@ from auplc_installer.gpu import (
     sku_for_product_name,
 )
 from auplc_installer.util import InstallerError
+
+
+def _write(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+class GpuMemoryFormattingTests(unittest.TestCase):
+    def test_format_gpu_memory_uses_gib(self) -> None:
+        self.assertEqual(gpu.format_gpu_memory(64 * 1024**3), "64 GiB")
+        self.assertEqual(gpu.format_gpu_memory(1536 * 1024**2), "1.5 GiB")
+        self.assertEqual(gpu.format_gpu_memory(None), "")
+
+    def test_build_gpu_description_omits_missing_parts(self) -> None:
+        self.assertEqual(
+            gpu.build_gpu_description(
+                "gfx1151",
+                vram_bytes=64 * 1024**3,
+                visible_vram_bytes=None,
+                gtt_bytes=31 * 1024**3,
+            ),
+            "gfx1151 | VRAM 64 GiB | GTT 31 GiB",
+        )
+
+
+class DriverInventoryTests(unittest.TestCase):
+    def test_driver_inventory_reads_sysfs_memory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            drm_root = Path(tmp) / "drm"
+            device = drm_root / "card0" / "device"
+            _write(device / "vendor", "0x1002\n")
+            _write(device / "product_name", "AMD Radeon 8060S Graphics\n")
+            _write(device / "mem_info_vram_total", str(64 * 1024**3))
+            _write(device / "mem_info_vis_vram_total", str(64 * 1024**3))
+            _write(device / "mem_info_gtt_total", str(31 * 1024**3))
+
+            with (
+                patch.object(gpu, "SYS_DRM_ROOT", drm_root),
+                patch.object(gpu, "detect_rocminfo_gpu_marketing_names", return_value=[]),
+                patch.object(gpu, "detect_gpu_gfx_family", return_value="gfx1151"),
+            ):
+                entries = gpu.detect_driver_gpu_inventory()
+
+        self.assertEqual(len(entries), 1)
+        entry = entries[0]
+        self.assertEqual(entry.accel_key, "strix-halo")
+        self.assertEqual(entry.product_name, "AMD_Radeon_8060S_Graphics")
+        self.assertEqual(entry.display_name, "AMD Radeon 8060S Graphics")
+        self.assertEqual(entry.description, "gfx1151 | VRAM 64 GiB | Visible VRAM 64 GiB | GTT 31 GiB")
+
+    def test_driver_inventory_uses_gfx_display_when_product_name_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            drm_root = Path(tmp) / "drm"
+            device = drm_root / "card0" / "device"
+            _write(device / "vendor", "0x1002\n")
+            _write(device / "mem_info_vram_total", str(64 * 1024**3))
+            _write(device / "mem_info_vis_vram_total", str(64 * 1024**3))
+            _write(device / "mem_info_gtt_total", str(31 * 1024**3))
+
+            with (
+                patch.object(gpu, "SYS_DRM_ROOT", drm_root),
+                patch.object(gpu, "detect_rocminfo_gpu_marketing_names", return_value=[]),
+                patch.object(gpu, "detect_gpu_gfx_family", return_value="gfx1151"),
+            ):
+                entries = gpu.detect_driver_gpu_inventory()
+
+        self.assertEqual(len(entries), 1)
+        entry = entries[0]
+        self.assertEqual(entry.accel_key, "strix-halo")
+        self.assertEqual(entry.product_name, "")
+        self.assertEqual(entry.display_name, "AMD Radeon 8060S (Strix Halo iGPU)")
+        self.assertEqual(entry.description, "gfx1151 | VRAM 64 GiB | Visible VRAM 64 GiB | GTT 31 GiB")
+
+
+class DetectAndConfigureGpuTests(unittest.TestCase):
+    def test_no_detection_requires_explicit_gpu_type(self) -> None:
+        cfg = GpuConfig()
+        with (
+            patch.object(gpu, "detect_driver_gpu_inventory", return_value=[]),
+            patch.object(gpu, "detect_gpu_product_names", return_value=[]),
+            patch.object(gpu, "detect_gpu_gfx_family", return_value=None),
+        ):
+            with self.assertRaises(InstallerError):
+                gpu.detect_and_configure_gpu(cfg)
+
+    def test_manifest_pinned_target_survives_missing_host_detection(self) -> None:
+        cfg = GpuConfig(accel_key="strix-halo", gpu_target="gfx1151", accel_env="")
+        with (
+            patch.object(gpu, "detect_driver_gpu_inventory", return_value=[]),
+            patch.object(gpu, "detect_gpu_product_names", return_value=[]),
+            patch.object(gpu, "detect_gpu_gfx_family", return_value=None),
+        ):
+            gpu.detect_and_configure_gpu(cfg)
+
+        self.assertEqual(cfg.accel_key, "strix-halo")
+        self.assertEqual(cfg.gpu_target, "gfx1151")
+        self.assertEqual(len(cfg.skus), 1)
 
 
 class NormaliseProductNameTests(unittest.TestCase):
