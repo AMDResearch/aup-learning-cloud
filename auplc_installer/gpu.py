@@ -574,53 +574,54 @@ def detect_and_configure_gpu(cfg: GpuConfig, gpu_type_override: str = "") -> Non
     cfg.accel_env = ""
     cfg.gpu_product_name = ""
 
-    entries = detect_driver_gpu_inventory()
-    if entries:
-        log("Detected AMD GPU(s) from driver:")
-        for entry in entries:
-            log(f"  - {entry.display_name or _display_name_for_accel_key(entry.accel_key)}")
-            log(f"    {entry.description}")
-            cfg.append(entry)
+    if gpu_type_override:
+        log(f"Using GPU type override: {gpu_type_override}")
+        cfg.append(_sku_entry_from_row(resolve_gpu_config(gpu_type_override)))
+        apply_driver_metadata_to_config(cfg)
+    else:
+        entries = detect_driver_gpu_inventory()
+        if entries:
+            log("Detected AMD GPU(s) from driver:")
+            for entry in entries:
+                log(f"  - {entry.display_name or _display_name_for_accel_key(entry.accel_key)}")
+                log(f"    {entry.description}")
+                cfg.append(entry)
+
+        if not cfg.skus:
+            names = detect_gpu_product_names()
+            if names:
+                log("Detected GPU product name(s) from host:")
+                for name in names:
+                    log(f"  - {name}")
+                    append_product(cfg, name)
 
     if not cfg.skus:
-        names = detect_gpu_product_names()
-        if names:
-            log("Detected GPU product name(s) from host:")
-            for name in names:
-                log(f"  - {name}")
-                append_product(cfg, name)
-
-    if not cfg.skus:
-        if gpu_type_override:
-            log(f"Using GPU type override: {gpu_type_override}")
-            input_key = gpu_type_override
+        gfx = detect_gpu_gfx_family()
+        if gfx:
+            log(f"Detected GPU: {gfx}")
+            input_key = gfx
         else:
-            gfx = detect_gpu_gfx_family()
-            if gfx:
-                log(f"Detected GPU: {gfx}")
-                input_key = gfx
-            else:
-                if pinned_target:
-                    key = pinned_key or pinned_target
-                    rate = 4
-                    display = _display_name_for_accel_key(key)
-                    if row := _GFX_FALLBACK.get(key):
-                        _, _, _, rate, row_display = row
-                        display = row_display or display
-                    log(f"GPU not detected; using manifest-pinned GPU config ({key}/{pinned_target}).")
-                    cfg.append(
-                        SkuEntry(
-                            accel_key=key,
-                            product_name="",
-                            gpu_target=pinned_target,
-                            accel_env=pinned_env,
-                            quota_rate=rate,
-                            display_name=display,
-                        )
+            if pinned_target:
+                key = pinned_key or pinned_target
+                rate = 4
+                display = _display_name_for_accel_key(key)
+                if row := _GFX_FALLBACK.get(key):
+                    _, _, _, rate, row_display = row
+                    display = row_display or display
+                log(f"GPU not detected; using manifest-pinned GPU config ({key}/{pinned_target}).")
+                cfg.append(
+                    SkuEntry(
+                        accel_key=key,
+                        product_name="",
+                        gpu_target=pinned_target,
+                        accel_env=pinned_env,
+                        quota_rate=rate,
+                        display_name=display,
                     )
-                    input_key = ""
-                else:
-                    raise InstallerError("GPU not detected. Re-run with --gpu=TYPE if you need to force a target.")
+                )
+                input_key = ""
+            else:
+                raise InstallerError("GPU not detected. Re-run with --gpu=TYPE if you need to force a target.")
         if input_key:
             cfg.append(_sku_entry_from_row(resolve_gpu_config(input_key)))
 

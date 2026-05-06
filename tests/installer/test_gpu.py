@@ -99,6 +99,31 @@ class DriverInventoryTests(unittest.TestCase):
 
 
 class DetectAndConfigureGpuTests(unittest.TestCase):
+    def test_override_wins_over_driver_inventory(self) -> None:
+        cfg = GpuConfig()
+        driver_entry = SkuEntry(
+            accel_key="strix-halo",
+            product_name="AMD_Radeon_8060S_Graphics",
+            gpu_target="gfx1151",
+            accel_env="",
+            quota_rate=3,
+            display_name="AMD Radeon 8060S Graphics",
+            description="gfx1151 | VRAM 64 GiB",
+        )
+
+        with (
+            patch.object(gpu, "detect_driver_gpu_inventory", return_value=[driver_entry]),
+            patch.object(gpu, "detect_gpu_product_names") as product_names,
+            patch.object(gpu, "detect_gpu_gfx_family") as gfx_family,
+        ):
+            gpu.detect_and_configure_gpu(cfg, gpu_type_override="phx")
+
+        self.assertEqual(cfg.accel_key, "phx")
+        self.assertEqual(cfg.gpu_target, "gfx110x")
+        self.assertEqual(cfg.accel_env, "11.0.0")
+        product_names.assert_not_called()
+        gfx_family.assert_not_called()
+
     def test_no_detection_requires_explicit_gpu_type(self) -> None:
         cfg = GpuConfig()
         with (
