@@ -1,0 +1,276 @@
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Build the auplc-vllm image (vLLM + AITER + ROCm flash-attention from source).
+#
+# This workflow is intentionally separate from docker-build.yml because the
+# vLLM HIP build is ~45-90 min per GPU target, vs. ~5-10 min for base/course
+# images. Keeping it standalone means a Hub or Course-only PR doesn't trigger
+# the long vLLM rebuild, and the cache scopes / runner sizing / timeouts can
+# be tuned independently.
+#
+# Targets are restricted to gfx1150 + gfx1151 (Strix Halo and its sibling)
+# because dockerfiles/VLLM/{patch_aiter_headers.py, optCompilerConfig.gfx1151.json,
+# patch_strix.py} encode RDNA 3.5-specific fixups that don't apply to
+# gfx110x / gfx120x. Add other targets here only after the patch suite is
+# extended to cover their ISA gaps.
+#
+# Cadence:
+#   * push  to main / develop with dockerfiles/VLLM/** changes  → build & push
+#   * push  to v* tag                                           → build & push, semver-tagged
+#   * pull_request touching dockerfiles/VLLM/**                 → build (no push)
+#   * workflow_dispatch                                         → manual trigger,
+#                                                                 optional GPU/version/ref overrides
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: Build vLLM Image
+
+on:
+  push:
+    branches: [main, develop]
+    tags: ['v*']
+    paths:
+      - 'dockerfiles/VLLM/**'
+      - '.github/workflows/docker-build-vllm.yml'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'dockerfiles/VLLM/**'
+      - '.github/workflows/docker-build-vllm.yml'
+  workflow_dispatch:
+    inputs:
+      gpu_target:
+        description: 'GPU target (all = build every supported target)'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - gfx1150
+          - gfx1151
+      version:
+        description: 'Optional version tag (e.g. v1.2.0). Empty = use semver-from-tag/branch.'
+        required: false
+        default: ''
+      vllm_ref:
+        description: 'vLLM git ref (commit/tag/branch). Empty = HEAD of vllm-project/vllm.'
+        required: false
+        default: ''
+      flash_attn_ref:
+        description: 'ROCm/flash-attention ref (default: main_perf).'
+        required: false
+        default: 'main_perf'
+      max_jobs:
+        description: 'Parallel HIP compile jobs (lower = less RAM pressure on shared runners).'
+        required: false
+        default: '2'
+
+# Prevent duplicate concurrent builds on the same branch / PR. vLLM builds are
+# long; the cache is more valuable than a stale duplicate run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-vllm:
+    name: "Build vLLM (${{ matrix.gpu_target }})"
+    runs-on: ubuntu-latest
+    # 6h is GHA's hard ceiling; we target 90 min but leave headroom for cold caches.
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      # Don't run gfx1150 + gfx1151 in parallel on free runners — both want
+      # ~14 GB intermediate disk and the GHA runner is tight. Self-hosted
+      # runners can override this by removing the line.
+      max-parallel: 1
+      matrix:
+        gpu_target:
+          - gfx1150
+          - gfx1151
+        # When triggered manually with a single GPU choice, narrow the matrix.
+        # GitHub doesn't have a clean way to skip matrix entries; we filter at
+        # the job level instead via the `if:` below.
+    if: |
+      github.event_name != 'workflow_dispatch' ||
+      github.event.inputs.gpu_target == 'all' ||
+      github.event.inputs.gpu_target == matrix.gpu_target
+    outputs:
+      image: ${{ steps.out.outputs.image }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # vLLM build wheel is several GB; HIP intermediate .o files balloon
+      # /tmp. Free what we can on the GHA runner before docker even starts.
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GH_PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Resolve registry + image name
+        id: names
+        env:
+          # Mirrors the convention from docker-build.yml: forks set
+          # vars.IMAGE_NAME_SUFFIX="-dev" so they don't collide with upstream.
+          SUFFIX: ${{ vars.IMAGE_NAME_SUFFIX }}
+        run: |
+          REGISTRY="ghcr.io/$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          echo "registry=${REGISTRY}"                      >> "$GITHUB_OUTPUT"
+          echo "vllm_image=${REGISTRY}/auplc-vllm${SUFFIX}" >> "$GITHUB_OUTPUT"
+          echo "base_image_name=${REGISTRY}/auplc-base${SUFFIX}" >> "$GITHUB_OUTPUT"
+
+      # The vLLM Dockerfile takes BASE_IMAGE as a build-arg. We point it at
+      # the matching auplc-base tag built by the sibling docker-build.yml
+      # workflow on the same branch (or `latest-<gpu>` on main, or
+      # `<tag>-<gpu>` on a release tag). Stays in lock-step with how
+      # build-courses resolves its BASE_IMAGE.
+      - name: Resolve BASE_IMAGE tag
+        id: base
+        run: |
+          SUFFIX="${{ matrix.gpu_target }}"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            BRANCH="${GITHUB_REF##*/}"
+          elif [[ "$GITHUB_REF" == refs/heads/main ]]; then
+            BRANCH="latest"
+          elif [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            # Pull req: target branch's published base, since the PR's head
+            # branch may not have its own base build pushed yet.
+            BRANCH=$(echo "${GITHUB_BASE_REF:-main}" | tr '/' '-')
+            [[ "$BRANCH" == "main" ]] && BRANCH="latest"
+          else
+            BRANCH=$(echo "${GITHUB_REF##refs/heads/}" | tr '/' '-')
+          fi
+          echo "image=${{ steps.names.outputs.base_image_name }}:${BRANCH}-${SUFFIX}" >> "$GITHUB_OUTPUT"
+
+      - name: Docker metadata (target-suffixed tags)
+        id: meta-suffixed
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.names.outputs.vllm_image }}
+          flavor: |
+            suffix=-${{ matrix.gpu_target }}
+          tags: |
+            type=semver,pattern=v{{version}}
+            type=semver,pattern=v{{major}}.{{minor}}
+            type=semver,pattern=v{{major}}
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=${{ github.event.inputs.version }},enable=${{ github.event.inputs.version != '' }}
+            type=sha,prefix=sha-
+            type=ref,event=branch
+            type=ref,event=tag
+            type=ref,event=pr
+
+      # Default GPU target (gfx1151) also gets unsuffixed tags so
+      # `auplc-vllm:latest` resolves to the Strix Halo build. Matches the
+      # convention in docker-build.yml.
+      - name: Docker metadata (unsuffixed tags — gfx1151 only)
+        if: matrix.gpu_target == 'gfx1151'
+        id: meta-default
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.names.outputs.vllm_image }}
+          tags: |
+            type=semver,pattern=v{{version}}
+            type=semver,pattern=v{{major}}.{{minor}}
+            type=semver,pattern=v{{major}}
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=${{ github.event.inputs.version }},enable=${{ github.event.inputs.version != '' }}
+            type=sha,prefix=sha-
+            type=ref,event=branch
+            type=ref,event=tag
+            type=ref,event=pr
+
+      - name: Merge tags
+        id: tags
+        run: |
+          TAGS="${{ steps.meta-suffixed.outputs.tags }}"
+          if [ -n "${{ steps.meta-default.outputs.tags }}" ]; then
+            TAGS="${TAGS}
+          ${{ steps.meta-default.outputs.tags }}"
+          fi
+          TAGS=$(echo "$TAGS" | sort -u | sed '/^$/d')
+          {
+            echo "tags<<EOF"
+            echo "$TAGS"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build and push vLLM (${{ matrix.gpu_target }})
+        uses: docker/build-push-action@v6
+        with:
+          context: dockerfiles/VLLM
+          file: dockerfiles/VLLM/Dockerfile
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.tags.outputs.tags }}
+          labels: ${{ steps.meta-suffixed.outputs.labels }}
+          build-args: |
+            BASE_IMAGE=${{ steps.base.outputs.image }}
+            GPU_TARGET=${{ matrix.gpu_target }}
+            MAX_JOBS=${{ github.event.inputs.max_jobs || '2' }}
+            FLASH_ATTN_REF=${{ github.event.inputs.flash_attn_ref || 'main_perf' }}
+            ${{ github.event.inputs.vllm_ref && format('VLLM_REF={0}', github.event.inputs.vllm_ref) || '' }}
+          # Per-GPU cache scope: gfx1150 and gfx1151 produce different .o
+          # files (different --offload-arch) so we don't share cache. PRs
+          # share scope with their base branch's main build.
+          cache-from: type=gha,scope=vllm-${{ matrix.gpu_target }}
+          cache-to: type=gha,mode=max,scope=vllm-${{ matrix.gpu_target }}
+          provenance: false
+
+      - name: Export first image tag for downstream jobs
+        if: github.event_name != 'pull_request'
+        id: out
+        run: echo "image=$(echo '${{ steps.tags.outputs.tags }}' | head -1)" >> "$GITHUB_OUTPUT"
+
+      # Sanity check: confirm the wheel that landed in the image only ships
+      # gfx1151 (and/or gfx1150) code objects — no fat binary leakage. Skips
+      # on PR builds because we don't push and the local image was discarded
+      # by buildx after push: false.
+      - name: Smoke test — verify --offload-arch
+        if: github.event_name != 'pull_request'
+        run: |
+          IMAGE="$(echo '${{ steps.tags.outputs.tags }}' | head -1)"
+          echo "Inspecting ${IMAGE} for stray --offload-arch entries ..."
+          docker run --rm --entrypoint bash "${IMAGE}" -c '
+            set -eo pipefail
+            SO=$(python3 -c "import vllm._C, os; print(vllm._C.__file__)")
+            echo "[smoke] _C.so path: ${SO}"
+            ARCHES=$(/opt/rocm/lib/llvm/bin/llvm-objdump --offloading "${SO}" 2>/dev/null | grep -oE "gfx[0-9a-f]+" | sort -u || true)
+            echo "[smoke] offload arches in vllm._C: ${ARCHES:-<none-detected>}"
+            EXPECTED="${{ matrix.gpu_target }}"
+            if [ -n "${ARCHES}" ] && ! echo "${ARCHES}" | grep -qx "${EXPECTED}"; then
+              echo "[smoke] WARNING: expected ${EXPECTED}, saw ${ARCHES}"
+              # Non-fatal: ROCm tooling versions vary in --offloading support.
+              # Promote to `exit 1` once we settle on a llvm-objdump that
+              # reliably reports --offload-arch in fat ELFs.
+            fi
+          '

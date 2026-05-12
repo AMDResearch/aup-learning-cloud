@@ -24,6 +24,13 @@ GPU_TARGET ?= gfx1151
 # GPU base image used by course Dockerfiles (override to track a specific version)
 GPU_BASE_IMAGE ?= ghcr.io/amdresearch/auplc-base:latest
 
+# vLLM image build knobs (consumed by dockerfiles/VLLM/build.sh).
+# Override on the command line:
+#   make vllm VLLM_REF=v0.10.0 MAX_JOBS=8
+VLLM_REF ?=
+VLLM_MAX_JOBS ?= 4
+FLASH_ATTN_REF ?= main_perf
+
 # Build args for docker build (constructed from mirror settings)
 BUILD_ARGS :=
 ifneq ($(MIRROR_PREFIX),)
@@ -37,7 +44,7 @@ ifneq ($(MIRROR_NPM),)
   BUILD_ARGS += --build-arg NPM_REGISTRY=$(MIRROR_NPM)
 endif
 
-.PHONY: all base base-cpu base-rocm base-gfx1151 hub courses cv dl llm physim
+.PHONY: all base base-cpu base-rocm base-gfx1151 hub courses cv dl llm physim vllm
 
 # Build all images
 all: base hub courses
@@ -120,6 +127,22 @@ physim:
 	cd Courses/PhySim && BASE_IMAGE=$(GPU_BASE_IMAGE) bash ./build.sh
 	docker tag ghcr.io/amdresearch/auplc-physim:latest ghcr.io/amdresearch/auplc-physim:latest-$(GPU_TARGET)
 	$(MAKE) save-image IMAGE=ghcr.io/amdresearch/auplc-physim:latest
+
+# --- vLLM Base Image ---
+# Builds vLLM + AITER flash-attention from source on top of auplc-base.
+# Long build (~45-90 min on Strix Halo) — see dockerfiles/VLLM/README.md.
+vllm:
+	@echo "-------------------------------------------"; \
+		echo "Building vLLM Image (GPU_TARGET=$(GPU_TARGET))..."; \
+		echo "-------------------------------------------";
+
+	cd VLLM && BASE_IMAGE=$(GPU_BASE_IMAGE) \
+		GPU_TARGET=$(GPU_TARGET) \
+		MAX_JOBS=$(VLLM_MAX_JOBS) \
+		VLLM_REF=$(VLLM_REF) \
+		FLASH_ATTN_REF=$(FLASH_ATTN_REF) \
+		bash ./build.sh
+	$(MAKE) save-image IMAGE=ghcr.io/amdresearch/auplc-vllm:latest
 
 # --- Export Images ---
 save-image:
