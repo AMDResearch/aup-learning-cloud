@@ -1,0 +1,3 @@
+# run_qwen3_4b_throughput.sh writes server / bench output here. Local artefacts;
+# share results out-of-band (README, dashboards) rather than via VCS.
+results/

@@ -48,6 +48,10 @@ exclude = [
     "node_modules",
     "*.egg-info",
     "projects/CV/DL08_Diffusion_Model_new.ipynb",  # Work in progress with syntax errors
+    # patch_aiter_headers.py is ~95 % C++ source kept inside a Python string.
+    # Ruff would fight us indefinitely on indentation and trailing spaces
+    # *inside* the embedded C++. Skip; the wrapper Python is trivial.
+    "dockerfiles/VLLM/patch_aiter_headers.py",
 ]
 
 [tool.ruff.lint]

@@ -195,6 +195,7 @@ custom:
     images:
       cpu: "ghcr.io/amdresearch/auplc-default:latest"
       gpu: "ghcr.io/amdresearch/auplc-base:latest"
+      vllm: "ghcr.io/amdresearch/auplc-vllm:latest"
       Course-CV: "ghcr.io/amdresearch/auplc-cv:latest"
       Course-DL: "ghcr.io/amdresearch/auplc-dl:latest"
       Course-LLM: "ghcr.io/amdresearch/auplc-llm:latest"
@@ -208,6 +209,10 @@ custom:
         cpu: "0"
         memory: "0Gi"
       gpu:
+        cpu: "0"
+        memory: "0Gi"
+        amd.com/gpu: "1"
+      vllm:
         cpu: "0"
         memory: "0Gi"
         amd.com/gpu: "1"
@@ -245,6 +250,14 @@ custom:
         group: "CUSTOM REPO"
         description: "Basic GPU Environment"
         subDescription: "GPU Accelerated Environment"
+        accelerator: "GPU"
+        acceleratorKeys:
+          - strix-halo
+        allowGitClone: true
+      vllm:
+        group: "CUSTOM REPO"
+        description: "vLLM Inference Server"
+        subDescription: "OpenAI-compatible LLM serving on ROCm"
         accelerator: "GPU"
         acceleratorKeys:
           - strix-halo
@@ -296,9 +309,11 @@ custom:
         - Course-DL
         - Course-LLM
         - Course-PhySim
+        - vllm
       official:
         - cpu
         - gpu
+        - vllm
         - Course-CV
         - Course-DL
         - Course-LLM
@@ -308,6 +323,7 @@ custom:
         - Course-DL
         - Course-LLM
         - Course-PhySim
+        - vllm
       native-users:
         - Course-CV
         - Course-DL
@@ -315,9 +331,11 @@ custom:
         - Course-PhySim
         - cpu
         - gpu
+        - vllm
       github-users:
         - cpu
         - gpu
+        - vllm
         - Course-CV
         - Course-DL
         - Course-LLM
