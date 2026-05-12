@@ -85,8 +85,34 @@ permissions:
   packages: write
 
 jobs:
+  # Resolve which GPU targets to build for. Lives in its own job because
+  # GHA's `matrix:` is evaluated before any other context, so we can't filter
+  # `matrix.gpu_target` from a job-level `if:` — instead we hand the matrix a
+  # JSON array computed here.
+  resolve-matrix:
+    name: Resolve GPU matrix
+    runs-on: ubuntu-latest
+    outputs:
+      gpu_targets: ${{ steps.set.outputs.gpu_targets }}
+    steps:
+      - name: Compute gpu_targets
+        id: set
+        env:
+          INPUT: ${{ github.event.inputs.gpu_target }}
+        run: |
+          # Default + push / pull_request → both targets.
+          # workflow_dispatch with explicit gfx1150 or gfx1151 → that one only.
+          if [[ "${INPUT}" == "gfx1150" || "${INPUT}" == "gfx1151" ]]; then
+            TARGETS="[\"${INPUT}\"]"
+          else
+            TARGETS='["gfx1150","gfx1151"]'
+          fi
+          echo "gpu_targets=${TARGETS}" >> "$GITHUB_OUTPUT"
+          echo "Resolved gpu_targets=${TARGETS}"
+
   build-vllm:
     name: "Build vLLM (${{ matrix.gpu_target }})"
+    needs: resolve-matrix
     runs-on: ubuntu-latest
     # 6h is GHA's hard ceiling; we target 90 min but leave headroom for cold caches.
     timeout-minutes: 360
@@ -97,16 +123,7 @@ jobs:
       # runners can override this by removing the line.
       max-parallel: 1
       matrix:
-        gpu_target:
-          - gfx1150
-          - gfx1151
-        # When triggered manually with a single GPU choice, narrow the matrix.
-        # GitHub doesn't have a clean way to skip matrix entries; we filter at
-        # the job level instead via the `if:` below.
-    if: |
-      github.event_name != 'workflow_dispatch' ||
-      github.event.inputs.gpu_target == 'all' ||
-      github.event.inputs.gpu_target == matrix.gpu_target
+        gpu_target: ${{ fromJSON(needs.resolve-matrix.outputs.gpu_targets) }}
     outputs:
       image: ${{ steps.out.outputs.image }}
     steps:
