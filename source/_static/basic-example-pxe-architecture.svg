@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 940 650" role="img" aria-labelledby="title desc">
+  <title id="title">Basic example PXE netboot architecture</title>
+  <desc id="desc">A service AIPC provides PXE, NFS rootfs, HTTP K3s credentials, and K3s server services. Two AIPC agents netboot from the service machine and join the K3s server. A JupyterHub application layer runs on the cluster. The optional component, shown in a separate colour, is NFS backed persistent storage.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#334155"/>
+    </marker>
+    <marker id="arrow-opt" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#ea580c"/>
+    </marker>
+    <style>
+      svg {
+        background: #f3f4f6;
+        font-family: Arial, Helvetica, sans-serif;
+      }
+      .group { fill: #eef6ff; stroke: #2563eb; stroke-width: 2.5; }
+      .client-group { fill: #f8fafc; stroke: #94a3b8; stroke-width: 2.5; }
+      .box { fill: #ffffff; stroke: #64748b; stroke-width: 2.5; }
+      .service { fill: #f8fbff; }
+      .optional-box { fill: #fff7ed; stroke: #ea580c; stroke-width: 2.5; stroke-dasharray: 9 6; }
+      .node-title { fill: #0f172a; font-size: 22px; font-weight: 700; }
+      .node-text { fill: #334155; font-size: 16px; }
+      .section-title { fill: #0f172a; font-size: 24px; font-weight: 700; }
+      .opt-title { fill: #9a3412; font-size: 22px; font-weight: 700; }
+      .opt-text { fill: #c2410c; font-size: 16px; font-weight: 600; }
+      .line { fill: none; stroke: #334155; stroke-width: 2.6; marker-end: url(#arrow); }
+      .optional-line { fill: none; stroke: #ea580c; stroke-width: 2.6; stroke-dasharray: 9 6; marker-end: url(#arrow-opt); }
+      .label { fill: #0f172a; font-size: 20px; font-weight: 700; }
+      .opt-label { fill: #c2410c; font-size: 20px; font-weight: 700; }
+    </style>
+  </defs>
+
+  <rect class="group" x="60" y="85" width="460" height="345" rx="18"/>
+  <text class="section-title" x="290" y="122" text-anchor="middle">AIPC 1: Service Machine</text>
+
+  <rect class="box service" x="90" y="160" width="185" height="85" rx="12"/>
+  <text class="node-title" x="182" y="198" text-anchor="middle">PXE Stack</text>
+  <text class="node-text" x="182" y="224" text-anchor="middle">Proxy-DHCP, TFTP</text>
+
+  <rect class="box service" x="305" y="160" width="185" height="85" rx="12"/>
+  <text class="node-title" x="397" y="198" text-anchor="middle">NFS Rootfs</text>
+  <text class="node-text" x="397" y="224" text-anchor="middle">/srv/nfs/rootfs</text>
+
+  <rect class="box service" x="90" y="310" width="185" height="85" rx="12"/>
+  <text class="node-title" x="182" y="348" text-anchor="middle">HTTP</text>
+  <text class="node-text" x="182" y="374" text-anchor="middle">/k3s/token</text>
+
+  <rect class="box service" x="305" y="310" width="185" height="85" rx="12"/>
+  <text class="node-title" x="397" y="348" text-anchor="middle">K3s Server</text>
+  <text class="node-text" x="397" y="374" text-anchor="middle">API :6443</text>
+
+  <rect class="client-group" x="640" y="150" width="260" height="270" rx="18"/>
+  <text class="section-title" x="770" y="190" text-anchor="middle">PXE Netboot Agents</text>
+
+  <rect class="box" x="685" y="222" width="170" height="78" rx="12"/>
+  <text class="node-title" x="770" y="256" text-anchor="middle">AIPC 2</text>
+  <text class="node-text" x="770" y="280" text-anchor="middle">K3s agent</text>
+
+  <rect class="box" x="685" y="325" width="170" height="78" rx="12"/>
+  <text class="node-title" x="770" y="359" text-anchor="middle">AIPC 3</text>
+  <text class="node-text" x="770" y="383" text-anchor="middle">K3s agent</text>
+
+  <rect class="optional-box" x="210" y="520" width="215" height="88" rx="12"/>
+  <text class="opt-title" x="317" y="558" text-anchor="middle">NFS StorageClass</text>
+  <text class="opt-text" x="317" y="586" text-anchor="middle">Optional notebook PVCs</text>
+
+  <rect class="box" x="470" y="520" width="215" height="88" rx="12"/>
+  <text class="node-title" x="577" y="558" text-anchor="middle">JupyterHub</text>
+  <text class="node-text" x="577" y="586" text-anchor="middle">App layer</text>
+
+  <path class="line" d="M 275 202 H 305"/>
+
+  <path class="line" d="M 490 202 C 545 202, 575 232, 640 252"/>
+  <text class="label" x="580" y="200" text-anchor="middle">netboot</text>
+
+  <path class="line" d="M 90 352 H 35 V 55 H 770 V 146"/>
+  <text class="label" x="402" y="46" text-anchor="middle">token and kubeconfig</text>
+
+  <path class="line" d="M 640 360 C 585 360, 555 352, 490 350"/>
+  <text class="label" text-anchor="middle">
+    <tspan x="580" y="384">k3s-agent</tspan>
+    <tspan x="580" y="404">join</tspan>
+  </text>
+
+  <path class="optional-line" d="M 350 395 C 333 450, 322 475, 317 516"/>
+  <path class="line" d="M 450 395 C 475 450, 545 477, 577 516"/>
+</svg>

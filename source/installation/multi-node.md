@@ -1,6 +1,15 @@
 # Multi-Node Cluster Deployment
 
-This guide covers the current Ansible + Helm workflow for deploying AUP Learning Cloud on a multi-node K3s cluster.
+This guide covers the product-supported Ansible + Helm workflow for deploying
+AUP Learning Cloud on a multi-node K3s cluster. It is the software deployment
+runbook for operators who already have the target machines, network, storage,
+and image path planned.
+
+::::{seealso}
+For a concrete, runnable example that deploys this software stack across three
+AIPCs using PXE netboot (diskless agents, NFS root, and automatic K3s join), see
+[Basic Example Multi-AIPC PXE Netboot Deployment Guide](multi-node/multi-aipc-hardware-deployment.md).
+::::
 
 Unlike the single-node path, multi-node deployment is not driven by `./auplc-installer install`. The main flow is:
 
@@ -346,11 +355,13 @@ helm upgrade --install jupyterhub ./chart \
 
 ### High Availability Scope
 
-This guide covers the base multi-node chart deployment. Choices such as:
+This guide covers the base product deployment path with a single K3s
+control-plane node. Choices such as:
 
 - external database backends
 - multiple Hub replicas
 - dedicated load balancers
+- multiple K3s control-plane nodes
 - production TLS and certificate rotation
 
 should be treated as explicit operator decisions layered on top of this base flow.
@@ -430,4 +441,5 @@ sudo ansible-playbook playbooks/pb-k3s-reset.yml --limit <node_name>
 
 - The sample multi-node values file is a starting point, not a promise that every advanced topology is turnkey.
 - The most important cluster-specific alignment is between real node labels and `custom.accelerators.*.nodeSelector`.
+- This runbook focuses on AMD GPU-backed worker nodes. NPU enablement is not part of the current product deployment scope.
 - If you want the simplest local install, use the single-node installer flow instead of this guide.
