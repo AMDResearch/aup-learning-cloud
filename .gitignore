@@ -392,6 +392,9 @@ dockerfiles/Courses/DL/data/FashionMNIST/raw/
 # Local config overrides (any file containing 'local')
 *local*
 *.local.*
+# Exceptions: PXE agent disk-persistence templates would otherwise match *local*
+!deploy/ansible/roles/pxe_controller/templates/mount-local-disk.service.j2
+!deploy/ansible/roles/pxe_controller/templates/mount-local-disk.sh.j2
 
 # Offline bundle artifacts
 auplc-bundle-*/

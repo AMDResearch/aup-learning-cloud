@@ -1,0 +1,525 @@
+# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+---
+# ==========================================================
+# 0. Pre-flight validation of required site-specific values
+# ==========================================================
+
+- name: Assert PXE controller IP is set
+  ansible.builtin.assert:
+    that:
+      - pxe_controller_ip | default('') | length > 0
+      - "'<' not in (pxe_controller_ip | string)"
+    fail_msg: >-
+      pxe_controller_ip is not set. Set it to your PXE controller / service
+      host IP in the playbook vars (no value ships in the repo).
+
+- name: Assert k3s server node IPs are set
+  ansible.builtin.assert:
+    that:
+      - pxe_k3s_server_ips | default([]) | length > 0
+      - pxe_k3s_server_ips | map('string') | select('match', '^<') | list | length == 0
+    fail_msg: >-
+      pxe_k3s_server_ips is empty or still a placeholder. Set at least one
+      k3s server node IP in the playbook vars (no value ships in the repo).
+
+# ==========================================================
+# 1. Install PXE controller host packages
+# ==========================================================
+
+# - name: Install PXE controller packages
+#   ansible.builtin.apt:
+#     name: "{{ pxe_host_packages }}"
+#     state: present
+#     update_cache: true
+#     cache_valid_time: 3600
+
+# ==========================================================
+# 2. Build NFS rootfs with debootstrap
+# ==========================================================
+
+- name: Stop NFS before rootfs rebuild
+  when: pxe_rootfs_force_rebuild | bool
+  ansible.builtin.systemd:
+    name: nfs-kernel-server
+    state: stopped
+  ignore_errors: true
+
+- name: Remove existing rootfs (force rebuild)
+  when: pxe_rootfs_force_rebuild | bool
+  ansible.builtin.shell: |
+    mountpoint -q {{ pxe_nfs_root }}/dev  && umount {{ pxe_nfs_root }}/dev  || true
+    mountpoint -q {{ pxe_nfs_root }}/sys  && umount {{ pxe_nfs_root }}/sys  || true
+    mountpoint -q {{ pxe_nfs_root }}/proc && umount {{ pxe_nfs_root }}/proc || true
+    rm -rf {{ pxe_nfs_root }}
+  changed_when: true
+
+- name: Check if NFS rootfs already exists
+  ansible.builtin.stat:
+    path: "{{ pxe_nfs_root }}/bin/bash"
+  register: _rootfs_exists
+
+- name: Build NFS rootfs
+  when: not _rootfs_exists.stat.exists
+  block:
+    - name: Create NFS root directory
+      ansible.builtin.file:
+        path: "{{ pxe_nfs_root }}"
+        state: directory
+        mode: "0755"
+
+    - name: Run debootstrap to create base rootfs
+      ansible.builtin.command:
+        cmd: >-
+          debootstrap --arch=amd64
+          {{ pxe_ubuntu_codename }}
+          {{ pxe_nfs_root }}
+          {{ pxe_apt_mirror }}
+      changed_when: true
+
+# ==========================================================
+# 3. Deploy agent service files into rootfs
+# ==========================================================
+
+- name: Create systemd directory in rootfs
+  ansible.builtin.file:
+    path: "{{ pxe_nfs_root }}/etc/systemd/system"
+    state: directory
+    mode: "0755"
+
+- name: Create bin directory in rootfs
+  ansible.builtin.file:
+    path: "{{ pxe_nfs_root }}/usr/local/bin"
+    state: directory
+    mode: "0755"
+
+- name: Deploy set-hostname service unit
+  ansible.builtin.template:
+    src: set-hostname.service.j2
+    dest: "{{ pxe_nfs_root }}/etc/systemd/system/set-hostname.service"
+    mode: "0644"
+
+- name: Deploy set-hostname script
+  ansible.builtin.template:
+    src: set-hostname.sh.j2
+    dest: "{{ pxe_nfs_root }}/usr/local/bin/set-hostname.sh"
+    mode: "0755"
+
+- name: Deploy k3s-auto-join service unit
+  ansible.builtin.template:
+    src: k3s-auto-join.service.j2
+    dest: "{{ pxe_nfs_root }}/etc/systemd/system/k3s-auto-join.service"
+    mode: "0644"
+
+- name: Deploy k3s-auto-join script
+  ansible.builtin.template:
+    src: k3s-auto-join.sh.j2
+    dest: "{{ pxe_nfs_root }}/usr/local/bin/k3s-auto-join.sh"
+    mode: "0755"
+
+- name: Deploy mount-local-disk service unit
+  ansible.builtin.template:
+    src: mount-local-disk.service.j2
+    dest: "{{ pxe_nfs_root }}/etc/systemd/system/mount-local-disk.service"
+    mode: "0644"
+
+- name: Deploy mount-local-disk script
+  ansible.builtin.template:
+    src: mount-local-disk.sh.j2
+    dest: "{{ pxe_nfs_root }}/usr/local/bin/mount-local-disk.sh"
+    mode: "0755"
+
+- name: Copy r8125 driver source tarball into rootfs
+  ansible.builtin.copy:
+    src: r8125-9.016.01.tar.bz2
+    dest: "{{ pxe_nfs_root }}/tmp/r8125-9.016.01.tar.bz2"
+    mode: "0644"
+
+# ==========================================================
+# 4. Configure initramfs modules in rootfs
+# ==========================================================
+
+- name: Ensure initramfs modules directory exists
+  ansible.builtin.file:
+    path: "{{ pxe_nfs_root }}/etc/initramfs-tools"
+    state: directory
+    mode: "0755"
+
+- name: Add required modules to initramfs
+  ansible.builtin.lineinfile:
+    path: "{{ pxe_nfs_root }}/etc/initramfs-tools/modules"
+    line: "{{ item }}"
+    create: true
+    mode: "0644"
+  loop: "{{ pxe_initramfs_modules }}"
+
+# Eagerly load the nftables `reject` modules at boot.
+#
+# These modules are only needed if you later add an optional Cloudflare WARP
+# egress proxy, which is OUT OF SCOPE for this base deployment (see the
+# "Out Of Scope" section of the Multi-AIPC PXE deployment guide). WARP installs
+# nftables rules using `ip protocol tcp reject with tcp reset`, provided by
+# nft_reject_inet plus nf_reject_ipv4/ipv6. The .ko files already ship with
+# linux-modules-<KVER>, but on this overlayroot+tmpfs PXE rootfs udev
+# demand-loading does not reliably fire, so we list them in modules-load.d for
+# systemd-modules-load.service to load eagerly. Pre-loading is harmless when
+# WARP is not used. modprobe pulls in nf_tables/nft_reject transitively, so
+# listing the leaves is sufficient.
+#
+# This is deliberately written as a host-side task (not inside the chroot
+# script) so it cannot perturb the r8125 DKMS build, which has shown to be
+# sensitive to seemingly unrelated changes in the chroot environment.
+- name: Ensure modules-load.d directory exists in rootfs
+  ansible.builtin.file:
+    path: "{{ pxe_nfs_root }}/etc/modules-load.d"
+    state: directory
+    mode: "0755"
+
+- name: Eagerly load nftables reject modules at boot (optional Cloudflare WARP egress)
+  ansible.builtin.copy:
+    dest: "{{ pxe_nfs_root }}/etc/modules-load.d/nf-reject.conf"
+    content: |
+      # Only needed by the optional Cloudflare WARP egress proxy, which is out
+      # of scope for the base deployment. Harmless to pre-load otherwise.
+      nft_reject_inet
+      nft_reject_ipv4
+      nft_reject_ipv6
+    mode: "0644"
+
+# ==========================================================
+# 5. Run chroot setup (apt install, systemctl enable, initramfs)
+# ==========================================================
+
+- name: Deploy chroot setup script
+  ansible.builtin.template:
+    src: chroot-setup.sh.j2
+    dest: "{{ pxe_nfs_root }}/tmp/chroot-setup.sh"
+    mode: "0755"
+
+- name: Execute chroot setup
+  block:
+    - name: Mount virtual filesystems for chroot
+      ansible.builtin.shell: |
+        mountpoint -q {{ pxe_nfs_root }}/proc || mount --bind /proc {{ pxe_nfs_root }}/proc
+        mountpoint -q {{ pxe_nfs_root }}/sys  || mount --bind /sys  {{ pxe_nfs_root }}/sys
+        mountpoint -q {{ pxe_nfs_root }}/dev  || mount --bind /dev  {{ pxe_nfs_root }}/dev
+      changed_when: true
+
+    - name: Run chroot setup script
+      ansible.builtin.command:
+        cmd: "chroot {{ pxe_nfs_root }} /tmp/chroot-setup.sh"
+      changed_when: true
+      register: _chroot_result
+
+  always:
+    - name: Unmount virtual filesystems from chroot
+      ansible.builtin.shell: |
+        mountpoint -q {{ pxe_nfs_root }}/dev  && umount {{ pxe_nfs_root }}/dev  || true
+        mountpoint -q {{ pxe_nfs_root }}/sys  && umount {{ pxe_nfs_root }}/sys  || true
+        mountpoint -q {{ pxe_nfs_root }}/proc && umount {{ pxe_nfs_root }}/proc || true
+      changed_when: true
+
+- name: Remove chroot setup script
+  ansible.builtin.file:
+    path: "{{ pxe_nfs_root }}/tmp/chroot-setup.sh"
+    state: absent
+
+# ==========================================================
+# 6. Copy kernel and initrd to TFTP
+# ==========================================================
+
+- name: Find latest kernel in rootfs
+  ansible.builtin.shell: |
+    ls {{ pxe_nfs_root }}/boot/vmlinuz-* | sort -V | tail -1 | sed 's|.*/vmlinuz-||'
+  register: _kver
+  changed_when: false
+
+- name: Set kernel version fact
+  ansible.builtin.set_fact:
+    pxe_kernel_version: "{{ _kver.stdout }}"
+
+- name: Create TFTP directory structure
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ pxe_tftp_root }}"
+    - "{{ pxe_tftp_root }}/pxelinux.cfg"
+    - "{{ pxe_tftp_root }}/grub"
+
+- name: Copy kernel to TFTP root
+  ansible.builtin.copy:
+    src: "{{ pxe_nfs_root }}/boot/vmlinuz-{{ pxe_kernel_version }}"
+    dest: "{{ pxe_tftp_root }}/vmlinuz"
+    remote_src: true
+    mode: "0644"
+
+- name: Copy initrd to TFTP root
+  ansible.builtin.copy:
+    src: "{{ pxe_nfs_root }}/boot/initrd.img-{{ pxe_kernel_version }}"
+    dest: "{{ pxe_tftp_root }}/initrd.img"
+    remote_src: true
+    mode: "0644"
+
+- name: Copy pxelinux.0 bootloader
+  ansible.builtin.copy:
+    src: /usr/lib/PXELINUX/pxelinux.0
+    dest: "{{ pxe_tftp_root }}/pxelinux.0"
+    remote_src: true
+    mode: "0644"
+
+- name: Copy syslinux menu modules
+  ansible.builtin.shell: |
+    cp /usr/lib/syslinux/modules/bios/ldlinux.c32  {{ pxe_tftp_root }}/
+    cp /usr/lib/syslinux/modules/bios/menu.c32     {{ pxe_tftp_root }}/
+    cp /usr/lib/syslinux/modules/bios/libutil.c32  {{ pxe_tftp_root }}/
+    cp /usr/lib/syslinux/modules/bios/libcom32.c32 {{ pxe_tftp_root }}/
+  changed_when: true
+
+- name: Copy GRUB EFI signed binary to TFTP root
+  ansible.builtin.copy:
+    src: /usr/lib/grub/x86_64-efi-signed/grubnetx64.efi.signed
+    dest: "{{ pxe_tftp_root }}/grubnetx64.efi"
+    remote_src: true
+    mode: "0644"
+
+# ==========================================================
+# 7. Create PXE boot menus
+# ==========================================================
+
+- name: Deploy BIOS PXE boot menu
+  ansible.builtin.template:
+    src: pxelinux-default.cfg.j2
+    dest: "{{ pxe_tftp_root }}/pxelinux.cfg/default"
+    mode: "0644"
+
+- name: Deploy UEFI GRUB boot menu
+  ansible.builtin.template:
+    src: grub.cfg.j2
+    dest: "{{ pxe_tftp_root }}/grub/grub.cfg"
+    mode: "0644"
+
+# ==========================================================
+# 8. Configure NFS server
+# ==========================================================
+
+- name: Add NFS export for rootfs
+  ansible.builtin.lineinfile:
+    path: /etc/exports
+    line: "{{ pxe_nfs_root }}  {{ pxe_subnet }}(ro,sync,no_subtree_check,no_root_squash)"
+    regexp: "^{{ pxe_nfs_root | regex_escape }}\\s"
+    create: true
+    mode: "0644"
+
+- name: Re-export and restart NFS server
+  ansible.builtin.shell: |
+    exportfs -ra
+    systemctl restart nfs-kernel-server
+  changed_when: true
+
+- name: Enable NFS server
+  ansible.builtin.systemd:
+    name: nfs-kernel-server
+    enabled: true
+
+- name: Wait for NFS server to be ready
+  ansible.builtin.command: showmount -e localhost
+  register: _nfs_ready
+  retries: 5
+  delay: 2
+  until: _nfs_ready.rc == 0
+  changed_when: false
+
+- name: Flush handlers for NFS
+  ansible.builtin.meta: flush_handlers
+
+- name: Verify NFS exports
+  ansible.builtin.command: showmount -e localhost
+  register: _nfs_exports
+  changed_when: false
+
+- name: Display NFS exports
+  ansible.builtin.debug:
+    var: _nfs_exports.stdout_lines
+
+# ==========================================================
+# 9. Configure dnsmasq (Proxy DHCP + TFTP)
+# ==========================================================
+
+- name: Deploy dnsmasq PXE configuration
+  ansible.builtin.template:
+    src: dnsmasq-pxe.conf.j2
+    dest: /etc/dnsmasq.d/pxe.conf
+    mode: "0644"
+  notify: Restart dnsmasq
+
+- name: Enable and start dnsmasq
+  ansible.builtin.systemd:
+    name: dnsmasq
+    state: started
+    enabled: true
+
+- name: Flush handlers for dnsmasq
+  ansible.builtin.meta: flush_handlers
+
+- name: Verify TFTP boot files
+  ansible.builtin.stat:
+    path: "{{ pxe_tftp_root }}/{{ item }}"
+  loop:
+    - pxelinux.0
+    - grubnetx64.efi
+    - vmlinuz
+    - initrd.img
+    - grub/grub.cfg
+  register: _tftp_files
+
+- name: Report TFTP boot file status
+  ansible.builtin.debug:
+    msg: "{{ item.item }}: {{ 'OK' if item.stat.exists else 'MISSING' }}"
+  loop: "{{ _tftp_files.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+# ==========================================================
+# 10. Inject SSH authorized keys into rootfs
+# ==========================================================
+
+- name: Fail if no SSH keys provided
+  ansible.builtin.assert:
+    that: pxe_rootfs_authorized_keys | default([]) | length > 0
+    fail_msg: "pxe_rootfs_authorized_keys is empty -- at least one SSH public key is required"
+
+- name: Create .ssh directory in rootfs
+  ansible.builtin.file:
+    path: "{{ pxe_nfs_root }}/root/.ssh"
+    state: directory
+    mode: "0700"
+
+- name: Inject authorized keys into rootfs
+  ansible.builtin.copy:
+    content: "{{ pxe_rootfs_authorized_keys | join('\n') }}\n"
+    dest: "{{ pxe_nfs_root }}/root/.ssh/authorized_keys"
+    mode: "0600"
+
+# ==========================================================
+# 11. Prepare HTTP directory for k3s tokens
+# ==========================================================
+
+- name: Create k3s token directory
+  ansible.builtin.file:
+    path: "{{ pxe_web_root }}/k3s"
+    state: directory
+    mode: "0755"
+
+- name: Deploy Apache ACL for k3s tokens
+  ansible.builtin.template:
+    src: k3s-acl.conf.j2
+    dest: /etc/apache2/conf-available/k3s-acl.conf
+    mode: "0644"
+  notify: Restart apache2
+
+- name: Enable k3s-acl Apache configuration
+  ansible.builtin.command:
+    cmd: a2enconf k3s-acl
+  register: _a2enconf
+  changed_when: "'Enabling' in _a2enconf.stdout"
+  notify: Restart apache2
+
+- name: Enable and start Apache
+  ansible.builtin.systemd:
+    name: apache2
+    state: started
+    enabled: true
+
+# ==========================================================
+# 12. Verify PXE server status
+# ==========================================================
+
+- name: Collect service status
+  ansible.builtin.service_facts:
+
+- name: Check critical services are active
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.services[item + '.service'] is defined
+      - ansible_facts.services[item + '.service'].state in ['running', 'exited']
+      - ansible_facts.services[item + '.service'].status == 'enabled'
+    fail_msg: "{{ item }} is NOT active (state: {{ ansible_facts.services[item + '.service'].state | default('unknown') }})"
+    success_msg: "{{ item }} is active ({{ ansible_facts.services[item + '.service'].state }})"
+    quiet: true
+  loop:
+    - dnsmasq
+    - apache2
+
+- name: Check NFS export is active
+  ansible.builtin.command: showmount -e localhost
+  register: _verify_nfs
+  changed_when: false
+
+- name: Verify rootfs is exported
+  ansible.builtin.assert:
+    that: "pxe_nfs_root in _verify_nfs.stdout"
+    fail_msg: "NFS export for {{ pxe_nfs_root }} not found"
+    success_msg: "NFS export OK: {{ pxe_nfs_root }}"
+
+- name: Check TFTP boot files exist
+  ansible.builtin.stat:
+    path: "{{ pxe_tftp_root }}/{{ item }}"
+  loop:
+    - pxelinux.0
+    - grubnetx64.efi
+    - vmlinuz
+    - initrd.img
+    - grub/grub.cfg
+    - pxelinux.cfg/default
+  register: _verify_tftp
+
+- name: Verify no TFTP files are missing
+  ansible.builtin.assert:
+    that: item.stat.exists
+    fail_msg: "MISSING: {{ item.item }}"
+    success_msg: "OK: {{ item.item }} ({{ item.stat.size | default(0) }} bytes)"
+  loop: "{{ _verify_tftp.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Check HTTP token endpoint is reachable
+  ansible.builtin.uri:
+    url: "http://127.0.0.1/k3s/"
+    status_code: [200, 403]
+  register: _verify_http
+
+- name: Print PXE server summary
+  ansible.builtin.debug:
+    msg: |
+      ══════════════════════════════════════════
+       PXE Controller ready on {{ pxe_controller_ip }}
+      ══════════════════════════════════════════
+       dnsmasq  : Proxy DHCP + TFTP on {{ pxe_network_interface }}
+       NFS      : {{ pxe_nfs_root }} → {{ pxe_subnet }}
+       Apache   : http://{{ pxe_controller_ip }}/k3s/
+       Kernel   : {{ pxe_kernel_version | default('unknown') }}
+      ──────────────────────────────────────────
+       Next steps (see the Multi-AIPC PXE deployment guide):
+         1. Install the K3s server and configure kubectl
+         2. Publish the K3s token + kubeconfig under {{ pxe_web_root }}/k3s/
+         3. Netboot the agents; they auto-join via k3s-auto-join.service
+      ══════════════════════════════════════════

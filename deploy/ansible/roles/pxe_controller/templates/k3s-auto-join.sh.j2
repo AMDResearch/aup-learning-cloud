@@ -1,0 +1,87 @@
+#!/bin/bash
+set -euo pipefail
+
+PXE_SERVER="{{ pxe_controller_ip }}"
+K3S_SERVERS="{{ pxe_k3s_server_ips | join(' ') }}"
+TOKEN_URL="http://${PXE_SERVER}/k3s/token"
+KUBECONFIG_URL="http://${PXE_SERVER}/k3s/kubeconfig"
+K3S_DATA="{{ pxe_k3s_data_dir }}"
+
+HOSTNAME=$(hostname)
+NEED_JOIN=true
+
+find_active_server() {
+  for srv in $K3S_SERVERS; do
+    if curl -sf --connect-timeout 3 -k "https://${srv}:6443/ping" &>/dev/null; then
+      echo "$srv"
+      return
+    fi
+  done
+  echo "$K3S_SERVERS" | awk '{print $1}'
+}
+
+node_exists_in_cluster() {
+  local kc="/tmp/admin-kubeconfig"
+  curl -sf "$KUBECONFIG_URL" -o "$kc" 2>/dev/null || return 1
+  k3s kubectl --kubeconfig="$kc" get node "$HOSTNAME" &>/dev/null
+  local rc=$?
+  rm -f "$kc"
+  return $rc
+}
+
+# ── Persist node password on SSD (volatile rootfs loses /etc on reboot) ──
+NODE_PWD_PERSIST="${K3S_DATA}/node-password"
+mkdir -p "$(dirname "$NODE_PWD_PERSIST")"
+mkdir -p /etc/rancher/node
+if [ -f "$NODE_PWD_PERSIST" ]; then
+  cp "$NODE_PWD_PERSIST" /etc/rancher/node/password
+  chmod 600 /etc/rancher/node/password
+  echo "Restored node password from SSD"
+fi
+
+# ── Check if this node already exists in the cluster ──
+if node_exists_in_cluster; then
+  echo "Node ${HOSTNAME} already exists in cluster, skipping join."
+  NEED_JOIN=false
+else
+  echo "Node ${HOSTNAME} not found in cluster, will join."
+fi
+
+# ── Always fetch token and write config (volatile rootfs loses /etc on reboot) ──
+
+TOKEN=""
+for i in $(seq 1 30); do
+  TOKEN=$(curl -sf "$TOKEN_URL" 2>/dev/null) || true
+  [ -n "$TOKEN" ] && break
+  echo "Waiting for k3s token... ($i/30)"
+  sleep 5
+done
+[ -z "$TOKEN" ] && { echo "ERROR: Failed to get k3s token after 30 attempts"; exit 1; }
+
+K3S_SERVER=$(find_active_server)
+
+mkdir -p /etc/rancher/k3s
+cat > /etc/rancher/k3s/config.yaml << CONF
+server: https://${K3S_SERVER}:6443
+token: ${TOKEN}
+CONF
+
+# ── Only clean agent state when actually joining as a new node ──
+if [ "$NEED_JOIN" = true ]; then
+  if [ -d "$K3S_DATA/agent/etc" ]; then
+    echo "Cleaning old agent state (keeping containerd cache)"
+    rm -rf "$K3S_DATA/agent/etc" "$K3S_DATA/agent/client-"* \
+      "$K3S_DATA/agent/server-"* "$K3S_DATA/agent/"*.kubeconfig 2>/dev/null || true
+  fi
+  rm -f "$NODE_PWD_PERSIST"
+  echo "Joining k3s server: ${K3S_SERVER}"
+fi
+
+systemctl enable --now k3s-agent
+
+# ── After agent starts, persist the node password for next boot ──
+if [ ! -f "$NODE_PWD_PERSIST" ] && [ -f /etc/rancher/node/password ]; then
+  cp /etc/rancher/node/password "$NODE_PWD_PERSIST"
+  chmod 600 "$NODE_PWD_PERSIST"
+  echo "Saved node password to SSD"
+fi

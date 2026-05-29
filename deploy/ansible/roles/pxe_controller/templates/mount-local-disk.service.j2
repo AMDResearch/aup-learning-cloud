@@ -1,0 +1,12 @@
+[Unit]
+Description=Mount local disk for k3s container image cache
+Before=k3s-auto-join.service
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/mount-local-disk.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
