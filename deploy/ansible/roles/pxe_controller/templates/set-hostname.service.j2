@@ -1,0 +1,12 @@
+[Unit]
+Description=Set hostname based on MAC address
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/set-hostname.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

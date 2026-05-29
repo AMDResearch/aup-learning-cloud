@@ -1,0 +1,95 @@
+# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+---
+- name: Setup PXE Controller for diskless k3s agent boot
+  hosts: pxe_controller
+  become: true
+  gather_facts: true
+  vars:
+    # ── config.env equivalent ──────────────────────────────
+    pxe_rootfs_force_rebuild: false
+    # Network
+    pxe_network_interface: "ens18"
+    pxe_subnet: "192.168.1.0/24"
+    pxe_gateway: "192.168.1.254"
+    pxe_dns_servers: "8.8.8.8,8.8.4.4"
+
+    # PXE Controller
+    pxe_controller_ip: "192.168.1.60"
+
+    # k3s Server Nodes
+    pxe_k3s_server_ips:
+      - "192.168.1.61"
+      - "192.168.1.62"
+      - "192.168.1.63"
+
+    # Root password for PXE-booted machines (leave empty to disable password login)
+    # Use ansible-vault: ansible-vault encrypt_string 'MyPass' --name 'pxe_rootfs_password'
+    pxe_rootfs_password: ""
+
+    # SSH keys for rootfs login (at least one required -- fill in before running).
+    # The playbook fails fast if this list is empty.
+    pxe_rootfs_authorized_keys: []
+    #   - "ssh-ed25519 AAAA... you@workstation"
+    #   - "ssh-rsa AAAA... ci@runner"
+
+    # APT Mirror
+    pxe_apt_mirror: "http://tw.archive.ubuntu.com/ubuntu"
+
+    pxe_rootfs_packages:
+      - linux-image-6.14.0-1018-oem
+      - linux-headers-6.14.0-1018-oem
+      - initramfs-tools
+      - linux-firmware
+      - nfs-common
+      - overlayroot
+      - openssh-server
+      - curl
+      - net-tools
+      - iproute2
+      - systemd-sysv
+      - sudo
+      - kmod
+      - pciutils
+      - e2fsprogs
+      - dkms
+      - build-essential
+      - libatomic1
+      - libquadmath0
+
+    pxe_initramfs_modules:
+      - nfs
+      - nfsv3
+      - overlay
+      - r8125
+      - amdgpu
+      # See pxe_initramfs_modules notes in role defaults: the nft_reject
+      # modules must come from the initramfs because, on this NFS+overlayroot
+      # rootfs, modprobe at runtime fails with ESTALE on modules.dep.bin
+      # whenever the PXE controller has rebuilt the rootfs underneath a
+      # running node. Pre-loading from initramfs avoids that path entirely.
+      - nft_reject_inet
+      - nft_reject_ipv4
+      - nft_reject_ipv6
+
+    pxe_k3s_data_dir: "/var/lib/rancher/k3s"
+
+  roles:
+    - role: pxe_controller

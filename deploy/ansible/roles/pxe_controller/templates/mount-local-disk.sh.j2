@@ -1,0 +1,25 @@
+#!/bin/bash
+set -euo pipefail
+
+K3S_DATA="{{ pxe_k3s_data_dir }}"
+
+DISK=""
+for dev in /dev/sda /dev/vda /dev/nvme0n1; do
+  [ -b "$dev" ] && { DISK="$dev"; break; }
+done
+
+if [ -z "$DISK" ]; then
+  echo "No local disk found, using tmpfs for k3s data"
+  mkdir -p "$K3S_DATA"
+  mount -t tmpfs -o size=4G tmpfs "$K3S_DATA"
+  exit 0
+fi
+
+if ! blkid "$DISK" | grep -q 'TYPE="ext4"'; then
+  echo "Formatting $DISK as ext4"
+  mkfs.ext4 -F -L k3s-cache "$DISK"
+fi
+
+mkdir -p "$K3S_DATA"
+mount "$DISK" "$K3S_DATA"
+echo "Mounted $DISK to $K3S_DATA"

@@ -1,0 +1,136 @@
+# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+# Role defaults -- override these in the playbook vars: section.
+# Maps 1:1 to config.env from the shell scripts.
+
+---
+# ============================================================
+# Network
+# ============================================================
+pxe_network_interface: "ens18"
+pxe_subnet: "192.168.1.0/24"
+pxe_gateway: "192.168.1.254"
+pxe_dns_servers: "8.8.8.8,8.8.4.4"
+
+# ============================================================
+# PXE Controller
+# ============================================================
+pxe_controller_ip: "192.168.1.60"
+
+# ============================================================
+# k3s Server Nodes
+# ============================================================
+pxe_k3s_server_ips:
+  - "192.168.1.61"
+  - "192.168.1.62"
+  - "192.168.1.63"
+
+# ============================================================
+# Credentials
+# ============================================================
+
+# Root password for rootfs (optional -- leave empty to disable password login)
+# Use ansible-vault to encrypt: ansible-vault encrypt_string 'MyPass' --name 'pxe_rootfs_password'
+pxe_rootfs_password: ""
+
+# SSH public keys injected into rootfs /root/.ssh/authorized_keys.
+# At least one key is REQUIRED (playbook will fail without it).
+# pxe_rootfs_authorized_keys:
+#   - "ssh-ed25519 AAAA... you@workstation"
+#   - "ssh-rsa AAAA... ci@runner"
+pxe_rootfs_authorized_keys: []
+
+# ============================================================
+# APT Mirror
+# ============================================================
+pxe_apt_mirror: "http://tw.archive.ubuntu.com/ubuntu"
+
+# ============================================================
+# Rootfs lifecycle
+# ============================================================
+# Force delete + rebuild rootfs from scratch (debootstrap)
+pxe_rootfs_force_rebuild: true
+# Run apt-get upgrade inside rootfs during chroot setup
+pxe_rootfs_upgrade: false
+
+# ============================================================
+# Paths
+# ============================================================
+pxe_nfs_root: "/srv/nfs/rootfs"
+pxe_tftp_root: "/srv/tftp"
+pxe_web_root: "/var/www/html"
+
+# ============================================================
+# Rootfs build settings
+# ============================================================
+pxe_ubuntu_codename: "noble"
+
+pxe_rootfs_packages:
+  - linux-image-6.14.0-1018-oem
+  - linux-headers-6.14.0-1018-oem
+  - initramfs-tools
+  - linux-firmware
+  - nfs-common
+  - overlayroot
+  - openssh-server
+  - curl
+  - net-tools
+  - iproute2
+  - systemd-sysv
+  - sudo
+  - kmod
+  - pciutils
+  - e2fsprogs
+  - dkms
+  - build-essential
+  - libatomic1
+  - libquadmath0
+
+pxe_initramfs_modules:
+  - nfs
+  - nfsv3
+  - overlay
+  - r8125
+  - amdgpu
+  # nftables `reject` modules. Required by Cloudflare WARP firewall rules.
+  # Loaded from the initramfs (BEFORE pivot_root) so they end up resident in
+  # kernel memory before the overlayroot+NFS rootfs is mounted. This sidesteps
+  # an overlayfs failure mode where, after the PXE controller rebuilds the
+  # NFS rootfs, the overlay's cached inode of /lib/modules/<KVER>/modules.dep.bin
+  # becomes ESTALE and modprobe stops working entirely on running nodes.
+  - nft_reject_inet
+  - nft_reject_ipv4
+  - nft_reject_ipv6
+
+pxe_k3s_data_dir: "/var/lib/rancher/k3s"
+
+# ============================================================
+# Host packages (installed on the PXE controller itself)
+# ============================================================
+pxe_host_packages:
+  - dnsmasq
+  - pxelinux
+  - syslinux-common
+  - apache2
+  - nfs-kernel-server
+  - debootstrap
+  - qemu-guest-agent
+  - grub-efi-amd64-signed
+  - shim-signed
