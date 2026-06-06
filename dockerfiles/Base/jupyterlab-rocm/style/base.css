@@ -1,0 +1,420 @@
+.jp-rocm-widget {
+  overflow: auto;
+  background-color: var(--jp-layout-color1);
+  color: var(--jp-ui-font-color1);
+}
+
+.jp-rocm-root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  font-size: var(--jp-ui-font-size1);
+}
+
+.jp-rocm-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 6px 8px 0;
+  border-bottom: 1px solid var(--jp-border-color2);
+  flex: 0 0 auto;
+}
+
+.jp-rocm-tabs button {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--jp-ui-font-color2);
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: var(--jp-ui-font-size1);
+}
+
+.jp-rocm-tabs button.active {
+  color: var(--jp-ui-font-color0);
+  border-bottom-color: var(--jp-brand-color1);
+}
+
+.jp-rocm-tabpanel {
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 10px 12px;
+}
+
+/* ---- Dashboard ---- */
+
+.jp-rocm-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 10px;
+}
+
+.jp-rocm-status {
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: var(--jp-ui-font-size0);
+}
+
+.jp-rocm-status.connected {
+  background: var(--jp-success-color3, #d7f7e0);
+  color: var(--jp-success-color1, #117a3d);
+}
+
+.jp-rocm-status.disconnected {
+  background: var(--jp-warn-color3, #fbe7c6);
+  color: var(--jp-warn-color1, #a05a00);
+}
+
+.jp-rocm-interval select,
+.jp-rocm-form select,
+.jp-rocm-form input {
+  background: var(--jp-input-background, var(--jp-layout-color1));
+  color: var(--jp-ui-font-color1);
+  border: 1px solid var(--jp-border-color2);
+  border-radius: 3px;
+  padding: 3px 6px;
+  margin-left: 6px;
+}
+
+.jp-rocm-warn {
+  color: var(--jp-warn-color1, #a05a00);
+  font-size: var(--jp-ui-font-size0);
+}
+
+.jp-rocm-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.jp-rocm-card {
+  border: 1px solid var(--jp-border-color2);
+  border-radius: 6px;
+  padding: 10px 12px;
+  background: var(--jp-layout-color0);
+}
+
+.jp-rocm-card-title {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.jp-rocm-gpu-index {
+  font-weight: 700;
+  color: var(--jp-brand-color1);
+}
+
+.jp-rocm-gpu-name {
+  color: var(--jp-ui-font-color2);
+}
+
+.jp-rocm-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+.jp-rocm-metric-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.jp-rocm-metric-title {
+  font-size: var(--jp-ui-font-size0);
+  color: var(--jp-ui-font-color2);
+}
+
+.jp-rocm-metric-value {
+  font-weight: 600;
+}
+
+.jp-rocm-chart {
+  height: 70px;
+  margin-top: 4px;
+}
+
+.jp-rocm-extra {
+  display: flex;
+  gap: 16px;
+  margin-top: 8px;
+  font-size: var(--jp-ui-font-size0);
+  color: var(--jp-ui-font-color2);
+}
+
+.jp-rocm-loading,
+.jp-rocm-error {
+  padding: 10px 12px;
+  border-radius: 6px;
+  margin: 8px 0;
+}
+
+.jp-rocm-loading {
+  color: var(--jp-ui-font-color2);
+}
+
+.jp-rocm-error {
+  background: var(--jp-error-color3, #f9d7d7);
+  color: var(--jp-error-color1, #b71c1c);
+}
+
+.jp-rocm-error pre {
+  white-space: pre-wrap;
+  font-size: var(--jp-ui-font-size0);
+  max-height: 200px;
+  overflow: auto;
+}
+
+/* ---- Profiler ---- */
+
+.jp-rocm-cell-profiling {
+  margin-bottom: 18px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--jp-border-color2);
+}
+
+.jp-rocm-cell-profiling h3 {
+  margin-bottom: 6px;
+}
+
+.jp-rocm-hint {
+  font-size: var(--jp-ui-font-size0);
+  color: var(--jp-ui-font-color2);
+  margin: 6px 0;
+}
+
+.jp-rocm-hint code {
+  background: var(--jp-layout-color2);
+  padding: 0 4px;
+  border-radius: 3px;
+  font-family: var(--jp-code-font-family);
+}
+
+.jp-rocm-cell-select {
+  display: flex;
+  flex-direction: column;
+  font-size: var(--jp-ui-font-size0);
+  color: var(--jp-ui-font-color2);
+  max-width: 320px;
+  margin: 6px 0;
+}
+
+.jp-rocm-cell-select select {
+  margin-top: 3px;
+  background: var(--jp-input-background, var(--jp-layout-color1));
+  color: var(--jp-ui-font-color1);
+  border: 1px solid var(--jp-border-color2);
+  border-radius: 3px;
+  padding: 3px 6px;
+}
+
+.jp-rocm-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 640px;
+  margin-bottom: 12px;
+}
+
+.jp-rocm-form label {
+  display: flex;
+  flex-direction: column;
+  font-size: var(--jp-ui-font-size0);
+  color: var(--jp-ui-font-color2);
+}
+
+.jp-rocm-form label select,
+.jp-rocm-form label input {
+  margin-left: 0;
+  margin-top: 3px;
+}
+
+.jp-rocm-run-btn {
+  align-self: flex-start;
+  background: var(--jp-brand-color1);
+  color: #fff;
+  border: none;
+  border-radius: 3px;
+  padding: 6px 16px;
+  cursor: pointer;
+}
+
+.jp-rocm-run-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.jp-rocm-link-btn {
+  align-self: flex-start;
+  background: transparent;
+  color: var(--jp-brand-color1);
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  font-size: var(--jp-ui-font-size0);
+}
+
+.jp-rocm-job-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0;
+}
+
+.jp-rocm-badge {
+  text-transform: uppercase;
+  font-size: var(--jp-ui-font-size0);
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+.jp-rocm-badge.running,
+.jp-rocm-badge.queued {
+  background: var(--jp-warn-color3, #fbe7c6);
+  color: var(--jp-warn-color1, #a05a00);
+}
+
+.jp-rocm-badge.done {
+  background: var(--jp-success-color3, #d7f7e0);
+  color: var(--jp-success-color1, #117a3d);
+}
+
+.jp-rocm-badge.error {
+  background: var(--jp-error-color3, #f9d7d7);
+  color: var(--jp-error-color1, #b71c1c);
+}
+
+.jp-rocm-cmd {
+  font-size: var(--jp-ui-font-size0);
+  color: var(--jp-ui-font-color2);
+  word-break: break-all;
+}
+
+.jp-rocm-summary {
+  display: flex;
+  gap: 18px;
+  margin: 10px 0;
+  font-weight: 600;
+}
+
+.jp-rocm-kernel-chart {
+  height: 280px;
+  margin: 10px 0;
+}
+
+.jp-rocm-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--jp-ui-font-size0);
+}
+
+.jp-rocm-table th,
+.jp-rocm-table td {
+  text-align: right;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--jp-border-color2);
+}
+
+.jp-rocm-table th:first-child,
+.jp-rocm-table td:first-child {
+  text-align: left;
+}
+
+.jp-rocm-kname {
+  font-family: var(--jp-code-font-family);
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jp-rocm-log {
+  white-space: pre-wrap;
+  font-size: var(--jp-ui-font-size0);
+  max-height: 240px;
+  overflow: auto;
+  background: var(--jp-layout-color2);
+  padding: 8px;
+  border-radius: 4px;
+}
+
+/* ---- GPU Info (static) ---- */
+
+.jp-rocm-static .jp-rocm-toolbar {
+  justify-content: space-between;
+}
+
+.jp-rocm-static h3 {
+  margin: 0;
+}
+
+.jp-rocm-info-gpu {
+  margin-bottom: 18px;
+}
+
+.jp-rocm-info-section {
+  border: 1px solid var(--jp-border-color2);
+  border-radius: 5px;
+  margin: 6px 0;
+  overflow: hidden;
+}
+
+.jp-rocm-info-toggle {
+  width: 100%;
+  text-align: left;
+  background: var(--jp-layout-color2);
+  color: var(--jp-ui-font-color1);
+  border: none;
+  padding: 7px 10px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: var(--jp-ui-font-size1);
+}
+
+.jp-rocm-info-toggle:hover {
+  background: var(--jp-layout-color3);
+}
+
+.jp-rocm-info-caret {
+  display: inline-block;
+  width: 14px;
+  color: var(--jp-ui-font-color2);
+}
+
+.jp-rocm-info-body {
+  padding: 4px 12px 10px;
+}
+
+.jp-rocm-info-table td {
+  text-align: left;
+  vertical-align: top;
+}
+
+.jp-rocm-info-key {
+  color: var(--jp-ui-font-color2);
+  width: 45%;
+  padding-right: 12px;
+}
+
+.jp-rocm-info-val {
+  font-family: var(--jp-code-font-family);
+  word-break: break-word;
+}
+
+.jp-rocm-info-subsection {
+  margin: 8px 0 8px 8px;
+  padding-left: 8px;
+  border-left: 2px solid var(--jp-border-color2);
+}
+
+.jp-rocm-info-subsection h5 {
+  margin: 6px 0 2px;
+  color: var(--jp-ui-font-color2);
+  font-size: var(--jp-ui-font-size0);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
