@@ -106,6 +106,9 @@ ENV LD_LIBRARY_PATH="${ROCM_PATH}/lib"
 ENV DEVICE_LIB_PATH=/opt/rocm/lib/llvm/amdgcn/bitcode
 ENV HIP_DEVICE_LIB_PATH=/opt/rocm/lib/llvm/amdgcn/bitcode
 
+# Enable rocprofv3 attach for %%rocprofv3 cell magic
+ENV ROCP_TOOL_ATTACH=1
+
 # Allow pip to install system-wide
 RUN printf '[global]\nbreak-system-packages = true\n' > /etc/pip.conf
 
@@ -215,6 +218,46 @@ COPY --from=runtime-status-builder /build/runtime/notebook/jupyterlab-runtime-st
 
 RUN python3 -m pip install --no-cache-dir /tmp/auplc-jupyterlab-runtime-status && \
     rm -rf /tmp/auplc-jupyterlab-runtime-status
+
+# Install amdsmi (ships with the ROCm tree) so the jupyterlab-rocm extension can
+# read live GPU metrics. Build from a temp copy — pip builds in-tree and would
+# otherwise drop an egg-info into the read-only ROCm install dir.
+RUN cp -r /opt/rocm/share/amd_smi /tmp/amd_smi && \
+    pip3 install --no-cache-dir /tmp/amd_smi && \
+    rm -rf /tmp/amd_smi
+
+# Work around a libamd_smi ODR conflict that makes torch.cuda.device_count()
+# return 0 (so Genesis/PyTorch raise "Invalid device id") whenever the amdsmi
+# Python package is importable. The torch ROCm wheel bundles its own
+# libamd_smi.so.26 (via _rocm_sdk_core); when `import torch` loads it first, the
+# amdsmi package's GPU enumeration is hijacked by the duplicate symbols and
+# returns 0 devices, even though HIP reports the GPU correctly.
+#
+# Fix: initialise amdsmi BEFORE torch via a .pth file, which site.py executes at
+# interpreter startup for every Python process (plain scripts AND ipykernel),
+# so the correct libamd_smi copy wins symbol resolution. This is preferred over:
+#   - a global LD_PRELOAD (breaks the `amd-smi` CLI), and
+#   - an IPython startup file (misses plain `python script.py`, and ~/.ipython
+#     is masked by the PVC mount at runtime).
+# The standalone amd-smi CLI and jupyterlab-rocm metrics run in separate
+# processes (no torch), so they are unaffected and keep working. Verified on
+# gfx1150 with torch 2.9.1/2.11.0+rocm7.13.0. See upstream ROCm/amdsmi#72.
+RUN SITE="$(python3 -c 'import site; print(site.getsitepackages()[0])')" && \
+    printf '%s\n' \
+        '# Initialise amdsmi before torch to avoid a libamd_smi ODR clash that' \
+        '# otherwise makes torch.cuda.device_count() return 0 on ROCm.' \
+        'try:' \
+        '    import amdsmi' \
+        '    amdsmi.amdsmi_init()' \
+        'except Exception:' \
+        '    pass' \
+        > "${SITE}/_auplc_amdsmi_init.py" && \
+    echo 'import _auplc_amdsmi_init' > "${SITE}/_auplc_amdsmi_init.pth"
+
+# Install the bundled ROCm JupyterLab extension (prebuilt; no Node needed)
+COPY jupyterlab-rocm /opt/jupyterlab-rocm
+RUN pip3 install --no-cache-dir /opt/jupyterlab-rocm && \
+    jupyter server extension enable jupyterlab_rocm
 
 # Remove the jenkins user if it exists (user with ID 1000)
 RUN if getent passwd 1000 > /dev/null; then \
