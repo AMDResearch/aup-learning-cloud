@@ -70,6 +70,9 @@
     "rimraf": "^5.0.1",
     "typescript": "~5.5.4"
   },
+  "resolutions": {
+    "webpack": "5.106.2"
+  },
   "sideEffects": [
     "style/*.css",
     "style/index.js"

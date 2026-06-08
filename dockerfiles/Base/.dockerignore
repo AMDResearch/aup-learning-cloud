@@ -1,0 +1,6 @@
+jupyterlab-rocm/node_modules
+jupyterlab-rocm/lib
+jupyterlab-rocm/jupyterlab_rocm/labextension
+jupyterlab-rocm/jupyterlab_rocm/_version.py
+jupyterlab-rocm/.pytest_cache
+jupyterlab-rocm/**/__pycache__
