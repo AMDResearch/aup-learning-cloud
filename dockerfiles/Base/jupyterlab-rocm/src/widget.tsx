@@ -1,3 +1,5 @@
+import { INotebookTracker } from '@jupyterlab/notebook';
+import { ISettingRegistry } from '@jupyterlab/settingregistry';
 import { ReactWidget } from '@jupyterlab/ui-components';
 import React, { useState } from 'react';
 import { Dashboard } from './components/Dashboard';
@@ -6,7 +8,10 @@ import { StaticInfo } from './components/StaticInfo';
 
 type Tab = 'monitor' | 'info' | 'profiler';
 
-function RocmPanel(): JSX.Element {
+function RocmPanel(props: {
+  settingRegistry: ISettingRegistry | null;
+  notebooks: INotebookTracker | null;
+}): JSX.Element {
   const [tab, setTab] = useState<Tab>('monitor');
   return (
     <div className="jp-rocm-root">
@@ -33,15 +38,28 @@ function RocmPanel(): JSX.Element {
       <div className="jp-rocm-tabpanel">
         {tab === 'monitor' && <Dashboard />}
         {tab === 'info' && <StaticInfo />}
-        {tab === 'profiler' && <Profiler />}
+        {tab === 'profiler' && (
+          <Profiler
+            settingRegistry={props.settingRegistry}
+            notebooks={props.notebooks}
+          />
+        )}
       </div>
     </div>
   );
 }
 
 export class RocmWidget extends ReactWidget {
-  constructor() {
+  private _settingRegistry: ISettingRegistry | null;
+  private _notebooks: INotebookTracker | null;
+
+  constructor(
+    settingRegistry: ISettingRegistry | null = null,
+    notebooks: INotebookTracker | null = null
+  ) {
     super();
+    this._settingRegistry = settingRegistry;
+    this._notebooks = notebooks;
     this.addClass('jp-rocm-widget');
     this.id = 'jupyterlab-rocm-panel';
     this.title.label = 'ROCm GPU';
@@ -50,6 +68,11 @@ export class RocmWidget extends ReactWidget {
   }
 
   render(): JSX.Element {
-    return <RocmPanel />;
+    return (
+      <RocmPanel
+        settingRegistry={this._settingRegistry}
+        notebooks={this._notebooks}
+      />
+    );
   }
 }

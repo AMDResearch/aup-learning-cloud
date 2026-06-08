@@ -6,6 +6,7 @@ Cell Profile uses ``torch.profiler`` in the live kernel. Helper routines for
 
 from __future__ import annotations
 
+import contextlib
 import csv
 import ctypes
 import glob
@@ -30,6 +31,31 @@ TRACE_PRESETS = {
     "sys": "--sys-trace",
     "hip": "--hip-trace",
 }
+
+
+class ProfilerBusyError(RuntimeError):
+    """Raised when a torch.profiler run is requested while one is already active.
+
+    Only one ``torch.profiler`` can be active per process, so the cell-magic
+    path and the live-watcher path share this lock to avoid colliding.
+    """
+
+
+_PROFILER_LOCK = threading.Lock()
+
+
+@contextlib.contextmanager
+def profiler_slot():
+    """Acquire the single per-process profiler slot or raise ``ProfilerBusyError``."""
+    if not _PROFILER_LOCK.acquire(blocking=False):
+        raise ProfilerBusyError(
+            "Another profiling run is already active in this kernel. "
+            "Wait for it to finish, then try again."
+        )
+    try:
+        yield
+    finally:
+        _PROFILER_LOCK.release()
 
 def rocprof_executable() -> Optional[str]:
     """Locate the rocprofv3 binary."""
@@ -136,6 +162,7 @@ class ProfileJob:
         self.created = time.time()
         self.finished: Optional[float] = None
         self.kernels: List[Dict[str, Any]] = []
+        self.operators: List[Dict[str, Any]] = []
         self.memory_copies: List[Dict[str, Any]] = []
         self.summary: Dict[str, Any] = {}
 
@@ -159,6 +186,7 @@ class ProfileJob:
                     "stdout": self.stdout[-8000:],
                     "stderr": self.stderr[-8000:],
                     "kernels": self.kernels,
+                    "operators": self.operators,
                     "memory_copies": self.memory_copies,
                     "summary": self.summary,
                 }
@@ -220,6 +248,18 @@ def _apply_kernel_summary(job: ProfileJob) -> None:
         "total_kernel_ns": total_ns,
         "total_dispatches": sum(k["calls"] for k in job.kernels),
     }
+
+
+def _apply_operator_summary(job: ProfileJob) -> None:
+    """Augment ``job.summary`` with operator-level (key_averages) totals."""
+    ops = job.operators
+    job.summary.update(
+        {
+            "operator_count": len(ops),
+            "self_cpu_total_ns": sum(o.get("self_cpu_ns", 0.0) for o in ops),
+            "self_gpu_total_ns": sum(o.get("self_gpu_ns", 0.0) for o in ops),
+        }
+    )
 
 
 def _parse_memory_copy_trace(path: str) -> List[Dict[str, Any]]:
@@ -338,45 +378,238 @@ def _parse_torch_kernel_events(trace_data: Dict[str, Any]) -> List[Dict[str, Any
     return _summarize_kernels(agg)
 
 
-def profile_cell_torch(shell: Any, cell: str, label: str, preset: str = "kernel") -> ProfileJob:
-    """Profile a cell in the live kernel using ``torch.profiler``."""
-    import contextlib
-    import io
+def _evt_attr(evt: Any, *names: str, default: Any = 0) -> Any:
+    """Return the first present, non-None attribute from ``names``.
 
-    import torch  # type: ignore
-    from torch.profiler import ProfilerActivity, profile  # type: ignore
+    ``key_averages`` event objects renamed several CUDA fields to ``device``
+    across torch versions (e.g. ``cuda_time_total`` -> ``device_time_total``),
+    so we probe both spellings.
+    """
+    for name in names:
+        if hasattr(evt, name):
+            try:
+                value = getattr(evt, name)
+            except Exception:
+                continue
+            if value is not None:
+                return value
+    return default
 
-    job = ProfileJob("cell", label, preset, {"backend": "torch"})
-    job.status = "running"
+
+def _summarize_key_averages(prof: Any, row_limit: int = 100) -> List[Dict[str, Any]]:
+    """Aggregate ``prof.key_averages()`` into operator-level result rows.
+
+    Times are converted from microseconds (torch's unit) to nanoseconds so the
+    frontend can reuse its existing ``*_ns`` formatting. Memory is in bytes.
+    """
+    try:
+        events = prof.key_averages()
+    except Exception:
+        return []
+
+    operators: List[Dict[str, Any]] = []
+    for evt in events:
+        shapes = getattr(evt, "input_shapes", None)
+        stack = getattr(evt, "stack", None)
+        operators.append(
+            {
+                "name": str(_evt_attr(evt, "key", default="") or "<unknown>"),
+                "calls": int(_evt_attr(evt, "count", default=0) or 0),
+                "cpu_total_ns": float(_evt_attr(evt, "cpu_time_total")) * 1000.0,
+                "self_cpu_ns": float(_evt_attr(evt, "self_cpu_time_total")) * 1000.0,
+                "gpu_total_ns": float(
+                    _evt_attr(evt, "device_time_total", "cuda_time_total")
+                )
+                * 1000.0,
+                "self_gpu_ns": float(
+                    _evt_attr(evt, "self_device_time_total", "self_cuda_time_total")
+                )
+                * 1000.0,
+                "cpu_mem": int(_evt_attr(evt, "cpu_memory_usage")),
+                "self_cpu_mem": int(_evt_attr(evt, "self_cpu_memory_usage")),
+                "gpu_mem": int(
+                    _evt_attr(evt, "device_memory_usage", "cuda_memory_usage")
+                ),
+                "self_gpu_mem": int(
+                    _evt_attr(evt, "self_device_memory_usage", "self_cuda_memory_usage")
+                ),
+                "input_shapes": str(shapes) if shapes else None,
+                "stack": [str(s) for s in stack] if stack else None,
+            }
+        )
+
+    has_gpu = any(o["self_gpu_ns"] > 0 for o in operators)
+    metric = "self_gpu_ns" if has_gpu else "self_cpu_ns"
+    grand_total = sum(o[metric] for o in operators) or 1.0
+    for o in operators:
+        o["percent"] = round(o[metric] / grand_total * 100.0, 2)
+    operators.sort(key=lambda o: o[metric], reverse=True)
+    return operators[:row_limit]
+
+
+def _kernels_from_prof(prof: Any) -> tuple:
+    """Export a chrome trace from ``prof`` and parse GPU kernel events.
+
+    Returns ``(kernels, trace_path)``. ``trace_path`` is left on disk so the
+    caller can either keep it (for download) or delete it.
+    """
     trace_path: Optional[str] = None
+    kernels: List[Dict[str, Any]] = []
     try:
         fd, trace_path = tempfile.mkstemp(suffix=".json", prefix="rocm_torch_trace_")
         os.close(fd)
-        activities = [ProfilerActivity.CPU, ProfilerActivity.CUDA]
-        with profile(activities=activities, record_shapes=False) as prof:
-            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
-                io.StringIO()
-            ):
-                shell.run_cell(cell, store_history=False)
-            if torch.cuda.is_available():
-                torch.cuda.synchronize()
         prof.export_chrome_trace(trace_path)
         with open(trace_path) as handle:
-            trace_data = json.load(handle)
-        job.kernels = _parse_torch_kernel_events(trace_data)
-        _apply_kernel_summary(job)
+            kernels = _parse_torch_kernel_events(json.load(handle))
+    except Exception:
+        if trace_path:
+            try:
+                os.remove(trace_path)
+            except OSError:
+                pass
+            trace_path = None
+    return kernels, trace_path
+
+
+def trace_path_for(job_id: str) -> str:
+    """Filesystem path of the persisted chrome trace for a cell job."""
+    return os.path.join(cell_jobs_dir(), f"{job_id}.trace.json")
+
+
+def _store_trace(job: ProfileJob, src: Optional[str]) -> None:
+    """Persist the chrome trace next to the job JSON for later download."""
+    if not src:
+        return
+    dst = trace_path_for(job.id)
+    try:
+        shutil.move(src, dst)
+        job.extra["trace_available"] = True
+    except OSError:
+        try:
+            os.remove(src)
+        except OSError:
+            pass
+
+
+def _discard_trace(src: Optional[str]) -> None:
+    if not src:
+        return
+    try:
+        os.remove(src)
+    except OSError:
+        pass
+
+
+def _torch_activities() -> List[Any]:
+    import torch  # type: ignore
+    from torch.profiler import ProfilerActivity  # type: ignore
+
+    activities = [ProfilerActivity.CPU]
+    if torch.cuda.is_available():
+        activities.append(ProfilerActivity.CUDA)
+    return activities
+
+
+def _finalize_torch_job(
+    job: ProfileJob,
+    prof: Any,
+    *,
+    keep_trace: bool,
+    kernels: Optional[List[Dict[str, Any]]] = None,
+    trace_path: Optional[str] = None,
+    operators: Optional[List[Dict[str, Any]]] = None,
+) -> None:
+    """Compute operators/kernels/summary for a finished torch profile."""
+    job.operators = operators if operators is not None else _summarize_key_averages(prof)
+    if kernels is None:
+        kernels, trace_path = _kernels_from_prof(prof)
+    job.kernels = kernels
+    if keep_trace:
+        _store_trace(job, trace_path)
+    else:
+        _discard_trace(trace_path)
+    _apply_kernel_summary(job)
+    _apply_operator_summary(job)
+
+
+def _run_cell_quietly(shell: Any, cell: str) -> None:
+    import io
+
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
+        io.StringIO()
+    ):
+        shell.run_cell(cell, store_history=False)
+
+
+def profile_cell_torch(
+    shell: Any,
+    cell: str,
+    label: str,
+    preset: str = "kernel",
+    *,
+    record_shapes: bool = False,
+    profile_memory: bool = False,
+    with_stack: bool = False,
+    keep_trace: bool = False,
+) -> ProfileJob:
+    """Profile an entire cell in the live kernel using ``torch.profiler``."""
+    import torch  # type: ignore
+    from torch.profiler import profile  # type: ignore
+
+    job = ProfileJob("cell", label, preset, {"backend": "torch", "mode": "full"})
+    job.status = "running"
+    try:
+        with profile(
+            activities=_torch_activities(),
+            record_shapes=record_shapes,
+            profile_memory=profile_memory,
+            with_stack=with_stack,
+        ) as prof:
+            _run_cell_quietly(shell, cell)
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+        _finalize_torch_job(job, prof, keep_trace=keep_trace)
         job.status = "done"
     except Exception as exc:
         job.status = "error"
         job.error = f"{type(exc).__name__}: {exc}"
     finally:
         job.finished = time.time()
-        if trace_path:
-            try:
-                os.remove(trace_path)
-            except OSError:
-                pass
     return job
+
+
+def run_cell_profile(
+    shell: Any,
+    cell: str,
+    *,
+    label: str = "notebook cell",
+    preset: str = "kernel",
+    options: Optional[Dict[str, Any]] = None,
+) -> ProfileJob:
+    """Profile a whole notebook cell with ``torch.profiler`` in the live kernel.
+
+    Held under :func:`profiler_slot` so it cannot run concurrently with a live
+    capture (only one ``torch.profiler`` per process).
+    """
+    options = options or {}
+    try:
+        with profiler_slot():
+            return profile_cell_torch(
+                shell,
+                cell,
+                label,
+                preset,
+                record_shapes=bool(options.get("record_shapes", False)),
+                profile_memory=bool(options.get("profile_memory", False)),
+                with_stack=bool(options.get("with_stack", False)),
+                keep_trace=bool(options.get("keep_trace", False)),
+            )
+    except ProfilerBusyError as exc:
+        job = ProfileJob("cell", label, preset, {"backend": "torch", "mode": "full"})
+        job.status = "error"
+        job.error = str(exc)
+        job.finished = time.time()
+        return job
 
 
 def _build_rocprof_command(
@@ -663,12 +896,17 @@ def cell_jobs_dir() -> str:
     return path
 
 
+def _is_job_file(name: str) -> bool:
+    """True for ``{id}.json`` job files, excluding ``{id}.trace.json`` traces."""
+    return name.endswith(".json") and not name.endswith(".trace.json")
+
+
 def _prune_cell_jobs(directory: str, max_keep: int) -> None:
     try:
         files = [
             os.path.join(directory, name)
             for name in os.listdir(directory)
-            if name.endswith(".json")
+            if _is_job_file(name)
         ]
     except OSError:
         return
@@ -676,6 +914,12 @@ def _prune_cell_jobs(directory: str, max_keep: int) -> None:
     for stale in files[max_keep:]:
         try:
             os.remove(stale)
+        except OSError:
+            pass
+        # Remove the companion trace, if any.
+        job_id = os.path.basename(stale)[: -len(".json")]
+        try:
+            os.remove(trace_path_for(job_id))
         except OSError:
             pass
 
@@ -696,7 +940,7 @@ def list_cell_jobs(limit: int = 20) -> List[Dict[str, Any]]:
     directory = cell_jobs_dir()
     jobs: List[Dict[str, Any]] = []
     try:
-        names = [name for name in os.listdir(directory) if name.endswith(".json")]
+        names = [name for name in os.listdir(directory) if _is_job_file(name)]
     except OSError:
         names = []
     for name in names:
@@ -707,3 +951,237 @@ def list_cell_jobs(limit: int = 20) -> List[Dict[str, Any]]:
             continue
     jobs.sort(key=lambda j: j.get("created", 0), reverse=True)
     return jobs[:limit]
+
+
+# ---------------------------------------------------------------------------
+# Live capture (profile a cell that is already running)
+# ---------------------------------------------------------------------------
+#
+# The kernel is single-threaded for cell execution, so a busy training cell
+# cannot accept a new ``%%rocprofv3``. Instead a background watcher thread
+# (armed when the extension loads) polls a trigger file written by the server
+# extension and runs ``torch.profiler`` for a short window. Because kineto is
+# process-wide, it captures the work the main thread is doing.
+
+
+def current_kernel_id() -> Optional[str]:
+    """Best-effort current ipykernel id, parsed from the connection file."""
+    try:
+        from ipykernel.connect import get_connection_file  # type: ignore
+
+        path = get_connection_file()
+    except Exception:
+        return None
+    match = re.match(r"kernel-(.+)\.json$", os.path.basename(path or ""))
+    return match.group(1) if match else None
+
+
+def live_dir() -> str:
+    path = os.path.join(cell_jobs_dir(), "live")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def _trigger_name(kernel_id: Optional[str]) -> str:
+    return f"trigger-{kernel_id or 'any'}.json"
+
+
+def write_live_trigger(kernel_id: Optional[str], payload: Dict[str, Any]) -> str:
+    """Atomically publish a live-capture request for ``kernel_id`` (or any)."""
+    directory = live_dir()
+    path = os.path.join(directory, _trigger_name(kernel_id))
+    tmp = f"{path}.{uuid.uuid4().hex}.tmp"
+    with open(tmp, "w") as handle:
+        json.dump(payload, handle)
+    os.replace(tmp, path)
+    return path
+
+
+def claim_live_trigger(kernel_id: Optional[str]) -> Optional[Dict[str, Any]]:
+    """Atomically claim a pending trigger for this kernel; return its payload.
+
+    Tries the kernel-specific trigger first, then the ``any`` trigger. The
+    ``os.rename`` makes the claim atomic so concurrent watchers never run the
+    same request twice.
+    """
+    directory = live_dir()
+    names = [_trigger_name(kernel_id)] if kernel_id else []
+    names.append(_trigger_name(None))
+    for name in names:
+        src = os.path.join(directory, name)
+        dst = os.path.join(directory, f"claim-{uuid.uuid4().hex}.json")
+        try:
+            os.rename(src, dst)
+        except OSError:
+            continue
+        payload: Optional[Dict[str, Any]] = None
+        try:
+            with open(dst) as handle:
+                payload = json.load(handle)
+        except (OSError, ValueError):
+            payload = None
+        finally:
+            try:
+                os.remove(dst)
+            except OSError:
+                pass
+        return payload
+    return None
+
+
+def live_heartbeat(kernel_id: Optional[str]) -> None:
+    """Mark this kernel's watcher as alive (also under the shared ``any`` key)."""
+    directory = live_dir()
+    keys = {"any"}
+    if kernel_id:
+        keys.add(kernel_id)
+    stamp = str(time.time())
+    for key in keys:
+        try:
+            with open(os.path.join(directory, f"heartbeat-{key}"), "w") as handle:
+                handle.write(stamp)
+        except OSError:
+            pass
+
+
+def live_armed(kernel_id: Optional[str], max_age: float = 6.0) -> bool:
+    """True if a watcher heartbeat for ``kernel_id`` (or any) is recent."""
+    directory = live_dir()
+    names = [f"heartbeat-{kernel_id}"] if kernel_id else []
+    names.append("heartbeat-any")
+    now = time.time()
+    for name in names:
+        try:
+            if now - os.path.getmtime(os.path.join(directory, name)) <= max_age:
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def set_live_busy(kernel_id: Optional[str], expiry: float) -> None:
+    """Mark a live capture as in-progress until ``expiry`` (epoch seconds)."""
+    directory = live_dir()
+    keys = {"any"}
+    if kernel_id:
+        keys.add(kernel_id)
+    for key in keys:
+        try:
+            with open(os.path.join(directory, f"busy-{key}"), "w") as handle:
+                handle.write(str(expiry))
+        except OSError:
+            pass
+
+
+def clear_live_busy(kernel_id: Optional[str]) -> None:
+    directory = live_dir()
+    keys = {"any"}
+    if kernel_id:
+        keys.add(kernel_id)
+    for key in keys:
+        try:
+            os.remove(os.path.join(directory, f"busy-{key}"))
+        except OSError:
+            pass
+
+
+def live_busy(kernel_id: Optional[str]) -> bool:
+    """True if a live capture is currently running for this kernel.
+
+    Uses a stored expiry so a crashed capture cannot wedge the UI forever.
+    """
+    directory = live_dir()
+    name = f"busy-{kernel_id}" if kernel_id else "busy-any"
+    try:
+        with open(os.path.join(directory, name)) as handle:
+            expiry = float(handle.read().strip() or 0)
+    except (OSError, ValueError):
+        return False
+    return time.time() < expiry
+
+
+def profile_live_window(
+    *,
+    window_s: float = 2.0,
+    warmup_s: float = 0.0,
+    preset: str = "kernel",
+    options: Optional[Dict[str, Any]] = None,
+    label: str = "live capture",
+) -> ProfileJob:
+    """Profile whatever the kernel is doing for a fixed wall-clock window.
+
+    Unlike :func:`profile_cell_torch_timed` this does not run a cell; the
+    workload is the already-running code on the main thread. Held under
+    :func:`profiler_slot` to stay mutually exclusive with the cell-magic path.
+    """
+    options = options or {}
+    try:
+        with profiler_slot():
+            return _profile_live_window_locked(
+                window_s=window_s,
+                warmup_s=warmup_s,
+                preset=preset,
+                options=options,
+                label=label,
+            )
+    except ProfilerBusyError as exc:
+        job = ProfileJob("live", label, preset, {"backend": "torch", "mode": "live"})
+        job.status = "error"
+        job.error = str(exc)
+        job.finished = time.time()
+        return job
+
+
+def _profile_live_window_locked(
+    *,
+    window_s: float,
+    warmup_s: float,
+    preset: str,
+    options: Dict[str, Any],
+    label: str,
+) -> ProfileJob:
+    import torch  # type: ignore
+    from torch.profiler import profile  # type: ignore
+
+    job = ProfileJob(
+        "live",
+        label,
+        preset,
+        {
+            "backend": "torch",
+            "mode": "live",
+            "window_s": window_s,
+            "warmup_s": warmup_s,
+            "approx": True,
+            "stop_after_window": False,
+        },
+    )
+    job.status = "running"
+    keep_trace = bool(options.get("keep_trace", False))
+    try:
+        if warmup_s > 0:
+            time.sleep(warmup_s)
+        prof = profile(
+            activities=_torch_activities(),
+            record_shapes=bool(options.get("record_shapes", False)),
+            profile_memory=bool(options.get("profile_memory", False)),
+            with_stack=bool(options.get("with_stack", False)),
+        )
+        prof.start()
+        try:
+            time.sleep(max(window_s, 0.0))
+            if torch.cuda.is_available():
+                try:
+                    torch.cuda.synchronize()
+                except Exception:
+                    pass
+        finally:
+            prof.stop()
+        _finalize_torch_job(job, prof, keep_trace=keep_trace)
+        job.status = "done"
+    except Exception as exc:
+        job.status = "error"
+        job.error = f"{type(exc).__name__}: {exc}"
+    finally:
+        job.finished = time.time()
+    return job

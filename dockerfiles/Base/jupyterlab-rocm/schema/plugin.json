@@ -1,7 +1,64 @@
 {
+  "jupyter.lab.toolbars": {
+    "Notebook": [
+      {
+        "name": "cell-profile",
+        "command": "jupyterlab-rocm:profile-cell",
+        "rank": 35
+      }
+    ]
+  },
   "title": "ROCm",
   "description": "AMD ROCm GPU monitor and rocprofv3 profiler settings.",
+  "jupyter.lab.setting-icon": "jupyterlab-rocm:icon",
+  "jupyter.lab.setting-icon-label": "ROCm",
   "type": "object",
-  "properties": {},
+  "properties": {
+    "cellProfileMode": {
+      "title": "Cell Profile mode",
+      "description": "Cell Profile strategy: full cell (toolbar button) or live capture (sidebar sampling of a running cell).",
+      "type": "string",
+      "enum": ["full", "live"],
+      "default": "full"
+    },
+    "timeWindowSeconds": {
+      "title": "Live capture window (seconds)",
+      "description": "Live capture: wall-clock seconds to sample from the running cell.",
+      "type": "number",
+      "minimum": 0.1,
+      "default": 2
+    },
+    "timeWarmupSeconds": {
+      "title": "Live capture warmup (seconds)",
+      "description": "Live capture: seconds to skip before sampling starts.",
+      "type": "number",
+      "minimum": 0,
+      "default": 0
+    },
+    "recordShapes": {
+      "title": "Record input shapes",
+      "description": "Record operator input shapes (adds overhead).",
+      "type": "boolean",
+      "default": false
+    },
+    "profileMemory": {
+      "title": "Profile memory",
+      "description": "Record per-operator CPU/GPU memory allocation.",
+      "type": "boolean",
+      "default": false
+    },
+    "withStack": {
+      "title": "Record stacks",
+      "description": "Record Python/source stacks for operators (adds overhead).",
+      "type": "boolean",
+      "default": false
+    },
+    "keepTrace": {
+      "title": "Keep trace for download",
+      "description": "Keep the chrome trace so it can be downloaded (Perfetto / chrome://tracing).",
+      "type": "boolean",
+      "default": false
+    }
+  },
   "additionalProperties": false
 }

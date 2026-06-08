@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import time
 
 import tornado
 import tornado.websocket
@@ -94,6 +96,62 @@ class CellProfileHandler(APIHandler):
         self.finish(json.dumps({"jobs": profiler.list_cell_jobs()}))
 
 
+class CellProfileTraceHandler(APIHandler):
+    """Serve the persisted chrome trace for a Cell Profile job (``--trace``)."""
+
+    @tornado.web.authenticated
+    def get(self):
+        job_id = self.get_query_argument("id", "")
+        if not job_id or not job_id.isalnum():
+            raise tornado.web.HTTPError(400, "Invalid or missing job id.")
+        path = profiler.trace_path_for(job_id)
+        if not os.path.isfile(path):
+            raise tornado.web.HTTPError(404, "Trace not found for this job.")
+        self.set_header("Content-Type", "application/json")
+        self.set_header(
+            "Content-Disposition",
+            f'attachment; filename="cell_profile_{job_id}.json"',
+        )
+        with open(path, "rb") as handle:
+            self.finish(handle.read())
+
+
+class CellProfileLiveHandler(APIHandler):
+    """Live-capture: arm status (GET) and trigger requests (POST)."""
+
+    @tornado.web.authenticated
+    def get(self):
+        kernel_id = self.get_query_argument("kernel_id", "") or None
+        self.finish(
+            json.dumps(
+                {
+                    "armed": profiler.live_armed(kernel_id),
+                    "busy": profiler.live_busy(kernel_id),
+                }
+            )
+        )
+
+    @tornado.web.authenticated
+    def post(self):
+        try:
+            body = json.loads(self.request.body or b"{}")
+        except ValueError:
+            body = {}
+        kernel_id = body.get("kernel_id") or None
+        armed = profiler.live_armed(kernel_id)
+        payload = {
+            "kernel_id": kernel_id,
+            "window_s": float(body.get("window_s", 2.0)),
+            "warmup_s": float(body.get("warmup_s", 0.0)),
+            "preset": body.get("preset", "kernel"),
+            "options": body.get("options") or {},
+            "label": body.get("label") or "live capture",
+            "created": time.time(),
+        }
+        profiler.write_live_trigger(kernel_id, payload)
+        self.finish(json.dumps({"ok": True, "armed": armed}))
+
+
 def setup_handlers(web_app):
     host_pattern = ".*$"
     base_url = web_app.settings["base_url"]
@@ -107,5 +165,7 @@ def setup_handlers(web_app):
         (route("static"), StaticHandler),
         (route("stream"), StreamHandler),
         (route("profile", "cell"), CellProfileHandler),
+        (route("profile", "cell", "trace"), CellProfileTraceHandler),
+        (route("profile", "cell", "live"), CellProfileLiveHandler),
     ]
     web_app.add_handlers(host_pattern, handlers)

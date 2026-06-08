@@ -8,9 +8,12 @@ breaks a whole sample. Missing values are normalised to ``None``.
 
 from __future__ import annotations
 
+import json
+import os
 import re
 import shutil
 import subprocess
+import sys
 import threading
 from typing import Any, Dict, List, Optional
 
@@ -18,6 +21,10 @@ _LOCK = threading.Lock()
 _INITIALISED = False
 _INIT_ERROR: Optional[str] = None
 _NAME_CACHE: Dict[int, str] = {}
+
+# Match amd-smi's process refresh behavior. Process rows are short-lived and
+# should not be hidden behind a long library cache.
+os.environ.setdefault("AMDSMI_PROCESS_INFO_CACHE_MS", "100")
 
 try:
     import amdsmi  # type: ignore
@@ -315,25 +322,245 @@ def _vram(handle: Any) -> Dict[str, Any]:
     return {"total_mb": total, "used_mb": used, "percent": percent}
 
 
+def _memory_bytes(value: Any) -> Optional[int]:
+    """Parse a byte counter from amdsmi, preserving large legitimate values."""
+    value = _normalise(value)
+    if value is None:
+        return None
+    if isinstance(value, str):
+        match = re.fullmatch(r"\s*([0-9]+(?:\.[0-9]+)?)\s*([kmgt]?i?b)?\s*", value, re.IGNORECASE)
+        if match:
+            number = float(match.group(1))
+            unit = (match.group(2) or "b").lower()
+            multipliers = {
+                "b": 1,
+                "kb": 1000,
+                "kib": 1024,
+                "mb": 1000**2,
+                "mib": 1024**2,
+                "gb": 1000**3,
+                "gib": 1024**3,
+                "tb": 1000**4,
+                "tib": 1024**4,
+            }
+            return int(number * multipliers.get(unit, 1))
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _microseconds(value: Any) -> Optional[int]:
+    value = _normalise_metric(value)
+    if value is None:
+        return None
+    if isinstance(value, str):
+        match = re.fullmatch(r"\s*([0-9]+(?:\.[0-9]+)?)\s*(us|µs|ms|s)?\s*", value, re.IGNORECASE)
+        if match:
+            number = float(match.group(1))
+            unit = (match.group(2) or "us").lower()
+            if unit == "s":
+                number *= 1000000
+            elif unit == "ms":
+                number *= 1000
+            return int(number)
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _compute_units(handle: Any) -> Optional[int]:
+    asic = _safe(amdsmi.amdsmi_get_gpu_asic_info, handle) or {}
+    if not isinstance(asic, dict):
+        return None
+    value = _normalise_metric(asic.get("num_compute_units"))
+    if value is None:
+        return None
+    try:
+        units = int(value)
+        return units if units > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _cu_percent(cu_occupancy: Any, num_compute_units: Optional[int]) -> Optional[float]:
+    occupancy = _normalise_metric(cu_occupancy)
+    if occupancy is None or num_compute_units is None:
+        return None
+    try:
+        return round(float(occupancy) / float(num_compute_units) * 100.0, 1)
+    except (TypeError, ValueError, ZeroDivisionError):
+        return None
+
+
+def _percent(value: Any, digits: int = 1) -> Optional[float]:
+    value = _normalise_metric(value)
+    if value is None:
+        return None
+    if isinstance(value, str):
+        match = re.fullmatch(r"\s*([0-9]+(?:\.[0-9]+)?)\s*%?\s*", value)
+        if not match:
+            return None
+        value = match.group(1)
+    try:
+        return round(float(value), digits)
+    except (TypeError, ValueError):
+        return None
+
+
+def _field(mapping: Dict[str, Any], *names: str) -> Any:
+    """Look up an amd-smi JSON field across minor naming variations."""
+    for name in names:
+        if name in mapping:
+            return mapping[name]
+    wanted = {re.sub(r"[^a-z0-9]", "", name.lower()) for name in names}
+    for key, value in mapping.items():
+        if re.sub(r"[^a-z0-9]", "", str(key).lower()) in wanted:
+            return value
+    return None
+
+
+def _process_from_mapping(item: Dict[str, Any], num_cu: Optional[int] = None) -> Optional[Dict[str, Any]]:
+    pid = _normalise(_field(item, "pid", "PID"))
+    if pid is None:
+        return None
+    try:
+        pid_int = int(pid)
+        if pid_int <= 0:
+            return None
+    except (TypeError, ValueError):
+        return None
+
+    mem = _field(item, "memory_usage")
+    gtt_mem = _field(item, "gtt_mem", "GTT_MEM", "gtt_memory")
+    vram_mem = _field(item, "vram_mem", "VRAM_MEM", "vram_memory")
+    if isinstance(mem, dict):
+        gtt_mem = _field(mem, "gtt_mem", "GTT_MEM", "gtt_memory")
+        vram_mem = _field(mem, "vram_mem", "VRAM_MEM", "vram_memory")
+
+    cu_value = _field(item, "cu_occupancy", "cu_percent", "CU %")
+    cu_percent = _cu_percent(cu_value, num_cu) if num_cu is not None else _percent(cu_value)
+
+    return {
+        "pid": pid_int,
+        "name": _normalise(_field(item, "process_name", "name", "Process Name")),
+        "gtt_mem": _memory_bytes(gtt_mem),
+        "vram_mem": _memory_bytes(vram_mem),
+        "mem_usage": _memory_bytes(_field(item, "mem", "mem_usage", "MEM_USAGE", "memory_usage")),
+        "cu_percent": cu_percent,
+        "sdma_us": _microseconds(_field(item, "sdma_usage", "sdma_us", "SDMA")),
+    }
+
+
+def _fresh_processes_by_gpu(
+    num_cu_by_gpu: Optional[Dict[int, Optional[int]]] = None
+) -> Optional[Dict[int, List[Dict[str, Any]]]]:
+    """Return process rows from a fresh AMD SMI Python subprocess.
+
+    ``amdsmi_get_gpu_process_list`` can keep stale process rows in this
+    long-lived Jupyter server process. A short-lived helper keeps the same
+    libamd_smi source without depending on the ``amd-smi`` command being present.
+    """
+    script = """
+import json
+
+import amdsmi
+
+amdsmi.amdsmi_init()
+try:
+    rows = []
+    for index, handle in enumerate(amdsmi.amdsmi_get_processor_handles()):
+        try:
+            processes = amdsmi.amdsmi_get_gpu_process_list(handle)
+        except Exception:
+            processes = []
+        rows.append({"gpu": index, "processes": processes})
+    print(json.dumps(rows))
+finally:
+    try:
+        amdsmi.amdsmi_shut_down()
+    except Exception:
+        pass
+"""
+    env = os.environ.copy()
+    env.setdefault("AMDSMI_PROCESS_INFO_CACHE_MS", "100")
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            env=env,
+            text=True,
+            timeout=3,
+        )
+    except Exception:
+        return None
+
+    out = (proc.stdout or "").strip()
+    if not out:
+        return None
+    try:
+        data = json.loads(out)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, list):
+        return None
+
+    by_gpu: Dict[int, List[Dict[str, Any]]] = {}
+    for gpu_item in data:
+        if not isinstance(gpu_item, dict):
+            continue
+        try:
+            gpu_index = int(_field(gpu_item, "gpu", "GPU"))
+        except (TypeError, ValueError):
+            continue
+
+        rows: List[Dict[str, Any]] = []
+        process_list = _field(gpu_item, "processes", "process_list") or []
+        if isinstance(process_list, list):
+            for item in process_list:
+                if not isinstance(item, dict):
+                    continue
+                process_info = _field(item, "process_info")
+                if isinstance(process_info, str):
+                    continue
+                source = process_info if isinstance(process_info, dict) else item
+                row = _process_from_mapping(
+                    source, (num_cu_by_gpu or {}).get(gpu_index)
+                )
+                if row is not None:
+                    rows.append(row)
+        by_gpu[gpu_index] = rows
+    return by_gpu
+
+
 def _processes(handle: Any) -> List[Dict[str, Any]]:
+    """Return GPU processes exactly from libamd_smi's process list API.
+
+    This intentionally does not validate PIDs with ``/proc``. amd-smi itself
+    trusts ``amdsmi_get_gpu_process_list``; in containers, GPU-visible PIDs can
+    be outside the Jupyter server's process namespace.
+    """
     raw = _safe(amdsmi.amdsmi_get_gpu_process_list, handle)
     procs: List[Dict[str, Any]] = []
     if not isinstance(raw, list):
         return procs
+    num_cu = _compute_units(handle)
     for item in raw:
         if not isinstance(item, dict):
             continue
-        mem = item.get("memory_usage")
-        vram_used = None
-        if isinstance(mem, dict):
-            vram_used = _normalise(mem.get("vram_mem"))
-        procs.append(
-            {
-                "pid": _normalise(item.get("pid")),
-                "name": _normalise(item.get("name")),
-                "vram_bytes": vram_used,
-            }
-        )
+        pid = _normalise(item.get("pid"))
+        if pid is None:
+            continue
+        try:
+            pid_int = int(pid)
+            if pid_int <= 0:
+                continue
+        except (TypeError, ValueError):
+            continue
+        row = _process_from_mapping(item, num_cu)
+        if row is not None:
+            procs.append(row)
     return procs
 
 
@@ -345,8 +572,11 @@ def sample() -> Dict[str, Any]:
 
     import time
 
+    handles = _handles()
+    num_cu_by_gpu = {index: _compute_units(handle) for index, handle in enumerate(handles)}
+    fresh_processes = _fresh_processes_by_gpu(num_cu_by_gpu)
     gpus: List[Dict[str, Any]] = []
-    for index, handle in enumerate(_handles()):
+    for index, handle in enumerate(handles):
         gpus.append(
             {
                 "index": index,
@@ -356,7 +586,11 @@ def sample() -> Dict[str, Any]:
                 "power": _power(handle),
                 "temperature_c": _temperature(handle),
                 "clock": _clock(handle),
-                "processes": _processes(handle),
+                "processes": (
+                    fresh_processes.get(index, [])
+                    if fresh_processes is not None
+                    else _processes(handle)
+                ),
             }
         )
     return {"available": True, "error": None, "timestamp": time.time(), "gpus": gpus}

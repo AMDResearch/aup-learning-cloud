@@ -56,6 +56,7 @@
     "@jupyterlab/launcher": "^4.0.0",
     "@jupyterlab/notebook": "^4.0.0",
     "@jupyterlab/services": "^7.0.0",
+    "@jupyterlab/settingregistry": "^4.0.0",
     "@jupyterlab/ui-components": "^4.0.0",
     "@lumino/widgets": "^2.0.0",
     "chart.js": "^4.4.0",
@@ -83,6 +84,7 @@
   },
   "jupyterlab": {
     "extension": true,
+    "schemaDir": "schema",
     "outputDir": "jupyterlab_rocm/labextension",
     "discovery": {
       "server": {

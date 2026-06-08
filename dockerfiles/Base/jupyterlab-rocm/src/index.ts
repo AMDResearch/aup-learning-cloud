@@ -9,9 +9,14 @@ import { ILauncher } from '@jupyterlab/launcher';
 import { INotebookTracker, NotebookPanel } from '@jupyterlab/notebook';
 import { OutputAreaModel, SimplifiedOutputArea } from '@jupyterlab/outputarea';
 import { IRenderMimeRegistry } from '@jupyterlab/rendermime';
+import { ISettingRegistry } from '@jupyterlab/settingregistry';
 import { LabIcon } from '@jupyterlab/ui-components';
 import { PanelLayout, Widget } from '@lumino/widgets';
-import { CellProfileFloatButton } from './cellProfileFloat';
+import {
+  buildCellProfileFlags,
+  DEFAULT_CELL_PROFILE_SETTINGS,
+  readCellProfileSettings
+} from './cellProfileSettings';
 import { RocmWidget } from './widget';
 
 const rocmIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24">
@@ -40,8 +45,9 @@ namespace CommandIDs {
   export const profileCell = 'jupyterlab-rocm:profile-cell';
 }
 
-// Default trace preset used by the Cell Profile button.
-const CELL_PROFILE_FLAGS = '--preset kernel';
+// Cell Profile magic flags, kept in sync with the user's settings. Defaults to
+// the "full cell" preset until settings load.
+let cellProfileFlags = buildCellProfileFlags(DEFAULT_CELL_PROFILE_SETTINGS);
 
 // Tracks the inline profile-result widget mounted under each cell so a repeat
 // click disposes the previous result instead of stacking widgets.
@@ -60,7 +66,7 @@ function buildProfileCellCode(source: string): string {
     'except Exception:\n' +
     '    pass\n';
   const run = `get_ipython().run_cell_magic('rocprofv3', ${JSON.stringify(
-    CELL_PROFILE_FLAGS
+    cellProfileFlags
   )}, ${JSON.stringify(source)})`;
   return loadExt + run;
 }
@@ -137,7 +143,8 @@ const plugin: JupyterFrontEndPlugin<void> = {
     ILauncher,
     INotebookTracker,
     ILayoutRestorer,
-    IRenderMimeRegistry
+    IRenderMimeRegistry,
+    ISettingRegistry
   ],
   activate: (
     app: JupyterFrontEnd,
@@ -145,13 +152,32 @@ const plugin: JupyterFrontEndPlugin<void> = {
     launcher: ILauncher | null,
     notebooks: INotebookTracker | null,
     restorer: ILayoutRestorer | null,
-    rendermime: IRenderMimeRegistry | null
+    rendermime: IRenderMimeRegistry | null,
+    settingRegistry: ISettingRegistry | null
   ) => {
     const { commands, shell } = app;
 
+    // Keep the Cell Profile button's magic flags in sync with user settings.
+    if (settingRegistry) {
+      void settingRegistry
+        .load(plugin.id)
+        .then(settings => {
+          const apply = (): void => {
+            cellProfileFlags = buildCellProfileFlags(
+              readCellProfileSettings(settings)
+            );
+          };
+          apply();
+          settings.changed.connect(apply);
+        })
+        .catch(err => {
+          console.warn('jupyterlab-rocm: could not load settings', err);
+        });
+    }
+
     // Create the panel once and dock it in the left sidebar so it is visible
     // by default near the top of the leftmost column.
-    const widget = new RocmWidget();
+    const widget = new RocmWidget(settingRegistry, notebooks);
     widget.id = 'jupyterlab-rocm-sidebar';
     widget.title.icon = rocmIcon;
     // Show only the icon in the sidebar tab (no rotated text label); the
@@ -176,7 +202,13 @@ const plugin: JupyterFrontEndPlugin<void> = {
       caption:
         'Profile the active PyTorch GPU cell with torch.profiler; results appear under the cell',
       icon: profileIcon,
-      isEnabled: () => !!notebooks?.activeCell,
+      isEnabled: () => {
+        const cell = notebooks?.activeCell;
+        if (!cell || cell.model.type !== 'code') {
+          return false;
+        }
+        return cell.model.sharedModel.getSource().trim().length > 0;
+      },
       execute: async () => {
         const panel = notebooks?.currentWidget;
         const cell = panel?.content.activeCell;
@@ -211,12 +243,17 @@ const plugin: JupyterFrontEndPlugin<void> = {
     });
 
     if (notebooks) {
-      void new CellProfileFloatButton(
-        notebooks,
-        commands,
-        CommandIDs.profileCell,
-        profileIcon
-      );
+      const notifyProfileCell = (): void => {
+        commands.notifyCommandChanged(CommandIDs.profileCell);
+      };
+      notebooks.activeCellChanged.connect(notifyProfileCell);
+      notebooks.currentChanged.connect(notifyProfileCell);
+      notebooks.widgetAdded.connect((_, panel) => {
+        panel.content.activeCellChanged.connect(notifyProfileCell);
+      });
+      notebooks.forEach(panel => {
+        panel.content.activeCellChanged.connect(notifyProfileCell);
+      });
     }
 
     if (palette) {

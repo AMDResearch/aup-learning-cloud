@@ -62,7 +62,11 @@ export interface IGpuClock {
 export interface IGpuProcess {
   pid: number | null;
   name: string | null;
-  vram_bytes: number | null;
+  gtt_mem: number | null;
+  vram_mem: number | null;
+  mem_usage: number | null;
+  cu_percent: number | null;
+  sdma_us: number | null;
 }
 
 export interface IGpuSample {
@@ -99,6 +103,22 @@ export interface IMemoryCopyStat {
   total_ns: number;
 }
 
+export interface IOperatorStat {
+  name: string;
+  calls: number;
+  cpu_total_ns: number;
+  self_cpu_ns: number;
+  gpu_total_ns: number;
+  self_gpu_ns: number;
+  cpu_mem: number;
+  self_cpu_mem: number;
+  gpu_mem: number;
+  self_gpu_mem: number;
+  input_shapes: string | null;
+  stack: string[] | null;
+  percent: number;
+}
+
 export interface IProfileJob {
   id: string;
   target_type: string;
@@ -110,14 +130,27 @@ export interface IProfileJob {
   command: string;
   created: number;
   finished: number | null;
+  extra?: {
+    backend?: string;
+    mode?: 'full' | 'live';
+    approx?: boolean;
+    trace_available?: boolean;
+    window_s?: number;
+    warmup_s?: number;
+    [key: string]: any;
+  };
   stdout?: string;
   stderr?: string;
   kernels?: IKernelStat[];
+  operators?: IOperatorStat[];
   memory_copies?: IMemoryCopyStat[];
   summary?: {
     kernel_count: number;
     total_kernel_ns: number;
     total_dispatches: number;
+    operator_count?: number;
+    self_cpu_total_ns?: number;
+    self_gpu_total_ns?: number;
   };
 }
 

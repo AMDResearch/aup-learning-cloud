@@ -2,7 +2,12 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Line } from 'react-chartjs-2';
 import { ensureChartsRegistered } from '../chartSetup';
 import { requestAPI, streamUrl } from '../handler';
-import { IGpuSample, IGpusResponse, IMetricsSample } from '../types';
+import {
+  IGpuProcess,
+  IGpuSample,
+  IGpusResponse,
+  IMetricsSample
+} from '../types';
 
 ensureChartsRegistered();
 
@@ -40,6 +45,67 @@ function fmt(value: number | null | undefined, unit = '', digits = 0): string {
     return 'N/A';
   }
   return `${value.toFixed(digits)}${unit}`;
+}
+
+function fmtBytes(bytes: number | null | undefined, digits = 1): string {
+  if (bytes === null || bytes === undefined || Number.isNaN(bytes)) {
+    return 'N/A';
+  }
+  return `${(bytes / 1048576).toFixed(digits)} MB`;
+}
+
+function fmtSdma(us: number | null | undefined): string {
+  if (us === null || us === undefined || Number.isNaN(us)) {
+    return 'N/A';
+  }
+  return `${us} us`;
+}
+
+function processDisplayName(name: string | null): string {
+  if (name === null || name === undefined || name === '') {
+    return 'N/A';
+  }
+  const base = name.split('/').pop() ?? name;
+  return base || 'N/A';
+}
+
+interface IProcessRow {
+  gpuIndex: number;
+  gpuName: string;
+  pid: IGpuProcess['pid'];
+  name: IGpuProcess['name'];
+  gtt_mem: IGpuProcess['gtt_mem'];
+  vram_mem: IGpuProcess['vram_mem'];
+  mem_usage: IGpuProcess['mem_usage'];
+  cu_percent: IGpuProcess['cu_percent'];
+  sdma_us: IGpuProcess['sdma_us'];
+}
+
+function collectProcessRows(gpus: IGpuSample[]): IProcessRow[] {
+  const rows: IProcessRow[] = [];
+  for (const gpu of gpus) {
+    for (const proc of gpu.processes) {
+      if (proc.pid == null || proc.pid <= 0) {
+        continue;
+      }
+      rows.push({
+        gpuIndex: gpu.index,
+        gpuName: gpu.name,
+        pid: proc.pid,
+        name: proc.name,
+        gtt_mem: proc.gtt_mem,
+        vram_mem: proc.vram_mem,
+        mem_usage: proc.mem_usage,
+        cu_percent: proc.cu_percent,
+        sdma_us: proc.sdma_us
+      });
+    }
+  }
+  return rows.sort(
+    (a, b) =>
+      a.gpuIndex - b.gpuIndex ||
+      (a.pid ?? Number.MAX_SAFE_INTEGER) - (b.pid ?? Number.MAX_SAFE_INTEGER)
+  );
 }
 
 // chart.js draws on a canvas and cannot resolve CSS variables, so resolve the
@@ -154,9 +220,87 @@ function GpuCard(props: { gpu: IGpuSample; history: IGpuHistory }): JSX.Element 
           Clock: {gpu.clock ? fmt(gpu.clock.cur_mhz, ' MHz') : 'N/A'}
         </span>
         <span>UMC: {fmt(gpu.activity.umc, '%')}</span>
-        <span>Processes: {gpu.processes.length}</span>
       </div>
     </div>
+  );
+}
+
+function ProcessSection(props: { gpus: IGpuSample[] }): JSX.Element {
+  const rows = collectProcessRows(props.gpus);
+  const gpuCount = props.gpus.length;
+
+  return (
+    <section className="jp-rocm-process-section">
+      <div className="jp-rocm-process-header">
+        <h3 className="jp-rocm-process-title">GPU Processes</h3>
+        <span className="jp-rocm-process-meta">
+          {rows.length} process{rows.length === 1 ? '' : 'es'} across{' '}
+          {gpuCount} GPU{gpuCount === 1 ? '' : 's'}
+        </span>
+      </div>
+      <div className="jp-rocm-process-table-wrap">
+        <table className="jp-rocm-table jp-rocm-process-table">
+            <thead>
+              <tr>
+                <th>GPU</th>
+                <th className="jp-rocm-process-num">PID</th>
+                <th>Process Name</th>
+                <th className="jp-rocm-process-num">GTT_MEM</th>
+                <th className="jp-rocm-process-num">VRAM_MEM</th>
+                <th className="jp-rocm-process-num">MEM_USAGE</th>
+                <th className="jp-rocm-process-num">CU %</th>
+                <th className="jp-rocm-process-num">SDM</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={8}
+                    className="jp-rocm-process-empty"
+                  >
+                    No running processes found
+                  </td>
+                </tr>
+              ) : (
+                rows.map(row => (
+                  <tr
+                    key={`${row.gpuIndex}-${row.pid ?? 'na'}-${row.name ?? ''}`}
+                  >
+                    <td
+                      className="jp-rocm-process-gpu"
+                      title={row.gpuName}
+                    >
+                      {row.gpuIndex}
+                    </td>
+                    <td className="jp-rocm-process-num">
+                      {row.pid ?? 'N/A'}
+                    </td>
+                    <td className="jp-rocm-proc-name" title={row.name ?? ''}>
+                      {processDisplayName(row.name)}
+                    </td>
+                    <td className="jp-rocm-process-num">
+                      {fmtBytes(row.gtt_mem)}
+                    </td>
+                    <td className="jp-rocm-process-num">
+                      {fmtBytes(row.vram_mem)}
+                    </td>
+                    <td className="jp-rocm-process-num">
+                      {fmtBytes(row.mem_usage)}
+                    </td>
+                    <td className="jp-rocm-process-num">
+                      {fmt(row.cu_percent, '%', 1)}
+                    </td>
+                    <td className="jp-rocm-process-num">
+                      {fmtSdma(row.sdma_us)}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+    </section>
   );
 }
 
@@ -291,6 +435,10 @@ export function Dashboard(): JSX.Element {
           />
         ))}
       </div>
+
+      {sample?.available && sample.gpus.length > 0 && (
+        <ProcessSection gpus={sample.gpus} />
+      )}
     </div>
   );
 }

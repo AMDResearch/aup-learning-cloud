@@ -11,7 +11,7 @@ It has two parts:
   [`amdsmi`](https://rocm.docs.amd.com/projects/amdsmi/en/latest/) Python
   library.
 - **Cell Profile** — profile a single PyTorch GPU notebook cell with
-  `torch.profiler` in the live kernel (via the floating button or
+  `torch.profiler` in the live kernel (via the notebook toolbar button or
   `%%rocprofv3`), rendering the hottest kernels inline and in the sidebar.
 
 ## Architecture
@@ -110,13 +110,14 @@ torch.cuda.synchronize()
 ```
 
 Options: `--preset {runtime,kernel,sys,hip}` (or the `--kernel-trace` /
-`--hip-trace` / `--sys-trace` / `--runtime-trace` shortcuts), `--include` /
-`--exclude` kernel regexes, `--label`, and `--ready-timeout`.
+`--hip-trace` / `--sys-trace` / `--runtime-trace` shortcuts), `--label`,
+`--shapes` / `--memory` / `--stack` (extra `torch.profiler` detail), and
+`--trace` (keep the chrome trace for download).
 
-You can also click the floating **Cell Profile** button beside the active code
-cell to profile the
+You can also click **Cell Profile** in the notebook toolbar to profile the
 active PyTorch GPU cell without typing the magic; results appear under the cell
-and in the sidebar.
+and in the sidebar. To profile a long-running cell without re-running it, use
+the **Live capture** mode in the sidebar instead.
 
 ## Notes on unsupported metrics
 
