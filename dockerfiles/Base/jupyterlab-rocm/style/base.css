@@ -1,3 +1,7 @@
+:root {
+  --jp-rocm-cell-profile-accent: var(--jp-brand-color1);
+}
+
 .jp-rocm-widget {
   overflow: auto;
   background-color: var(--jp-layout-color1);
@@ -66,9 +70,7 @@
   color: var(--jp-warn-color1, #a05a00);
 }
 
-.jp-rocm-interval select,
-.jp-rocm-form select,
-.jp-rocm-form input {
+.jp-rocm-interval select {
   background: var(--jp-input-background, var(--jp-layout-color1));
   color: var(--jp-ui-font-color1);
   border: 1px solid var(--jp-border-color2);
@@ -170,13 +172,13 @@
 
 /* ---- Profiler ---- */
 
-.jp-rocm-cell-profiling {
+.jp-rocm-cell-profile {
   margin-bottom: 18px;
   padding-bottom: 14px;
   border-bottom: 1px solid var(--jp-border-color2);
 }
 
-.jp-rocm-cell-profiling h3 {
+.jp-rocm-cell-profile h3 {
   margin-bottom: 6px;
 }
 
@@ -209,52 +211,6 @@
   border: 1px solid var(--jp-border-color2);
   border-radius: 3px;
   padding: 3px 6px;
-}
-
-.jp-rocm-form {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-width: 640px;
-  margin-bottom: 12px;
-}
-
-.jp-rocm-form label {
-  display: flex;
-  flex-direction: column;
-  font-size: var(--jp-ui-font-size0);
-  color: var(--jp-ui-font-color2);
-}
-
-.jp-rocm-form label select,
-.jp-rocm-form label input {
-  margin-left: 0;
-  margin-top: 3px;
-}
-
-.jp-rocm-run-btn {
-  align-self: flex-start;
-  background: var(--jp-brand-color1);
-  color: #fff;
-  border: none;
-  border-radius: 3px;
-  padding: 6px 16px;
-  cursor: pointer;
-}
-
-.jp-rocm-run-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.jp-rocm-link-btn {
-  align-self: flex-start;
-  background: transparent;
-  color: var(--jp-brand-color1);
-  border: none;
-  cursor: pointer;
-  padding: 0;
-  font-size: var(--jp-ui-font-size0);
 }
 
 .jp-rocm-job-head {
@@ -340,6 +296,126 @@
   background: var(--jp-layout-color2);
   padding: 8px;
   border-radius: 4px;
+}
+
+/* ---- Floating Cell Profile button ---- */
+
+.jp-rocm-cell-profile-float {
+  position: fixed;
+  z-index: 1000;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--jp-border-color2);
+  border-radius: 50%;
+  background: var(--jp-layout-color1);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 22%);
+  cursor: pointer;
+  color: var(--jp-rocm-cell-profile-accent);
+  opacity: 0.85;
+  transition: opacity 0.15s ease, background 0.15s ease, transform 0.15s ease;
+}
+
+.jp-rocm-cell-profile-float:hover:not(:disabled) {
+  background: var(--jp-layout-color2);
+  border-color: var(--jp-rocm-cell-profile-accent);
+  opacity: 1;
+  transform: scale(1.12);
+}
+
+.jp-rocm-cell-profile-float:focus-visible {
+  outline: 2px solid var(--jp-brand-color1);
+  outline-offset: 2px;
+}
+
+.jp-rocm-cell-profile-float:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.jp-rocm-cell-profile-float[hidden] {
+  display: none !important;
+}
+
+.jp-rocm-cell-profile-float-icon {
+  display: inline-flex;
+  align-items: center;
+}
+
+/* ---- Inline cell profile result ---- */
+
+.jp-rocm-inline-result {
+  margin: 5px 0 4px;
+  padding: 0;
+  width: 100%;
+}
+
+.jp-rocm-inline-row {
+  display: flex;
+  flex-direction: row;
+  width: 100%;
+}
+
+.jp-rocm-inline-gutter {
+  flex: 0 0
+    calc(var(--jp-cell-collapser-width) + var(--jp-cell-prompt-width));
+}
+
+.jp-rocm-inline-content {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 1px solid var(--jp-border-color2);
+  border-left: 3px solid var(--jp-rocm-cell-profile-accent);
+  border-radius: 4px;
+  background: var(--jp-layout-color0);
+  overflow: hidden;
+}
+
+@media only screen and (width <= 760px) {
+  .jp-rocm-inline-gutter {
+    flex: 0 0 var(--jp-cell-collapser-width);
+  }
+}
+
+.jp-rocm-inline-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 3px 8px;
+  background: var(--jp-layout-color2);
+  border-bottom: 1px solid var(--jp-border-color2);
+}
+
+.jp-rocm-inline-title {
+  font-weight: 600;
+  font-size: var(--jp-ui-font-size0);
+  color: var(--jp-rocm-cell-profile-accent);
+}
+
+.jp-rocm-profile-title {
+  font-weight: 600;
+  color: var(--jp-rocm-cell-profile-accent);
+}
+
+.jp-rocm-inline-close {
+  background: transparent;
+  border: none;
+  color: var(--jp-ui-font-color2);
+  cursor: pointer;
+  font-size: var(--jp-ui-font-size0);
+  line-height: 1;
+  padding: 2px 4px;
+}
+
+.jp-rocm-inline-close:hover {
+  color: var(--jp-ui-font-color1);
+}
+
+.jp-rocm-inline-output {
+  padding: 2px 8px;
 }
 
 /* ---- GPU Info (static) ---- */

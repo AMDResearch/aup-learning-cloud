@@ -308,6 +308,11 @@ RUN mkdir -p /home/$NB_USER/.jupyter && \
     chown -R $NB_UID:$NB_GID /home/$NB_USER/.jupyter && \
     chown -R $NB_UID:$NB_GID /home/$NB_USER/.local
 
+# Example notebook for rocprofv3 cell attach profiling (GEMM smoke test)
+RUN mkdir -p /opt/workspace/examples
+COPY notebooks/*.ipynb /opt/workspace/examples/
+RUN chown -R $NB_UID:$NB_GID /opt/workspace
+
 # Create startup script - ensuring it exists in the correct location
 RUN echo '#!/bin/bash' > /home/$NB_USER/start-jupyter.sh && \
     echo 'export USER=jovyan' >> /home/$NB_USER/start-jupyter.sh && \

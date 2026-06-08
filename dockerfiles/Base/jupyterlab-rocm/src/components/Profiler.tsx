@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Bar } from 'react-chartjs-2';
 import { ensureChartsRegistered } from '../chartSetup';
 import { requestAPI } from '../handler';
-import { IKernelStat, IProfileJob, IRocprofStatus } from '../types';
+import { IKernelStat, IProfileJob } from '../types';
 
 ensureChartsRegistered();
 
@@ -44,7 +44,7 @@ function KernelChart(props: { kernels: IKernelStat[] }): JSX.Element {
       {
         label: 'Total time (ms)',
         data: top.map(k => nsToMs(k.total_ns)),
-        backgroundColor: '#e8500e'
+        backgroundColor: cssVar('--jp-rocm-cell-profile-accent', '#1976d2')
       }
     ]
   };
@@ -75,7 +75,7 @@ function JobResults(props: { job: IProfileJob }): JSX.Element {
     <div className="jp-rocm-job">
       <div className="jp-rocm-job-head">
         <span className={`jp-rocm-badge ${job.status}`}>{job.status}</span>
-        <code className="jp-rocm-cmd">{job.command}</code>
+        {job.command ? <code className="jp-rocm-cmd">{job.command}</code> : null}
       </div>
 
       {job.status === 'error' && (
@@ -125,15 +125,15 @@ function JobResults(props: { job: IProfileJob }): JSX.Element {
 
       {job.status === 'done' && (!job.kernels || job.kernels.length === 0) && (
         <div className="jp-rocm-loading">
-          No kernel dispatches were captured. Try the "kernel" or "sys" preset,
-          or verify the target actually launches GPU kernels.
+          No kernel dispatches were captured. Make sure the cell launches GPU
+          work.
         </div>
       )}
     </div>
   );
 }
 
-function CellProfiling(props: { rocprof: IRocprofStatus | null }): JSX.Element {
+export function Profiler(): JSX.Element {
   const [jobs, setJobs] = useState<IProfileJob[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const timer = useRef<number | undefined>(undefined);
@@ -157,216 +157,42 @@ function CellProfiling(props: { rocprof: IRocprofStatus | null }): JSX.Element {
   }, []);
 
   const current = jobs.find(j => j.id === selected) || jobs[0] || null;
-  const attach = props.rocprof?.attach;
-
-  return (
-    <div className="jp-rocm-cell-profiling">
-      <h3>Cell profiling (live attach)</h3>
-      {attach && !attach.supported && attach.hint && (
-        <div className="jp-rocm-error">{attach.hint}</div>
-      )}
-      {attach && attach.supported && !attach.tool_attach_env && attach.hint && (
-        <div className="jp-rocm-loading">{attach.hint}</div>
-      )}
-      <p className="jp-rocm-hint">
-        Put <code>%load_ext jupyterlab_rocm</code> in a cell, then start a cell
-        with <code>%%rocprofv3</code> &mdash; or click <b>Profile cell</b> in the
-        notebook toolbar. The cell runs in the live kernel (state is preserved)
-        and results appear below.
-      </p>
-      {jobs.length > 1 && (
-        <label className="jp-rocm-cell-select">
-          Result
-          <select
-            value={current?.id ?? ''}
-            onChange={e => setSelected(e.target.value)}
-          >
-            {jobs.map(j => (
-              <option key={j.id} value={j.id}>
-                {new Date(j.created * 1000).toLocaleTimeString()} &mdash;{' '}
-                {j.preset}
-              </option>
-            ))}
-          </select>
-        </label>
-      )}
-      {current ? (
-        <JobResults job={current} />
-      ) : (
-        <div className="jp-rocm-loading">
-          No cell profiles yet. Run a cell with <code>%%rocprofv3</code>.
-        </div>
-      )}
-    </div>
-  );
-}
-
-export function Profiler(props: {
-  getCurrentNotebook: () => string | null;
-}): JSX.Element {
-  const [targetType, setTargetType] = useState<'notebook' | 'script' | 'command'>(
-    'notebook'
-  );
-  const [target, setTarget] = useState('');
-  const [preset, setPreset] = useState('runtime');
-  const [includeRegex, setIncludeRegex] = useState('');
-  const [excludeRegex, setExcludeRegex] = useState('');
-  const [job, setJob] = useState<IProfileJob | null>(null);
-  const [rocprof, setRocprof] = useState<IRocprofStatus | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const pollRef = useRef<number | undefined>(undefined);
-
-  useEffect(() => {
-    requestAPI<{ rocprof: IRocprofStatus }>('profile')
-      .then(res => setRocprof(res.rocprof))
-      .catch(err => console.error('jupyterlab-rocm: profile status', err));
-    return () => {
-      if (pollRef.current) {
-        window.clearInterval(pollRef.current);
-      }
-    };
-  }, []);
-
-  const useCurrentNotebook = (): void => {
-    const path = props.getCurrentNotebook();
-    if (path) {
-      setTargetType('notebook');
-      setTarget(path);
-    } else {
-      setError('No notebook is currently active.');
-    }
-  };
-
-  const poll = (id: string): void => {
-    if (pollRef.current) {
-      window.clearInterval(pollRef.current);
-    }
-    pollRef.current = window.setInterval(async () => {
-      try {
-        const updated = await requestAPI<IProfileJob>(`profile/${id}`);
-        setJob(updated);
-        if (updated.status === 'done' || updated.status === 'error') {
-          if (pollRef.current) {
-            window.clearInterval(pollRef.current);
-          }
-        }
-      } catch (err) {
-        console.error('jupyterlab-rocm: poll failed', err);
-      }
-    }, 1000);
-  };
-
-  const start = async (): Promise<void> => {
-    setError(null);
-    if (!target) {
-      setError('Please provide a target.');
-      return;
-    }
-    const extra: Record<string, unknown> = {};
-    if (includeRegex) {
-      extra.kernel_include_regex = includeRegex;
-    }
-    if (excludeRegex) {
-      extra.kernel_exclude_regex = excludeRegex;
-    }
-    try {
-      const created = await requestAPI<IProfileJob>('profile', {
-        method: 'POST',
-        body: JSON.stringify({
-          target_type: targetType,
-          target,
-          preset,
-          extra
-        })
-      });
-      setJob(created);
-      poll(created.id);
-    } catch (err: any) {
-      setError(err?.message || String(err));
-    }
-  };
-
-  const running = job && (job.status === 'queued' || job.status === 'running');
 
   return (
     <div className="jp-rocm-profiler">
-      <CellProfiling rocprof={rocprof} />
-
-      <h3>rocprofv3 Profiler</h3>
-      {rocprof && !rocprof.available && (
-        <div className="jp-rocm-error">{rocprof.error}</div>
-      )}
-
-      <div className="jp-rocm-form">
-        <label>
-          Target type
-          <select
-            value={targetType}
-            onChange={e => setTargetType(e.target.value as any)}
-          >
-            <option value="notebook">Notebook (.ipynb)</option>
-            <option value="script">Python script (.py)</option>
-            <option value="command">Custom command</option>
-          </select>
-        </label>
-        <label className="jp-rocm-target">
-          Target
-          <input
-            type="text"
-            value={target}
-            placeholder={
-              targetType === 'command'
-                ? 'e.g. python train.py --epochs 1'
-                : 'absolute or workspace-relative path'
-            }
-            onChange={e => setTarget(e.target.value)}
-          />
-        </label>
-        {targetType === 'notebook' && (
-          <button className="jp-rocm-link-btn" onClick={useCurrentNotebook}>
-            Use current notebook
-          </button>
+      <div className="jp-rocm-cell-profile">
+        <h3>Cell Profile</h3>
+        <p className="jp-rocm-hint">
+          Click the floating <b>Cell Profile</b> button beside the active code
+          cell (or use <code>%%rocprofv3</code>). PyTorch GPU cells are profiled
+          with <code>torch.profiler</code> in the live kernel. Results appear
+          under the cell and here.
+        </p>
+        {jobs.length > 1 && (
+          <label className="jp-rocm-cell-select">
+            Result
+            <select
+              value={current?.id ?? ''}
+              onChange={e => setSelected(e.target.value)}
+            >
+              {jobs.map(j => (
+                <option key={j.id} value={j.id}>
+                  {new Date(j.created * 1000).toLocaleTimeString()} &mdash;{' '}
+                  {j.preset}
+                </option>
+              ))}
+            </select>
+          </label>
         )}
-        <label>
-          Trace preset
-          <select value={preset} onChange={e => setPreset(e.target.value)}>
-            {(rocprof?.presets ?? ['runtime', 'kernel', 'sys', 'hip']).map(p => (
-              <option key={p} value={p}>
-                {p}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Include kernels (regex)
-          <input
-            type="text"
-            value={includeRegex}
-            placeholder="optional"
-            onChange={e => setIncludeRegex(e.target.value)}
-          />
-        </label>
-        <label>
-          Exclude kernels (regex)
-          <input
-            type="text"
-            value={excludeRegex}
-            placeholder="optional"
-            onChange={e => setExcludeRegex(e.target.value)}
-          />
-        </label>
-        <button
-          className="jp-rocm-run-btn"
-          onClick={start}
-          disabled={!!running || (rocprof ? !rocprof.available : false)}
-        >
-          {running ? 'Profiling...' : 'Run profiling'}
-        </button>
+        {current ? (
+          <JobResults job={current} />
+        ) : (
+          <div className="jp-rocm-loading">
+            No Cell Profile results yet. Click <b>Cell Profile</b> on a PyTorch
+            GPU cell.
+          </div>
+        )}
       </div>
-
-      {error && <div className="jp-rocm-error">{error}</div>}
-
-      {job && <JobResults job={job} />}
     </div>
   );
 }

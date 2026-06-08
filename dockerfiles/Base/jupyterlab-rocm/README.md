@@ -10,28 +10,23 @@ It has two parts:
   temperature, clocks, processes) over a WebSocket, collected through the
   [`amdsmi`](https://rocm.docs.amd.com/projects/amdsmi/en/latest/) Python
   library.
-- A **Profiler** that runs `rocprofv3` against the current notebook, a Python
-  script, or a custom command, then parses the kernel trace and shows a sorted
-  table and a bar chart of the hottest kernels.
-- A **`%%rocprofv3` cell magic** that profiles a single notebook cell by
-  attaching `rocprofv3` to the *live* kernel (so variables from earlier cells
-  are preserved), rendering the hottest kernels inline and in the sidebar.
+- **Cell Profile** — profile a single PyTorch GPU notebook cell with
+  `torch.profiler` in the live kernel (via the floating button or
+  `%%rocprofv3`), rendering the hottest kernels inline and in the sidebar.
 
 ## Architecture
 
 ```
 JupyterLab frontend (TypeScript + React)
   ├── GPU Monitor  ──WebSocket──►  /jupyterlab-rocm/stream
-  ├── Profiler     ──REST───────►  /jupyterlab-rocm/profile
-  └── Profile cell ──kernel exec─►  %%rocprofv3 (in the IPython kernel)
+  └── Cell Profile ──kernel exec─►  %%rocprofv3 (torch.profiler in kernel)
                                         │
 jupyter_server extension (Tornado)      │   ┌─ cell job JSON files ─┐
   ├── metrics.py   ── amdsmi ──────────► AMD GPU                    │
-  ├── profiler.py  ── rocprofv3 ───────► AMD GPU                    │
   └── /profile/cell  reads ◄────────────────────────────────────────┘
                                         │
 IPython kernel
-  └── magics.py    ── rocprofv3 --attach <kernel pid> ──► AMD GPU
+  └── magics.py    ── torch.profiler wraps run_cell ──► AMD GPU
 ```
 
 ## Requirements
@@ -40,7 +35,7 @@ IPython kernel
 - Python >= 3.9, JupyterLab >= 4.
 - `amdsmi` Python package (ships with ROCm). It is **not** installed as a hard
   dependency because it is normally provided by the system ROCm tree.
-- `rocprofv3` on `PATH` or in `/opt/rocm/bin` (only needed for the profiler).
+- PyTorch with ROCm/CUDA support (for Cell Profile).
 - The server process must be able to access `/dev/kfd` and `/dev/dri` (add your
   user to the `render` and `video` groups).
 
@@ -94,17 +89,13 @@ jupyter labextension list          # should list jupyterlab-rocm
    command palette.
 2. The **GPU Monitor** tab shows live charts per GPU. Adjust the sampling
    interval in the toolbar.
-3. The **Profiler** tab lets you pick a target (use *Use current notebook* to
-   profile the active notebook), choose a trace preset (`runtime`, `kernel`,
-   `sys`, `hip`), optionally filter kernels by regex, and run `rocprofv3`. When
-   it finishes, the hottest kernels are shown as a table and bar chart.
+3. The **Cell Profile** tab lists recent cell profiling results.
 
-## Cell-level profiling (`%%rocprofv3`)
+## Cell Profile (`%%rocprofv3`)
 
-Profile a single cell while keeping the variables defined in earlier cells.
-`rocprofv3` attaches to the running kernel with `--attach <pid>`, the cell runs
-in the live kernel, then the profiler detaches and shows the results inline and
-in the **Profiler** tab's *Cell profiling* section.
+Profile a single PyTorch GPU cell in the live kernel so variables from earlier
+cells are preserved. Results appear inline under the cell and in the **Cell
+Profile** sidebar tab.
 
 ```python
 %load_ext jupyterlab_rocm
@@ -122,37 +113,10 @@ Options: `--preset {runtime,kernel,sys,hip}` (or the `--kernel-trace` /
 `--hip-trace` / `--sys-trace` / `--runtime-trace` shortcuts), `--include` /
 `--exclude` kernel regexes, `--label`, and `--ready-timeout`.
 
-You can also click **Profile cell** in the notebook toolbar to profile the
-active cell without typing the magic; results appear in the sidebar.
-
-### Live-attach environment requirements
-
-`--attach` uses `ptrace`, so the environment must allow it **and** the kernel
-must be started with `ROCP_TOOL_ATTACH=1`:
-
-- **`ROCP_TOOL_ATTACH=1`** must be set *before the kernel starts* (it is read
-  during ROCm runtime initialization). Set it in your shell before launching
-  JupyterLab, or via a dedicated kernelspec so it is scoped to GPU profiling:
-
-  ```json
-  // ~/.local/share/jupyter/kernels/python3-rocmattach/kernel.json
-  {
-    "argv": ["python", "-m", "ipykernel_launcher", "-f", "{connection_file}"],
-    "display_name": "Python 3 (ROCm attach)",
-    "language": "python",
-    "env": { "ROCP_TOOL_ATTACH": "1" }
-  }
-  ```
-
-- **Yama `ptrace_scope`**: with the default `1`, the extension calls
-  `prctl(PR_SET_PTRACER, PR_SET_PTRACER_ANY)` from the kernel so the `rocprofv3`
-  child can attach. `ptrace_scope=2` additionally needs `CAP_SYS_PTRACE`;
-  `ptrace_scope=3` disables attach entirely.
-
-- **Containers**: add the ptrace capability, e.g. `docker run --cap-add=SYS_PTRACE ...`.
-
-The *Cell profiling* section shows a hint whenever any of these prerequisites
-is missing (reported by `GET /profile/cell`).
+You can also click the floating **Cell Profile** button beside the active code
+cell to profile the
+active PyTorch GPU cell without typing the magic; results appear under the cell
+and in the sidebar.
 
 ## Notes on unsupported metrics
 
@@ -171,10 +135,7 @@ authentication.
 | GET | `/gpus` | Static device info + amdsmi/rocprof availability |
 | GET | `/metrics` | One-shot metrics sample (polling fallback) |
 | WS | `/stream?interval=<ms>` | Live metrics stream |
-| GET | `/profile` | List profiling jobs + rocprof status |
-| POST | `/profile` | Start a profiling job |
-| GET | `/profile/cell` | List `%%rocprofv3` cell jobs + attach status |
-| GET | `/profile/{id}` | Job status and parsed results |
+| GET | `/profile/cell` | List Cell Profile jobs |
 
 ## License
 

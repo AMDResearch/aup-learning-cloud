@@ -1,0 +1,7 @@
+{
+  "title": "ROCm",
+  "description": "AMD ROCm GPU monitor and rocprofv3 profiler settings.",
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}

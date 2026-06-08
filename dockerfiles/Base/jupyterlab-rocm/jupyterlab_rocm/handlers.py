@@ -86,62 +86,12 @@ class StreamHandler(WebSocketMixin, JupyterHandler, tornado.websocket.WebSocketH
             self._pc = None
 
 
-class ProfileHandler(APIHandler):
-    """List existing profiling jobs or start a new one."""
-
-    @tornado.web.authenticated
-    def get(self):
-        self.finish(
-            json.dumps(
-                {"jobs": profiler.list_jobs(), "rocprof": profiler.get_status()}
-            )
-        )
-
-    @tornado.web.authenticated
-    def post(self):
-        body = self.get_json_body() or {}
-        target = body.get("target", "")
-        target_type = body.get("target_type", "notebook")
-        preset = body.get("preset", "runtime")
-        extra = body.get("extra", {}) or {}
-        if not target:
-            raise tornado.web.HTTPError(400, "Missing 'target'.")
-        if not isinstance(extra, dict):
-            raise tornado.web.HTTPError(400, "'extra' must be an object.")
-        job = profiler.start_profile(target_type, target, preset, extra)
-        self.set_status(201)
-        self.finish(json.dumps(job.to_dict(include_results=False)))
-
-
 class CellProfileHandler(APIHandler):
-    """Cell-level profiling jobs produced by the ``%%rocprofv3`` magic.
-
-    The magic runs inside the kernel process and persists results to a shared
-    directory; this handler surfaces them to the frontend together with the
-    live-attach environment status.
-    """
+    """Cell Profile jobs produced by the ``%%rocprofv3`` magic."""
 
     @tornado.web.authenticated
     def get(self):
-        self.finish(
-            json.dumps(
-                {
-                    "jobs": profiler.list_cell_jobs(),
-                    "rocprof": profiler.get_status(),
-                }
-            )
-        )
-
-
-class ProfileJobHandler(APIHandler):
-    """Status and parsed results for a single profiling job."""
-
-    @tornado.web.authenticated
-    def get(self, job_id):
-        job = profiler.get_job(job_id)
-        if job is None:
-            raise tornado.web.HTTPError(404, "Unknown job id.")
-        self.finish(json.dumps(job.to_dict(include_results=True)))
+        self.finish(json.dumps({"jobs": profiler.list_cell_jobs()}))
 
 
 def setup_handlers(web_app):
@@ -156,9 +106,6 @@ def setup_handlers(web_app):
         (route("metrics"), MetricsHandler),
         (route("static"), StaticHandler),
         (route("stream"), StreamHandler),
-        (route("profile"), ProfileHandler),
-        # The literal "cell" route must precede the generic job-id pattern.
         (route("profile", "cell"), CellProfileHandler),
-        (route("profile", r"(?P<job_id>[^/]+)"), ProfileJobHandler),
     ]
     web_app.add_handlers(host_pattern, handlers)

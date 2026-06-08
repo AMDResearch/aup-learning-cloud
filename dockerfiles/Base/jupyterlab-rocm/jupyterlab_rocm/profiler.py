@@ -1,8 +1,7 @@
-"""rocprofv3 profiling integration.
+"""Profiling integration for Cell Profile and optional rocprofv3 tooling.
 
-Runs ``rocprofv3`` against a notebook or Python script in a background thread,
-parses the resulting ``*_kernel_trace.csv`` file and aggregates per-kernel
-statistics for display in the JupyterLab frontend.
+Cell Profile uses ``torch.profiler`` in the live kernel. Helper routines for
+``rocprofv3`` CSV parsing remain for deferred subprocess/attach paths.
 """
 
 from __future__ import annotations
@@ -32,10 +31,6 @@ TRACE_PRESETS = {
     "hip": "--hip-trace",
 }
 
-_JOBS: Dict[str, "ProfileJob"] = {}
-_JOBS_LOCK = threading.Lock()
-
-
 def rocprof_executable() -> Optional[str]:
     """Locate the rocprofv3 binary."""
     for candidate in ("rocprofv3", "rocprof"):
@@ -55,6 +50,23 @@ def _read_ptrace_scope() -> Optional[int]:
             return int(handle.read().strip())
     except (OSError, ValueError):
         return None
+
+
+def attach_blockers() -> Optional[str]:
+    """Return a user-facing reason to skip live attach, or ``None`` if safe to try.
+
+    ``rocprofv3 --attach`` must run before PyTorch initialises the ROCprofiler
+    SDK in the kernel. If ``torch`` is already imported, attaching aborts the
+    ipykernel process (ROCPROFILER_REGISTER_LIBRARY conflict).
+    """
+    if "torch" in sys.modules:
+        return (
+            "PyTorch is already loaded in this kernel. rocprofv3 --attach "
+            "conflicts with PyTorch's ROCprofiler library and will crash the "
+            "kernel. Restart the kernel, then use Cell Profile without running "
+            "any prior import torch cells."
+        )
+    return None
 
 
 def attach_status(exe: Optional[str]) -> Dict[str, Any]:
@@ -133,6 +145,7 @@ class ProfileJob:
             "target_type": self.target_type,
             "target": self.target,
             "preset": self.preset,
+            "extra": dict(self.extra),
             "status": self.status,
             "error": self.error,
             "returncode": self.returncode,
@@ -151,52 +164,6 @@ class ProfileJob:
                 }
             )
         return data
-
-
-def _resolve_target_command(job: ProfileJob, workdir: str) -> List[str]:
-    """Build the command to be profiled (everything after ``--``)."""
-    if job.target_type == "notebook":
-        if not os.path.exists(job.target):
-            raise FileNotFoundError(f"Notebook not found: {job.target}")
-        script_path = os.path.join(workdir, "profiled_notebook.py")
-        convert = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "jupyter",
-                "nbconvert",
-                "--to",
-                "script",
-                "--output",
-                "profiled_notebook",
-                "--output-dir",
-                workdir,
-                job.target,
-            ],
-            capture_output=True,
-            text=True,
-        )
-        if convert.returncode != 0:
-            raise RuntimeError(
-                "nbconvert failed:\n" + convert.stdout + "\n" + convert.stderr
-            )
-        if not os.path.exists(script_path):
-            # nbconvert may keep the original extension casing; fall back to glob.
-            matches = glob.glob(os.path.join(workdir, "profiled_notebook*.py"))
-            if not matches:
-                raise RuntimeError("nbconvert did not produce a Python script.")
-            script_path = matches[0]
-        return [sys.executable, script_path]
-
-    if job.target_type == "script":
-        if not os.path.exists(job.target):
-            raise FileNotFoundError(f"Script not found: {job.target}")
-        return [sys.executable, job.target]
-
-    if job.target_type == "command":
-        return shlex.split(job.target)
-
-    raise ValueError(f"Unknown target_type: {job.target_type}")
 
 
 def _parse_kernel_trace(path: str) -> List[Dict[str, Any]]:
@@ -221,6 +188,11 @@ def _parse_kernel_trace(path: str) -> List[Dict[str, Any]]:
             entry["min_ns"] = min(entry["min_ns"], duration)
             entry["max_ns"] = max(entry["max_ns"], duration)
 
+    return _summarize_kernels(agg)
+
+
+def _summarize_kernels(agg: Dict[str, Dict[str, float]]) -> List[Dict[str, Any]]:
+    """Turn per-kernel aggregates into sorted result rows with percentages."""
     grand_total = sum(e["total_ns"] for e in agg.values()) or 1.0
     kernels: List[Dict[str, Any]] = []
     for name, entry in agg.items():
@@ -239,6 +211,15 @@ def _parse_kernel_trace(path: str) -> List[Dict[str, Any]]:
         )
     kernels.sort(key=lambda k: k["total_ns"], reverse=True)
     return kernels
+
+
+def _apply_kernel_summary(job: ProfileJob) -> None:
+    total_ns = sum(k["total_ns"] for k in job.kernels)
+    job.summary = {
+        "kernel_count": len(job.kernels),
+        "total_kernel_ns": total_ns,
+        "total_dispatches": sum(k["calls"] for k in job.kernels),
+    }
 
 
 def _parse_memory_copy_trace(path: str) -> List[Dict[str, Any]]:
@@ -275,38 +256,182 @@ def _collect_outputs(job: ProfileJob, outdir: str) -> None:
     if copy_files:
         job.memory_copies = _parse_memory_copy_trace(copy_files[0])
 
-    total_ns = sum(k["total_ns"] for k in job.kernels)
-    job.summary = {
-        "kernel_count": len(job.kernels),
-        "total_kernel_ns": total_ns,
-        "total_dispatches": sum(k["calls"] for k in job.kernels),
-    }
+    _apply_kernel_summary(job)
 
 
-def _run_job(job: ProfileJob) -> None:
+# ---------------------------------------------------------------------------
+# Cell Profile (torch.profiler in the live kernel)
+# ---------------------------------------------------------------------------
+
+_TORCH_GPU_CELL_RE = re.compile(
+    r"""
+    (?:^|\n)\s*(?:import\s+torch|from\s+torch\b)
+    |torch\.cuda\b
+    |device\s*=\s*['\"]cuda['\"]
+    |\.cuda\s*\(
+    |\.to\s*\(\s*['\"]cuda['\"]
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+
+def cell_looks_like_torch_gpu(cell_source: str) -> bool:
+    """Heuristic: does the cell source use PyTorch on a CUDA/ROCm device?"""
+    return bool(_TORCH_GPU_CELL_RE.search(cell_source))
+
+
+def torch_cuda_available() -> bool:
+    try:
+        import torch  # type: ignore
+
+        return bool(torch.cuda.is_available())
+    except Exception:
+        return False
+
+
+def cell_profile_unavailable_reason(cell_source: str) -> Optional[str]:
+    """Return a user-facing reason Cell Profile cannot run, or ``None`` if supported."""
+    if not cell_looks_like_torch_gpu(cell_source):
+        return (
+            "Cell Profile supports PyTorch GPU cells only "
+            '(import torch and use device="cuda" or .cuda()).'
+        )
+    if not torch_cuda_available():
+        return (
+            "PyTorch does not see a ROCm/CUDA device in this kernel. "
+            "Run a GPU check cell first."
+        )
+    return None
+
+
+def detect_cell_backend(cell_source: str) -> str:
+    """Pick the profiling backend for a notebook cell.
+
+    Cell Profile uses ``"torch"`` when the cell looks like PyTorch GPU code and
+    a ROCm/CUDA device is available. The ``"rocprofv3"`` subprocess path is
+    reserved for a future release and is not invoked by the UI today.
+    """
+    if cell_profile_unavailable_reason(cell_source) is None:
+        return "torch"
+    return "rocprofv3"
+
+
+def _parse_torch_kernel_events(trace_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Aggregate Chrome trace kernel events (``cat == "kernel"``) by name."""
+    agg: Dict[str, Dict[str, float]] = {}
+    for event in trace_data.get("traceEvents", []):
+        if event.get("cat") != "kernel" or event.get("ph") != "X":
+            continue
+        name = str(event.get("name") or "<unknown>")
+        # Chrome trace ``dur`` is in microseconds.
+        duration_ns = float(event.get("dur", 0) or 0) * 1000.0
+        if duration_ns <= 0:
+            continue
+        entry = agg.setdefault(
+            name,
+            {"calls": 0, "total_ns": 0.0, "min_ns": duration_ns, "max_ns": duration_ns},
+        )
+        entry["calls"] += 1
+        entry["total_ns"] += duration_ns
+        entry["min_ns"] = min(entry["min_ns"], duration_ns)
+        entry["max_ns"] = max(entry["max_ns"], duration_ns)
+    return _summarize_kernels(agg)
+
+
+def profile_cell_torch(shell: Any, cell: str, label: str, preset: str = "kernel") -> ProfileJob:
+    """Profile a cell in the live kernel using ``torch.profiler``."""
+    import contextlib
+    import io
+
+    import torch  # type: ignore
+    from torch.profiler import ProfilerActivity, profile  # type: ignore
+
+    job = ProfileJob("cell", label, preset, {"backend": "torch"})
     job.status = "running"
-    exe = rocprof_executable()
-    workdir = tempfile.mkdtemp(prefix="rocm_profile_")
+    trace_path: Optional[str] = None
+    try:
+        fd, trace_path = tempfile.mkstemp(suffix=".json", prefix="rocm_torch_trace_")
+        os.close(fd)
+        activities = [ProfilerActivity.CPU, ProfilerActivity.CUDA]
+        with profile(activities=activities, record_shapes=False) as prof:
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
+                io.StringIO()
+            ):
+                shell.run_cell(cell, store_history=False)
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+        prof.export_chrome_trace(trace_path)
+        with open(trace_path) as handle:
+            trace_data = json.load(handle)
+        job.kernels = _parse_torch_kernel_events(trace_data)
+        _apply_kernel_summary(job)
+        job.status = "done"
+    except Exception as exc:
+        job.status = "error"
+        job.error = f"{type(exc).__name__}: {exc}"
+    finally:
+        job.finished = time.time()
+        if trace_path:
+            try:
+                os.remove(trace_path)
+            except OSError:
+                pass
+    return job
+
+
+def _build_rocprof_command(
+    exe: str,
+    preset: str,
+    outdir: str,
+    target_cmd: List[str],
+    extra: Dict[str, Any],
+) -> List[str]:
+    flag = TRACE_PRESETS.get(preset, TRACE_PRESETS["kernel"])
+    command = [exe, flag, "--output-format", "csv", "-d", outdir]
+    include = extra.get("kernel_include_regex")
+    exclude = extra.get("kernel_exclude_regex")
+    if include:
+        command += ["--kernel-include-regex", str(include)]
+    if exclude:
+        command += ["--kernel-exclude-regex", str(exclude)]
+    command += ["--", *target_cmd]
+    return command
+
+
+def profile_cell_subprocess(
+    cell: str,
+    preset: str = "kernel",
+    extra: Optional[Dict[str, Any]] = None,
+    label: str = "notebook cell",
+) -> ProfileJob:
+    """Profile a cell in a fresh Python subprocess under ``rocprofv3``.
+
+    Deferred: Cell Profile does not call this path yet. Kept for tests and a
+    future non-PyTorch backend.
+    """
+    merged_extra = dict(extra or {})
+    merged_extra["backend"] = "rocprofv3-subprocess"
+    job = ProfileJob("cell", label, preset, merged_extra)
+    job.status = "running"
+    workdir = tempfile.mkdtemp(prefix="rocm_cell_")
     outdir = os.path.join(workdir, "out")
     os.makedirs(outdir, exist_ok=True)
+    script_path = os.path.join(workdir, "profiled_cell.py")
     try:
+        exe = rocprof_executable()
         if exe is None:
             raise RuntimeError("rocprofv3 executable not found.")
 
-        target_cmd = _resolve_target_command(job, workdir)
-        flag = TRACE_PRESETS.get(job.preset, TRACE_PRESETS["runtime"])
+        with open(script_path, "w") as handle:
+            handle.write(cell)
+            if not cell.endswith("\n"):
+                handle.write("\n")
 
-        command = [exe, flag, "--output-format", "csv", "-d", outdir]
-        include = job.extra.get("kernel_include_regex")
-        exclude = job.extra.get("kernel_exclude_regex")
-        if include:
-            command += ["--kernel-include-regex", str(include)]
-        if exclude:
-            command += ["--kernel-exclude-regex", str(exclude)]
-        command += ["--", *target_cmd]
+        command = _build_rocprof_command(
+            exe, preset, outdir, [sys.executable, script_path], merged_extra
+        )
         job.command = command
-
-        timeout = float(job.extra.get("timeout", 600))
+        timeout = float(merged_extra.get("timeout", 120))
         proc = subprocess.run(
             command,
             capture_output=True,
@@ -317,7 +442,6 @@ def _run_job(job: ProfileJob) -> None:
         job.returncode = proc.returncode
         job.stdout = proc.stdout
         job.stderr = proc.stderr
-
         _collect_outputs(job, outdir)
 
         if proc.returncode != 0 and not job.kernels:
@@ -334,32 +458,7 @@ def _run_job(job: ProfileJob) -> None:
     finally:
         job.finished = time.time()
         shutil.rmtree(workdir, ignore_errors=True)
-
-
-def start_profile(
-    target_type: str,
-    target: str,
-    preset: str = "runtime",
-    extra: Optional[Dict[str, Any]] = None,
-) -> ProfileJob:
-    job = ProfileJob(target_type, target, preset, extra or {})
-    with _JOBS_LOCK:
-        _JOBS[job.id] = job
-    thread = threading.Thread(target=_run_job, args=(job,), daemon=True)
-    thread.start()
     return job
-
-
-def get_job(job_id: str) -> Optional[ProfileJob]:
-    with _JOBS_LOCK:
-        return _JOBS.get(job_id)
-
-
-def list_jobs() -> List[Dict[str, Any]]:
-    with _JOBS_LOCK:
-        jobs = list(_JOBS.values())
-    jobs.sort(key=lambda j: j.created, reverse=True)
-    return [j.to_dict(include_results=False) for j in jobs]
 
 
 # ---------------------------------------------------------------------------

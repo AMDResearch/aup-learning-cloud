@@ -6,9 +6,7 @@ import { StaticInfo } from './components/StaticInfo';
 
 type Tab = 'monitor' | 'info' | 'profiler';
 
-function RocmPanel(props: {
-  getCurrentNotebook: () => string | null;
-}): JSX.Element {
+function RocmPanel(): JSX.Element {
   const [tab, setTab] = useState<Tab>('monitor');
   return (
     <div className="jp-rocm-root">
@@ -29,26 +27,21 @@ function RocmPanel(props: {
           className={tab === 'profiler' ? 'active' : ''}
           onClick={() => setTab('profiler')}
         >
-          Profiler
+          Cell Profile
         </button>
       </div>
       <div className="jp-rocm-tabpanel">
         {tab === 'monitor' && <Dashboard />}
         {tab === 'info' && <StaticInfo />}
-        {tab === 'profiler' && (
-          <Profiler getCurrentNotebook={props.getCurrentNotebook} />
-        )}
+        {tab === 'profiler' && <Profiler />}
       </div>
     </div>
   );
 }
 
 export class RocmWidget extends ReactWidget {
-  private _getCurrentNotebook: () => string | null;
-
-  constructor(getCurrentNotebook: () => string | null) {
+  constructor() {
     super();
-    this._getCurrentNotebook = getCurrentNotebook;
     this.addClass('jp-rocm-widget');
     this.id = 'jupyterlab-rocm-panel';
     this.title.label = 'ROCm GPU';
@@ -57,6 +50,6 @@ export class RocmWidget extends ReactWidget {
   }
 
   render(): JSX.Element {
-    return <RocmPanel getCurrentNotebook={this._getCurrentNotebook} />;
+    return <RocmPanel />;
   }
 }
