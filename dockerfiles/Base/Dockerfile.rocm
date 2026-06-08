@@ -62,6 +62,28 @@ RUN pnpm --filter @auplc/runtime-status run build && \
     test -f /build/runtime/notebook/jupyterlab-runtime-status/auplc_jupyterlab_runtime_status/labextension/package.json && \
     test -n "$(find /build/runtime/notebook/jupyterlab-runtime-status/auplc_jupyterlab_runtime_status/labextension/static -name 'remoteEntry*.js' -print -quit)"
 
+# Build the jupyterlab-rocm labextension in Node so the runtime image does not
+# need a local jlpm install or committed build artifacts.
+FROM ${NODE_IMAGE} AS jupyterlab-rocm-builder
+ARG JUPYTERLAB_VERSION="4.5.6"
+
+SHELL ["/bin/bash", "-c"]
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    python3-pip \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip3 install --no-cache-dir --break-system-packages \
+    "jupyterlab==${JUPYTERLAB_VERSION}"
+
+WORKDIR /build/jupyterlab-rocm
+COPY jupyterlab-rocm/package.json jupyterlab-rocm/yarn.lock jupyterlab-rocm/.yarnrc.yml ./
+RUN jlpm install
+COPY jupyterlab-rocm/ ./
+RUN jlpm build:prod
+
 FROM ${BASE_IMAGE}
 
 # Default Shell
@@ -254,8 +276,12 @@ RUN SITE="$(python3 -c 'import site; print(site.getsitepackages()[0])')" && \
         > "${SITE}/_auplc_amdsmi_init.py" && \
     echo 'import _auplc_amdsmi_init' > "${SITE}/_auplc_amdsmi_init.pth"
 
-# Install the bundled ROCm JupyterLab extension (prebuilt; no Node needed)
+# Install the bundled ROCm JupyterLab extension (frontend built in jupyterlab-rocm-builder)
 COPY jupyterlab-rocm /opt/jupyterlab-rocm
+COPY --from=jupyterlab-rocm-builder /build/jupyterlab-rocm/lib /opt/jupyterlab-rocm/lib
+COPY --from=jupyterlab-rocm-builder \
+    /build/jupyterlab-rocm/jupyterlab_rocm/labextension \
+    /opt/jupyterlab-rocm/jupyterlab_rocm/labextension
 RUN pip3 install --no-cache-dir /opt/jupyterlab-rocm && \
     jupyter server extension enable jupyterlab_rocm
 
