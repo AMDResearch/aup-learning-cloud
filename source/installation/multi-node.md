@@ -50,11 +50,15 @@ The Ansible flow assumes passwordless SSH to all nodes. In practice, the two mos
 - the control node cannot reach every node by hostname
 - the server node cannot SSH to agents with the same names used in `inventory.yml`
 
-If needed, use the helper noted in `deploy/scripts/README.md`:
+If needed, use the helper scripts in `deploy/scripts/`:
 
 ```bash
-ls deploy/scripts
+./deploy/scripts/edit_sshd.sh
+./deploy/scripts/setup_ssh_root_access.sh
+./deploy/scripts/deploy-kubeconfig.sh
 ```
+
+These scripts help enable root SSH login, copy SSH access to cluster nodes, and distribute kubeconfig where needed.
 
 You should also make sure `/etc/hosts` entries are consistent across the nodes when you rely on hostnames instead of direct IPs.
 
