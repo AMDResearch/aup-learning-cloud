@@ -2,20 +2,6 @@
 
 This section provides comprehensive guides for configuring and managing your JupyterHub deployment.
 
-```{toctree}
-:maxdepth: 2
-:hidden:
-
-configuration-reference
-README
-authentication-guide
-user-management
-admin-manual
-quota-system
-monitoring
-github-oauth-setup
-```
-
 ## Quick Links
 
 - {doc}`configuration-reference` - **runtime/values.yaml** — Full reference for all config sections (custom, hub, proxy, singleuser, etc.)

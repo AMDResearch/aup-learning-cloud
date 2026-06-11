@@ -29,21 +29,39 @@ AUP Learning Cloud is a tailored JupyterHub deployment designed to provide an in
 
 .. toctree::
    :maxdepth: 1
+   :caption: Learning Toolkits
    :hidden:
 
-   learning-toolkits/index
+   Overview <learning-toolkits/index>
+   learning-toolkits/computer-vision
+   learning-toolkits/deep-learning
+   learning-toolkits/llm-from-scratch
+   learning-toolkits/physics-simulation
 
 .. toctree::
    :maxdepth: 1
+   :caption: JupyterHub Configuration
    :hidden:
 
-   jupyterhub/index
+   Overview <jupyterhub/index>
+   jupyterhub/configuration-reference
+   jupyterhub/README
+   jupyterhub/authentication-guide
+   jupyterhub/user-management
+   jupyterhub/admin-manual
+   jupyterhub/quota-system
+   jupyterhub/monitoring
+   jupyterhub/github-oauth-setup
 
 .. toctree::
    :maxdepth: 1
+   :caption: User Guide
    :hidden:
 
-   user-guide/index
+   Overview <user-guide/index>
+   user-guide/platform-basics
+   user-guide/jupyterlab-guide
+   user-guide/code-server-guide
 
 .. toctree::
    :maxdepth: 1

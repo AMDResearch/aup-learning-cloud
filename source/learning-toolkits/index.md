@@ -38,13 +38,3 @@ Get started with Genesis, a high-performance physics engine with native AMD GPU 
 :::
 
 ::::
-
-```{toctree}
-:maxdepth: 1
-:hidden:
-
-computer-vision
-deep-learning
-llm-from-scratch
-physics-simulation
-```

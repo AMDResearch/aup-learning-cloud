@@ -2,15 +2,6 @@
 
 This section provides end-user guides for AUP Learning Cloud.
 
-```{toctree}
-:maxdepth: 2
-:hidden:
-
-platform-basics
-jupyterlab-guide
-code-server-guide
-```
-
 ## For Users
 
 Start with [Platform Basics](platform-basics.md) for login, environment selection, storage, and server lifecycle. Then use [JupyterLab Guide](jupyterlab-guide.md) or [Code Server Guide](code-server-guide.md) depending on the environment you launch. For authentication details, see the [Authentication Guide](../jupyterhub/authentication-guide.md). Your administrator can provide the JupyterHub URL; once logged in you can:
