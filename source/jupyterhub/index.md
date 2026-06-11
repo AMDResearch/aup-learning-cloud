@@ -4,6 +4,7 @@ This section provides comprehensive guides for configuring and managing your Jup
 
 ```{toctree}
 :maxdepth: 2
+:hidden:
 
 configuration-reference
 README
@@ -11,6 +12,7 @@ authentication-guide
 user-management
 admin-manual
 quota-system
+monitoring
 github-oauth-setup
 ```
 
@@ -22,4 +24,5 @@ github-oauth-setup
 - {doc}`user-management` - Manage users
 - {doc}`admin-manual` - Run common administrator workflows
 - {doc}`quota-system` - Configure quotas
+- {doc}`monitoring` - Connect Hub metrics to Prometheus and Grafana
 - {doc}`github-oauth-setup` - GitHub OAuth setup

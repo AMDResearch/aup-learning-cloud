@@ -4,6 +4,7 @@ This section provides end-user guides for AUP Learning Cloud.
 
 ```{toctree}
 :maxdepth: 2
+:hidden:
 
 platform-basics
 jupyterlab-guide

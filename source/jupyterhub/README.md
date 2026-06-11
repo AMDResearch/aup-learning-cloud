@@ -5,6 +5,7 @@
 - [Authentication Guide](./authentication-guide.md) - Authentication modes, GitHub org sync, native accounts, and admin bootstrap
 - [User Management Guide](./user-management.md) - Admin console and CLI-based user operations
 - [User Quota System](./quota-system.md) - Quota balances, rates, refresh rules, and admin actions
+- [Monitoring Deployment Guide](./monitoring.md) - Prometheus, Grafana, ServiceMonitor, dashboard, and alert setup
 - [GitHub App Setup](./github-oauth-setup.md) - Optional GitHub App integration for private repository access
 - [Configuration Reference](./configuration-reference.md) - Detailed `runtime/values.yaml` and chart configuration
 
