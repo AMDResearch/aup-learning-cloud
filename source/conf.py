@@ -57,6 +57,7 @@ html_theme_options = {
     "use_repository_button": False,
     "navigation_with_keys": True,
     "show_navbar_depth": 1,
+    "max_navbar_depth": 0,
 }
 # For AMD brand colors (#E8175D), add _static/custom.css and set html_css_files = ["custom.css"]
 
