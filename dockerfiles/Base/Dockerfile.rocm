@@ -79,9 +79,9 @@ RUN pip3 install --no-cache-dir --break-system-packages \
     "jupyterlab==${JUPYTERLAB_VERSION}"
 
 WORKDIR /build/jupyterlab-rocm
-COPY jupyterlab-rocm/package.json jupyterlab-rocm/yarn.lock jupyterlab-rocm/.yarnrc.yml ./
+COPY dockerfiles/Base/jupyterlab-rocm/package.json dockerfiles/Base/jupyterlab-rocm/yarn.lock dockerfiles/Base/jupyterlab-rocm/.yarnrc.yml ./
 RUN jlpm install
-COPY jupyterlab-rocm/ ./
+COPY dockerfiles/Base/jupyterlab-rocm/ ./
 RUN jlpm build:prod
 
 FROM ${BASE_IMAGE}
@@ -277,7 +277,7 @@ RUN SITE="$(python3 -c 'import site; print(site.getsitepackages()[0])')" && \
     echo 'import _auplc_amdsmi_init' > "${SITE}/_auplc_amdsmi_init.pth"
 
 # Install the bundled ROCm JupyterLab extension (frontend built in jupyterlab-rocm-builder)
-COPY jupyterlab-rocm /opt/jupyterlab-rocm
+COPY dockerfiles/Base/jupyterlab-rocm /opt/jupyterlab-rocm
 COPY --from=jupyterlab-rocm-builder /build/jupyterlab-rocm/lib /opt/jupyterlab-rocm/lib
 COPY --from=jupyterlab-rocm-builder \
     /build/jupyterlab-rocm/jupyterlab_rocm/labextension \
@@ -310,7 +310,7 @@ RUN mkdir -p /home/$NB_USER/.jupyter && \
 
 # Example notebook for rocprofv3 cell attach profiling (GEMM smoke test)
 RUN mkdir -p /opt/workspace/examples
-COPY notebooks/*.ipynb /opt/workspace/examples/
+COPY dockerfiles/Base/notebooks/*.ipynb /opt/workspace/examples/
 RUN chown -R $NB_UID:$NB_GID /opt/workspace
 
 # Create startup script - ensuring it exists in the correct location

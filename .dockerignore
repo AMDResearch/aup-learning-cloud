@@ -18,3 +18,5 @@
 **/*.tsbuildinfo
 **/*.vsix
 runtime/notebook/*/*/labextension
+dockerfiles/Base/jupyterlab-rocm/jupyterlab_rocm/labextension
+dockerfiles/Base/jupyterlab-rocm/jupyterlab_rocm/_version.py

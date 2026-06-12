@@ -22,7 +22,7 @@ import tempfile
 import threading
 import time
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 # Trace presets exposed to the frontend. Each maps to a rocprofv3 flag.
 TRACE_PRESETS = {
@@ -982,12 +982,18 @@ def live_dir() -> str:
     return path
 
 
-def _trigger_name(kernel_id: Optional[str]) -> str:
-    return f"trigger-{kernel_id or 'any'}.json"
+def _trigger_name(kernel_id: str) -> str:
+    return f"trigger-{kernel_id}.json"
 
 
-def write_live_trigger(kernel_id: Optional[str], payload: Dict[str, Any]) -> str:
-    """Atomically publish a live-capture request for ``kernel_id`` (or any)."""
+def write_live_trigger(kernel_id: Optional[str], payload: Dict[str, Any]) -> Optional[str]:
+    """Atomically publish a live-capture request for a specific ``kernel_id``.
+
+    Triggers are strictly kernel-scoped: a request without a ``kernel_id`` is
+    dropped so it can never be claimed by a different notebook's watcher.
+    """
+    if not kernel_id:
+        return None
     directory = live_dir()
     path = os.path.join(directory, _trigger_name(kernel_id))
     tmp = f"{path}.{uuid.uuid4().hex}.tmp"
@@ -998,91 +1004,92 @@ def write_live_trigger(kernel_id: Optional[str], payload: Dict[str, Any]) -> str
 
 
 def claim_live_trigger(kernel_id: Optional[str]) -> Optional[Dict[str, Any]]:
-    """Atomically claim a pending trigger for this kernel; return its payload.
+    """Atomically claim this kernel's pending trigger; return its payload.
 
-    Tries the kernel-specific trigger first, then the ``any`` trigger. The
-    ``os.rename`` makes the claim atomic so concurrent watchers never run the
-    same request twice.
+    The claim is strictly kernel-scoped (no ``any`` fallback) so concurrent
+    watchers in other notebooks never run a request meant for this kernel. The
+    ``os.rename`` makes the claim atomic.
     """
+    if not kernel_id:
+        return None
     directory = live_dir()
-    names = [_trigger_name(kernel_id)] if kernel_id else []
-    names.append(_trigger_name(None))
-    for name in names:
-        src = os.path.join(directory, name)
-        dst = os.path.join(directory, f"claim-{uuid.uuid4().hex}.json")
+    src = os.path.join(directory, _trigger_name(kernel_id))
+    dst = os.path.join(directory, f"claim-{uuid.uuid4().hex}.json")
+    try:
+        os.rename(src, dst)
+    except OSError:
+        return None
+    payload: Optional[Dict[str, Any]] = None
+    try:
+        with open(dst) as handle:
+            payload = json.load(handle)
+    except (OSError, ValueError):
+        payload = None
+    finally:
         try:
-            os.rename(src, dst)
+            os.remove(dst)
         except OSError:
-            continue
-        payload: Optional[Dict[str, Any]] = None
-        try:
-            with open(dst) as handle:
-                payload = json.load(handle)
-        except (OSError, ValueError):
-            payload = None
-        finally:
-            try:
-                os.remove(dst)
-            except OSError:
-                pass
-        return payload
-    return None
+            pass
+    return payload
 
 
 def live_heartbeat(kernel_id: Optional[str]) -> None:
-    """Mark this kernel's watcher as alive (also under the shared ``any`` key)."""
+    """Mark this kernel's watcher as alive (kernel-scoped only)."""
+    if not kernel_id:
+        return
     directory = live_dir()
-    keys = {"any"}
-    if kernel_id:
-        keys.add(kernel_id)
-    stamp = str(time.time())
-    for key in keys:
-        try:
-            with open(os.path.join(directory, f"heartbeat-{key}"), "w") as handle:
-                handle.write(stamp)
-        except OSError:
-            pass
+    try:
+        with open(os.path.join(directory, f"heartbeat-{kernel_id}"), "w") as handle:
+            handle.write(str(time.time()))
+    except OSError:
+        pass
+
+
+def remove_live_heartbeat(kernel_id: Optional[str]) -> None:
+    """Drop the heartbeat file so ``live_armed`` flips to False immediately."""
+    if not kernel_id:
+        return
+    directory = live_dir()
+    try:
+        os.remove(os.path.join(directory, f"heartbeat-{kernel_id}"))
+    except OSError:
+        pass
 
 
 def live_armed(kernel_id: Optional[str], max_age: float = 6.0) -> bool:
-    """True if a watcher heartbeat for ``kernel_id`` (or any) is recent."""
+    """True if a recent watcher heartbeat exists for this specific kernel."""
+    if not kernel_id:
+        return False
     directory = live_dir()
-    names = [f"heartbeat-{kernel_id}"] if kernel_id else []
-    names.append("heartbeat-any")
-    now = time.time()
-    for name in names:
-        try:
-            if now - os.path.getmtime(os.path.join(directory, name)) <= max_age:
-                return True
-        except OSError:
-            continue
-    return False
+    try:
+        age = time.time() - os.path.getmtime(
+            os.path.join(directory, f"heartbeat-{kernel_id}")
+        )
+    except OSError:
+        return False
+    return age <= max_age
 
 
 def set_live_busy(kernel_id: Optional[str], expiry: float) -> None:
     """Mark a live capture as in-progress until ``expiry`` (epoch seconds)."""
+    if not kernel_id:
+        return
     directory = live_dir()
-    keys = {"any"}
-    if kernel_id:
-        keys.add(kernel_id)
-    for key in keys:
-        try:
-            with open(os.path.join(directory, f"busy-{key}"), "w") as handle:
-                handle.write(str(expiry))
-        except OSError:
-            pass
+    try:
+        with open(os.path.join(directory, f"busy-{kernel_id}"), "w") as handle:
+            handle.write(str(expiry))
+    except OSError:
+        pass
 
 
 def clear_live_busy(kernel_id: Optional[str]) -> None:
+    if not kernel_id:
+        return
     directory = live_dir()
-    keys = {"any"}
-    if kernel_id:
-        keys.add(kernel_id)
-    for key in keys:
-        try:
-            os.remove(os.path.join(directory, f"busy-{key}"))
-        except OSError:
-            pass
+    try:
+        os.remove(os.path.join(directory, f"busy-{kernel_id}"))
+    except OSError:
+        pass
 
 
 def live_busy(kernel_id: Optional[str]) -> bool:
@@ -1090,14 +1097,89 @@ def live_busy(kernel_id: Optional[str]) -> bool:
 
     Uses a stored expiry so a crashed capture cannot wedge the UI forever.
     """
+    if not kernel_id:
+        return False
     directory = live_dir()
-    name = f"busy-{kernel_id}" if kernel_id else "busy-any"
     try:
-        with open(os.path.join(directory, name)) as handle:
+        with open(os.path.join(directory, f"busy-{kernel_id}")) as handle:
             expiry = float(handle.read().strip() or 0)
     except (OSError, ValueError):
         return False
     return time.time() < expiry
+
+
+# ---------------------------------------------------------------------------
+# Live capture: disarm (pause the watcher) and early-stop (end a window)
+# ---------------------------------------------------------------------------
+#
+# Both are file-based signals because the server extension and the kernel's
+# watcher thread live in separate processes and only share ``live_dir()``.
+
+
+def live_disable(kernel_id: Optional[str]) -> None:
+    """Pause the kernel's watcher: it stops heart-beating and claiming triggers.
+
+    The heartbeat file is removed too so ``live_armed`` reports False at once
+    instead of waiting for staleness.
+    """
+    if not kernel_id:
+        return
+    directory = live_dir()
+    try:
+        with open(os.path.join(directory, f"disabled-{kernel_id}"), "w") as handle:
+            handle.write(str(time.time()))
+    except OSError:
+        pass
+    remove_live_heartbeat(kernel_id)
+
+
+def live_enable(kernel_id: Optional[str]) -> None:
+    """Resume a paused watcher by clearing its disarm flag."""
+    if not kernel_id:
+        return
+    directory = live_dir()
+    try:
+        os.remove(os.path.join(directory, f"disabled-{kernel_id}"))
+    except OSError:
+        pass
+
+
+def live_disabled(kernel_id: Optional[str]) -> bool:
+    """True if the watcher for this kernel has been disarmed."""
+    if not kernel_id:
+        return False
+    directory = live_dir()
+    return os.path.exists(os.path.join(directory, f"disabled-{kernel_id}"))
+
+
+def request_live_stop(kernel_id: Optional[str]) -> None:
+    """Ask an in-progress capture for this kernel to end early (keep partial)."""
+    if not kernel_id:
+        return
+    directory = live_dir()
+    try:
+        with open(os.path.join(directory, f"stop-{kernel_id}"), "w") as handle:
+            handle.write(str(time.time()))
+    except OSError:
+        pass
+
+
+def live_stop_requested(kernel_id: Optional[str]) -> bool:
+    """True if an early-stop has been requested for this kernel's capture."""
+    if not kernel_id:
+        return False
+    directory = live_dir()
+    return os.path.exists(os.path.join(directory, f"stop-{kernel_id}"))
+
+
+def clear_live_stop(kernel_id: Optional[str]) -> None:
+    if not kernel_id:
+        return
+    directory = live_dir()
+    try:
+        os.remove(os.path.join(directory, f"stop-{kernel_id}"))
+    except OSError:
+        pass
 
 
 def profile_live_window(
@@ -1107,12 +1189,17 @@ def profile_live_window(
     preset: str = "kernel",
     options: Optional[Dict[str, Any]] = None,
     label: str = "live capture",
+    should_stop: Optional[Callable[[], bool]] = None,
 ) -> ProfileJob:
     """Profile whatever the kernel is doing for a fixed wall-clock window.
 
     Unlike :func:`profile_cell_torch_timed` this does not run a cell; the
     workload is the already-running code on the main thread. Held under
     :func:`profiler_slot` to stay mutually exclusive with the cell-magic path.
+
+    If ``should_stop`` is given it is polled during the warmup and the capture
+    window; returning True ends the window early while keeping whatever was
+    captured so far.
     """
     options = options or {}
     try:
@@ -1123,6 +1210,7 @@ def profile_live_window(
                 preset=preset,
                 options=options,
                 label=label,
+                should_stop=should_stop,
             )
     except ProfilerBusyError as exc:
         job = ProfileJob("live", label, preset, {"backend": "torch", "mode": "live"})
@@ -1132,6 +1220,22 @@ def profile_live_window(
         return job
 
 
+def _interruptible_sleep(
+    seconds: float, should_stop: Optional[Callable[[], bool]], step: float = 0.1
+) -> bool:
+    """Sleep up to ``seconds``, returning True if ``should_stop`` fired early."""
+    if seconds <= 0:
+        return bool(should_stop and should_stop())
+    deadline = time.time() + seconds
+    while True:
+        if should_stop and should_stop():
+            return True
+        remaining = deadline - time.time()
+        if remaining <= 0:
+            return False
+        time.sleep(min(step, remaining))
+
+
 def _profile_live_window_locked(
     *,
     window_s: float,
@@ -1139,6 +1243,7 @@ def _profile_live_window_locked(
     preset: str,
     options: Dict[str, Any],
     label: str,
+    should_stop: Optional[Callable[[], bool]] = None,
 ) -> ProfileJob:
     import torch  # type: ignore
     from torch.profiler import profile  # type: ignore
@@ -1154,13 +1259,14 @@ def _profile_live_window_locked(
             "warmup_s": warmup_s,
             "approx": True,
             "stop_after_window": False,
+            "stopped_early": False,
         },
     )
     job.status = "running"
     keep_trace = bool(options.get("keep_trace", False))
     try:
         if warmup_s > 0:
-            time.sleep(warmup_s)
+            _interruptible_sleep(warmup_s, should_stop)
         prof = profile(
             activities=_torch_activities(),
             record_shapes=bool(options.get("record_shapes", False)),
@@ -1169,7 +1275,8 @@ def _profile_live_window_locked(
         )
         prof.start()
         try:
-            time.sleep(max(window_s, 0.0))
+            stopped_early = _interruptible_sleep(max(window_s, 0.0), should_stop)
+            job.extra["stopped_early"] = stopped_early
             if torch.cuda.is_available():
                 try:
                     torch.cuda.synchronize()

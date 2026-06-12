@@ -49,6 +49,11 @@ namespace CommandIDs {
 // the "full cell" preset until settings load.
 let cellProfileFlags = buildCellProfileFlags(DEFAULT_CELL_PROFILE_SETTINGS);
 
+// Current Cell Profile mode, mirrored from settings. The toolbar button only
+// drives the "full" path; "live" capture is triggered from the sidebar, so the
+// button is gated off in live mode to avoid accidentally re-running a cell.
+let cellProfileMode = DEFAULT_CELL_PROFILE_SETTINGS.cellProfileMode;
+
 // Tracks the inline profile-result widget mounted under each cell so a repeat
 // click disposes the previous result instead of stacking widgets.
 const inlineResults = new WeakMap<Cell, Widget>();
@@ -109,6 +114,19 @@ function profileCellInline(
   title.textContent = 'Cell Profile';
   header.appendChild(title);
 
+  // Stop button: interrupts the kernel to abort a long full-cell profile.
+  // Visible only while the profiling execution is in flight.
+  const stop = document.createElement('button');
+  stop.className = 'jp-rocm-inline-stop';
+  stop.title = 'Stop profiling (interrupts the kernel)';
+  stop.textContent = 'Stop';
+  stop.onclick = () => {
+    stop.disabled = true;
+    stop.textContent = 'Stopping...';
+    void panel.sessionContext.session?.kernel?.interrupt();
+  };
+  header.appendChild(stop);
+
   const close = document.createElement('button');
   close.className = 'jp-rocm-inline-close';
   close.title = 'Dismiss profile result';
@@ -130,7 +148,13 @@ function profileCellInline(
   layout.addWidget(container);
   inlineResults.set(cell, container);
 
-  void SimplifiedOutputArea.execute(code, outputArea, panel.sessionContext);
+  const hideStop = (): void => {
+    stop.style.display = 'none';
+  };
+  void SimplifiedOutputArea.execute(code, outputArea, panel.sessionContext).then(
+    hideStop,
+    hideStop
+  );
 }
 
 const plugin: JupyterFrontEndPlugin<void> = {
@@ -163,9 +187,10 @@ const plugin: JupyterFrontEndPlugin<void> = {
         .load(plugin.id)
         .then(settings => {
           const apply = (): void => {
-            cellProfileFlags = buildCellProfileFlags(
-              readCellProfileSettings(settings)
-            );
+            const current = readCellProfileSettings(settings);
+            cellProfileFlags = buildCellProfileFlags(current);
+            cellProfileMode = current.cellProfileMode;
+            commands.notifyCommandChanged(CommandIDs.profileCell);
           };
           apply();
           settings.changed.connect(apply);
@@ -203,6 +228,11 @@ const plugin: JupyterFrontEndPlugin<void> = {
         'Profile the active PyTorch GPU cell with torch.profiler; results appear under the cell',
       icon: profileIcon,
       isEnabled: () => {
+        // In Live capture mode the sidebar's "Profile now" is the entry point;
+        // disable the toolbar button so a busy/long cell is not re-run.
+        if (cellProfileMode === 'live') {
+          return false;
+        }
         const cell = notebooks?.activeCell;
         if (!cell || cell.model.type !== 'code') {
           return false;

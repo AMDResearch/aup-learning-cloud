@@ -186,13 +186,41 @@ def test_live_watcher_handle_trigger(monkeypatch):
             "warmup_s": 0.5,
             "preset": "kernel",
             "options": {"profile_memory": True},
-        }
+        },
+        "k1",
     )
 
     assert captured["kwargs"]["window_s"] == 1.5
     assert captured["kwargs"]["warmup_s"] == 0.5
     assert captured["kwargs"]["options"]["profile_memory"] is True
     assert captured["registered"].target_type == "live"
+
+
+def test_live_watcher_passes_should_stop(monkeypatch):
+    captured = {}
+
+    def fake_live(**kwargs):
+        captured["kwargs"] = kwargs
+        job = ProfileJob("live", "live capture", "kernel", {"backend": "torch"})
+        job.status = "done"
+        return job
+
+    monkeypatch.setattr(profiler, "profile_live_window", fake_live)
+    monkeypatch.setattr(profiler, "register_cell_job", lambda job: None)
+    stop_calls = {"n": 0}
+
+    def fake_stop_requested(kernel_id):
+        stop_calls["n"] += 1
+        return kernel_id == "k1"
+
+    monkeypatch.setattr(profiler, "live_stop_requested", fake_stop_requested)
+
+    magics._handle_live_trigger({"window_s": 1.0}, "k1")
+
+    should_stop = captured["kwargs"]["should_stop"]
+    assert callable(should_stop)
+    assert should_stop() is True
+    assert stop_calls["n"] >= 1
 
 
 def test_render_job_empty_full_mode_hint():

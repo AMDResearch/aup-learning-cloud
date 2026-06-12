@@ -12,7 +12,7 @@ from __future__ import annotations
 import html
 import threading
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from IPython.core.magic import Magics, cell_magic, magics_class
 from IPython.core.magic_arguments import argument, magic_arguments, parse_argstring
@@ -334,13 +334,18 @@ _live_watcher_started = False
 _live_watcher_guard = threading.Lock()
 
 
-def _handle_live_trigger(payload: Dict[str, Any]) -> None:
+def _handle_live_trigger(
+    payload: Dict[str, Any], kernel_id: Optional[str] = None
+) -> None:
     job = profiler.profile_live_window(
         window_s=float(payload.get("window_s", 2.0)),
         warmup_s=float(payload.get("warmup_s", 0.0)),
         preset=payload.get("preset", "kernel"),
         options=payload.get("options") or {},
         label=payload.get("label") or "live capture",
+        should_stop=(
+            (lambda: profiler.live_stop_requested(kernel_id)) if kernel_id else None
+        ),
     )
     try:
         profiler.register_cell_job(job)
@@ -353,6 +358,11 @@ def _live_watcher_loop(poll_interval: float = 0.5) -> None:
     last_heartbeat = 0.0
     while True:
         try:
+            # Disarmed: stop heart-beating (so the sidebar shows Off) and skip
+            # trigger claims until the watcher is re-enabled.
+            if profiler.live_disabled(kernel_id):
+                time.sleep(poll_interval)
+                continue
             now = time.time()
             if now - last_heartbeat >= 2.0:
                 profiler.live_heartbeat(kernel_id)
@@ -361,14 +371,17 @@ def _live_watcher_loop(poll_interval: float = 0.5) -> None:
             if payload:
                 window_s = float(payload.get("window_s", 2.0))
                 warmup_s = float(payload.get("warmup_s", 0.0))
+                # A fresh capture ignores any stale early-stop request.
+                profiler.clear_live_stop(kernel_id)
                 # Mark busy so the sidebar can lock "Profile now" until done.
                 profiler.set_live_busy(
                     kernel_id, time.time() + window_s + warmup_s + 30.0
                 )
                 try:
-                    _handle_live_trigger(payload)
+                    _handle_live_trigger(payload, kernel_id)
                 finally:
                     profiler.clear_live_busy(kernel_id)
+                    profiler.clear_live_stop(kernel_id)
         except Exception:
             pass
         time.sleep(poll_interval)

@@ -597,9 +597,32 @@
 }
 
 .jp-rocm-inline-title {
+  flex: 1;
   font-weight: 600;
   font-size: var(--jp-ui-font-size0);
   color: var(--jp-rocm-cell-profile-accent);
+}
+
+.jp-rocm-inline-stop {
+  background: transparent;
+  border: 1px solid var(--jp-border-color1);
+  border-radius: 3px;
+  color: var(--jp-ui-font-color1);
+  cursor: pointer;
+  font-size: var(--jp-ui-font-size0);
+  line-height: 1;
+  margin-right: 6px;
+  padding: 2px 8px;
+}
+
+.jp-rocm-inline-stop:hover:not(:disabled) {
+  border-color: var(--jp-error-color1);
+  color: var(--jp-error-color1);
+}
+
+.jp-rocm-inline-stop:disabled {
+  cursor: default;
+  opacity: 0.6;
 }
 
 .jp-rocm-profile-title {

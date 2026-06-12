@@ -117,7 +117,16 @@ class CellProfileTraceHandler(APIHandler):
 
 
 class CellProfileLiveHandler(APIHandler):
-    """Live-capture: arm status (GET) and trigger requests (POST)."""
+    """Live-capture: watcher status (GET) and actions (POST).
+
+    POST ``action`` selects the operation:
+      - ``trigger`` (default): request a capture window on the armed watcher.
+      - ``stop``: end the in-progress capture early (keep partial result).
+      - ``disable``: disarm the background watcher.
+      - ``enable``: re-arm a previously disarmed watcher.
+
+    All actions are strictly kernel-scoped, so ``kernel_id`` is required.
+    """
 
     @tornado.web.authenticated
     def get(self):
@@ -127,6 +136,7 @@ class CellProfileLiveHandler(APIHandler):
                 {
                     "armed": profiler.live_armed(kernel_id),
                     "busy": profiler.live_busy(kernel_id),
+                    "disabled": profiler.live_disabled(kernel_id),
                 }
             )
         )
@@ -138,6 +148,32 @@ class CellProfileLiveHandler(APIHandler):
         except ValueError:
             body = {}
         kernel_id = body.get("kernel_id") or None
+        if not kernel_id:
+            self.set_status(400)
+            self.finish(
+                json.dumps(
+                    {
+                        "ok": False,
+                        "error": "kernel_id is required. Open and select a notebook first.",
+                    }
+                )
+            )
+            return
+
+        action = body.get("action") or "trigger"
+        if action == "disable":
+            profiler.live_disable(kernel_id)
+            self.finish(json.dumps({"ok": True, "disabled": True}))
+            return
+        if action == "enable":
+            profiler.live_enable(kernel_id)
+            self.finish(json.dumps({"ok": True, "disabled": False}))
+            return
+        if action == "stop":
+            profiler.request_live_stop(kernel_id)
+            self.finish(json.dumps({"ok": True, "stopping": True}))
+            return
+
         armed = profiler.live_armed(kernel_id)
         payload = {
             "kernel_id": kernel_id,

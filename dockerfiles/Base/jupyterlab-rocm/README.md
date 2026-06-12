@@ -116,8 +116,21 @@ Options: `--preset {runtime,kernel,sys,hip}` (or the `--kernel-trace` /
 
 You can also click **Cell Profile** in the notebook toolbar to profile the
 active PyTorch GPU cell without typing the magic; results appear under the cell
-and in the sidebar. To profile a long-running cell without re-running it, use
-the **Live capture** mode in the sidebar instead.
+and in the sidebar. While a full-cell profile is running, a **Stop** button on
+the inline result interrupts the kernel to abort it (the result is discarded).
+
+The sidebar **Cell Profile** panel offers two modes:
+
+- **Full cell** (short, self-contained cells): use the toolbar button. The
+  toolbar button is disabled while the panel is in Live capture mode so a busy
+  or long-running cell is never accidentally re-run.
+- **Live capture** (long-running cells): a background watcher samples the
+  already-running cell without re-running it. Its lifecycle is:
+  - **Off** -> **Enable live capture** arms a background watcher.
+  - **Ready** -> **Profile now** captures a fixed wall-clock window;
+    **Disable live capture** disarms the watcher.
+  - **Capturing** -> **Stop and keep** ends the window early but keeps the
+    partial result; **Disable live capture** also stops and disarms.
 
 ## Notes on unsupported metrics
 
@@ -137,6 +150,8 @@ authentication.
 | GET | `/metrics` | One-shot metrics sample (polling fallback) |
 | WS | `/stream?interval=<ms>` | Live metrics stream |
 | GET | `/profile/cell` | List Cell Profile jobs |
+| GET | `/profile/cell/live` | Live-capture watcher status (`armed`, `busy`, `disabled`) |
+| POST | `/profile/cell/live` | Live-capture action: `trigger` / `stop` / `disable` / `enable` (kernel-scoped) |
 
 ## License
 

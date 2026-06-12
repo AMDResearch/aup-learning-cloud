@@ -10,7 +10,15 @@ import {
   readCellProfileSettings
 } from '../cellProfileSettings';
 import { ensureChartsRegistered } from '../chartSetup';
-import { liveProfile, liveStatus, requestAPI, traceUrl } from '../handler';
+import {
+  liveDisable,
+  liveEnable,
+  liveProfile,
+  liveStatus,
+  liveStop,
+  requestAPI,
+  traceUrl
+} from '../handler';
 import { IKernelStat, IOperatorStat, IProfileJob } from '../types';
 
 ensureChartsRegistered();
@@ -338,6 +346,7 @@ function CellProfilePanel(props: {
   const [armed, setArmed] = useState<boolean>(false);
   const [busy, setBusy] = useState<boolean>(false);
   const [pending, setPending] = useState<boolean>(false);
+  const [stopping, setStopping] = useState<boolean>(false);
   const [message, setMessage] = useState<string>('');
   const pendingTimer = useRef<number | undefined>(undefined);
 
@@ -385,6 +394,9 @@ function CellProfilePanel(props: {
         if (res.busy) {
           // Server confirms a capture is running; clear the optimistic flag.
           setPending(false);
+        } else {
+          // Capture finished; reset the early-stop affordance.
+          setStopping(false);
         }
       } catch {
         if (active) {
@@ -426,12 +438,46 @@ function CellProfilePanel(props: {
       setMessage('No active kernel. Open a notebook and select its tab first.');
       return;
     }
+    // Start the watcher thread on first use (idempotent).
     kernel.requestExecute({
       code: '%load_ext jupyterlab_rocm',
       silent: true,
       store_history: false
     });
+    // Clear any prior disarm flag so a re-enabled watcher resumes (the thread
+    // already exists, so %load_ext alone would be a no-op).
+    void liveEnable(kernel.id).catch(() => undefined);
     setMessage('Arming live capture... do this before starting a long cell.');
+  };
+
+  const disableLive = async (): Promise<void> => {
+    const id = kernelId();
+    if (!id) {
+      setMessage('No active kernel.');
+      return;
+    }
+    setArmed(false);
+    setMessage('Live capture disabled. Re-enable to arm the watcher again.');
+    try {
+      await liveDisable(id);
+    } catch (err) {
+      setMessage(`Disable failed: ${String(err)}`);
+    }
+  };
+
+  const stopCapture = async (): Promise<void> => {
+    const id = kernelId();
+    if (!id) {
+      return;
+    }
+    setStopping(true);
+    setMessage('Stopping capture, keeping the partial result...');
+    try {
+      await liveStop(id);
+    } catch (err) {
+      setStopping(false);
+      setMessage(`Stop failed: ${String(err)}`);
+    }
   };
 
   const profileNow = async (): Promise<void> => {
@@ -499,68 +545,110 @@ function CellProfilePanel(props: {
         </p>
       )}
 
-      {isLive && (
-        <div className="jp-rocm-live">
-          <div className="jp-rocm-live-head">
-            <span
-              className={`jp-rocm-live-dot ${armed ? 'on' : 'off'}`}
-              title={armed ? 'Watcher armed' : 'Watcher not armed'}
-            />
-            <span className="jp-rocm-live-state">
-              {armed ? (busy ? 'capturing...' : 'armed') : 'not armed'}
-            </span>
-          </div>
-          <div className="jp-rocm-cp-row">
-            <label className="jp-rocm-cp-field">
-              Seconds
-              <input
-                type="number"
-                min={0.1}
-                step={0.5}
-                value={values.timeWindowSeconds}
-                onChange={e => update('timeWindowSeconds', Number(e.target.value))}
-              />
-            </label>
-            <label className="jp-rocm-cp-field">
-              Warmup (s)
-              <input
-                type="number"
-                min={0}
-                step={0.5}
-                value={values.timeWarmupSeconds}
-                onChange={e => update('timeWarmupSeconds', Number(e.target.value))}
-              />
-            </label>
-          </div>
-          <p className="jp-rocm-cp-note">
-            Start your long-running cell, then click Profile now to grab a{' '}
-            {values.timeWindowSeconds}s sample. No code edit, no warmup wait,
-            and training keeps running.
-          </p>
-          <div className="jp-rocm-cp-row">
-            <button
-              className="jp-rocm-live-btn"
-              onClick={() => void profileNow()}
-              disabled={!armed || busy || pending}
-              title={
-                !armed
-                  ? 'Enable live capture first'
-                  : busy || pending
-                    ? 'A capture is already running'
-                    : 'Capture now'
-              }
-            >
-              {busy || pending ? 'Capturing...' : 'Profile now'}
-            </button>
-            {!armed && (
-              <button className="jp-rocm-live-btn" onClick={enableLive}>
-                Enable live capture
-              </button>
-            )}
-          </div>
-          {message && <p className="jp-rocm-cp-note">{message}</p>}
-        </div>
-      )}
+      {isLive &&
+        (() => {
+          const hasKernel = !!kernelId();
+          const capturing = busy || pending;
+          const phase = !hasKernel
+            ? 'No kernel'
+            : capturing
+              ? 'Capturing...'
+              : armed
+                ? 'Ready'
+                : 'Off';
+          return (
+            <div className="jp-rocm-live">
+              <div className="jp-rocm-live-head">
+                <span
+                  className={`jp-rocm-live-dot ${armed ? 'on' : 'off'}`}
+                  title={`Live capture: ${phase}`}
+                />
+                <span className="jp-rocm-live-state">{phase}</span>
+              </div>
+              <div className="jp-rocm-cp-row">
+                <label className="jp-rocm-cp-field">
+                  Seconds
+                  <input
+                    type="number"
+                    min={0.1}
+                    step={0.5}
+                    value={values.timeWindowSeconds}
+                    onChange={e =>
+                      update('timeWindowSeconds', Number(e.target.value))
+                    }
+                  />
+                </label>
+                <label className="jp-rocm-cp-field">
+                  Warmup (s)
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.5}
+                    value={values.timeWarmupSeconds}
+                    onChange={e =>
+                      update('timeWarmupSeconds', Number(e.target.value))
+                    }
+                  />
+                </label>
+              </div>
+              <p className="jp-rocm-cp-note">
+                {!hasKernel
+                  ? 'Open a notebook and select its tab to arm live capture.'
+                  : 'Start your long-running cell, then Profile now to grab a ' +
+                    `${values.timeWindowSeconds}s sample. Stop and keep ends it ` +
+                    'early but keeps the partial result. Training keeps running.'}
+              </p>
+              <div className="jp-rocm-cp-row">
+                {/* Off: arm the watcher. */}
+                {hasKernel && !armed && !capturing && (
+                  <button className="jp-rocm-live-btn" onClick={enableLive}>
+                    Enable live capture
+                  </button>
+                )}
+                {/* Ready: capture, or disarm. */}
+                {hasKernel && armed && !capturing && (
+                  <>
+                    <button
+                      className="jp-rocm-live-btn"
+                      onClick={() => void profileNow()}
+                      title="Capture a window now"
+                    >
+                      Profile now
+                    </button>
+                    <button
+                      className="jp-rocm-live-btn"
+                      onClick={() => void disableLive()}
+                      title="Disarm the background watcher"
+                    >
+                      Disable live capture
+                    </button>
+                  </>
+                )}
+                {/* Capturing: stop early (keep partial), or disarm. */}
+                {hasKernel && capturing && (
+                  <>
+                    <button
+                      className="jp-rocm-live-btn"
+                      onClick={() => void stopCapture()}
+                      disabled={stopping}
+                      title="End the window now and keep what was captured"
+                    >
+                      {stopping ? 'Stopping...' : 'Stop and keep'}
+                    </button>
+                    <button
+                      className="jp-rocm-live-btn"
+                      onClick={() => void disableLive()}
+                      title="Stop and disarm the background watcher"
+                    >
+                      Disable live capture
+                    </button>
+                  </>
+                )}
+              </div>
+              {message && <p className="jp-rocm-cp-note">{message}</p>}
+            </div>
+          );
+        })()}
 
       <CaptureOptions values={values} update={update} />
     </div>

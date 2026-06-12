@@ -72,14 +72,44 @@ export async function liveProfile(
 ): Promise<{ ok: boolean; armed: boolean }> {
   return requestAPI('profile/cell/live', {
     method: 'POST',
-    body: JSON.stringify(params)
+    body: JSON.stringify({ ...params, action: 'trigger' })
+  });
+}
+
+/** Stop an in-progress capture early, keeping whatever was captured so far. */
+export async function liveStop(
+  kernelId: string | null
+): Promise<{ ok: boolean; stopping?: boolean }> {
+  return requestAPI('profile/cell/live', {
+    method: 'POST',
+    body: JSON.stringify({ kernel_id: kernelId, action: 'stop' })
+  });
+}
+
+/** Disarm the background watcher for the given kernel. */
+export async function liveDisable(
+  kernelId: string | null
+): Promise<{ ok: boolean; disabled?: boolean }> {
+  return requestAPI('profile/cell/live', {
+    method: 'POST',
+    body: JSON.stringify({ kernel_id: kernelId, action: 'disable' })
+  });
+}
+
+/** Re-arm a previously disarmed watcher for the given kernel. */
+export async function liveEnable(
+  kernelId: string | null
+): Promise<{ ok: boolean; disabled?: boolean }> {
+  return requestAPI('profile/cell/live', {
+    method: 'POST',
+    body: JSON.stringify({ kernel_id: kernelId, action: 'enable' })
   });
 }
 
 /** Live-capture watcher status for the given kernel. */
 export async function liveStatus(
   kernelId: string | null
-): Promise<{ armed: boolean; busy: boolean }> {
+): Promise<{ armed: boolean; busy: boolean; disabled: boolean }> {
   const q = kernelId ? `?kernel_id=${encodeURIComponent(kernelId)}` : '';
   return requestAPI(`profile/cell/live${q}`);
 }

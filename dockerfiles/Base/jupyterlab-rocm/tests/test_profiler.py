@@ -506,14 +506,16 @@ def test_live_trigger_claim_is_atomic(tmp_path, monkeypatch):
     assert second is None  # already claimed
 
 
-def test_live_trigger_any_fallback(tmp_path, monkeypatch):
+def test_live_trigger_is_kernel_scoped(tmp_path, monkeypatch):
     monkeypatch.setattr(profiler, "cell_jobs_dir", lambda: str(tmp_path))
 
-    profiler.write_live_trigger(None, {"window_s": 2.0})
-
-    # A kernel with a specific id still picks up the "any" trigger.
-    claimed = profiler.claim_live_trigger("kX")
-    assert claimed == {"window_s": 2.0}
+    # A trigger for one kernel must never be claimed by another kernel, and a
+    # trigger without a kernel id is dropped (no cross-notebook crosstalk).
+    profiler.write_live_trigger("k1", {"window_s": 2.0})
+    assert profiler.claim_live_trigger("kX") is None
+    assert profiler.write_live_trigger(None, {"window_s": 2.0}) is None
+    assert profiler.claim_live_trigger(None) is None
+    assert profiler.claim_live_trigger("k1") == {"window_s": 2.0}
 
 
 def test_live_heartbeat_and_armed(tmp_path, monkeypatch):
@@ -522,7 +524,8 @@ def test_live_heartbeat_and_armed(tmp_path, monkeypatch):
     assert profiler.live_armed("k1") is False
     profiler.live_heartbeat("k1")
     assert profiler.live_armed("k1") is True
-    assert profiler.live_armed(None) is True  # also written under "any"
+    assert profiler.live_armed("k2") is False  # strictly kernel-scoped
+    assert profiler.live_armed(None) is False
     assert profiler.live_armed("k1", max_age=-1.0) is False  # stale
 
 
@@ -532,9 +535,51 @@ def test_live_busy_lifecycle(tmp_path, monkeypatch):
     assert profiler.live_busy("k1") is False
     profiler.set_live_busy("k1", time.time() + 60)
     assert profiler.live_busy("k1") is True
-    assert profiler.live_busy(None) is True  # also written under "any"
+    assert profiler.live_busy("k2") is False  # strictly kernel-scoped
     profiler.clear_live_busy("k1")
     assert profiler.live_busy("k1") is False
+
+
+def test_live_disable_enable_lifecycle(tmp_path, monkeypatch):
+    monkeypatch.setattr(profiler, "cell_jobs_dir", lambda: str(tmp_path))
+
+    profiler.live_heartbeat("k1")
+    assert profiler.live_armed("k1") is True
+    assert profiler.live_disabled("k1") is False
+
+    profiler.live_disable("k1")
+    assert profiler.live_disabled("k1") is True
+    # Disabling drops the heartbeat so armed flips to False immediately.
+    assert profiler.live_armed("k1") is False
+
+    profiler.live_enable("k1")
+    assert profiler.live_disabled("k1") is False
+
+
+def test_live_stop_request_lifecycle(tmp_path, monkeypatch):
+    monkeypatch.setattr(profiler, "cell_jobs_dir", lambda: str(tmp_path))
+
+    assert profiler.live_stop_requested("k1") is False
+    profiler.request_live_stop("k1")
+    assert profiler.live_stop_requested("k1") is True
+    assert profiler.live_stop_requested("k2") is False  # kernel-scoped
+    profiler.clear_live_stop("k1")
+    assert profiler.live_stop_requested("k1") is False
+
+
+def test_profile_live_window_stops_early(monkeypatch):
+    events = [_FakeEvt("aten::mm", 1, 10, 10, 20, 20)]
+    _install_fake_torch(monkeypatch, events, cuda=True)
+
+    # A long window that is asked to stop immediately should end fast and keep
+    # the partial result.
+    job = profiler.profile_live_window(
+        window_s=30.0, warmup_s=0.0, should_stop=lambda: True
+    )
+
+    assert job.status == "done"
+    assert job.extra["stopped_early"] is True
+    assert job.operators and job.operators[0]["name"] == "aten::mm"
 
 
 def test_live_busy_expires(tmp_path, monkeypatch):
