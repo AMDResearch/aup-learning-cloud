@@ -62,28 +62,6 @@ RUN pnpm --filter @auplc/runtime-status run build && \
     test -f /build/runtime/notebook/jupyterlab-runtime-status/auplc_jupyterlab_runtime_status/labextension/package.json && \
     test -n "$(find /build/runtime/notebook/jupyterlab-runtime-status/auplc_jupyterlab_runtime_status/labextension/static -name 'remoteEntry*.js' -print -quit)"
 
-# Build the jupyterlab-rocm labextension in Node so the runtime image does not
-# need a local jlpm install or committed build artifacts.
-FROM ${NODE_IMAGE} AS jupyterlab-rocm-builder
-ARG JUPYTERLAB_VERSION="4.5.6"
-
-SHELL ["/bin/bash", "-c"]
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 \
-    python3-pip \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN pip3 install --no-cache-dir --break-system-packages \
-    "jupyterlab==${JUPYTERLAB_VERSION}"
-
-WORKDIR /build/jupyterlab-rocm
-COPY dockerfiles/Base/jupyterlab-rocm/package.json dockerfiles/Base/jupyterlab-rocm/yarn.lock dockerfiles/Base/jupyterlab-rocm/.yarnrc.yml ./
-RUN jlpm install
-COPY dockerfiles/Base/jupyterlab-rocm/ ./
-RUN jlpm build:prod
-
 FROM ${BASE_IMAGE}
 
 # Default Shell
@@ -241,7 +219,7 @@ COPY --from=runtime-status-builder /build/runtime/notebook/jupyterlab-runtime-st
 RUN python3 -m pip install --no-cache-dir /tmp/auplc-jupyterlab-runtime-status && \
     rm -rf /tmp/auplc-jupyterlab-runtime-status
 
-# Install amdsmi (ships with the ROCm tree) so the jupyterlab-rocm extension can
+# Install amdsmi (ships with the ROCm tree) so the roclens extension can
 # read live GPU metrics. Build from a temp copy — pip builds in-tree and would
 # otherwise drop an egg-info into the read-only ROCm install dir.
 RUN cp -r /opt/rocm/share/amd_smi /tmp/amd_smi && \
@@ -261,7 +239,7 @@ RUN cp -r /opt/rocm/share/amd_smi /tmp/amd_smi && \
 #   - a global LD_PRELOAD (breaks the `amd-smi` CLI), and
 #   - an IPython startup file (misses plain `python script.py`, and ~/.ipython
 #     is masked by the PVC mount at runtime).
-# The standalone amd-smi CLI and jupyterlab-rocm metrics run in separate
+# The standalone amd-smi CLI and roclens metrics run in separate
 # processes (no torch), so they are unaffected and keep working. Verified on
 # gfx1150 with torch 2.9.1/2.11.0+rocm7.13.0. See upstream ROCm/amdsmi#72.
 RUN SITE="$(python3 -c 'import site; print(site.getsitepackages()[0])')" && \
@@ -276,14 +254,13 @@ RUN SITE="$(python3 -c 'import site; print(site.getsitepackages()[0])')" && \
         > "${SITE}/_auplc_amdsmi_init.py" && \
     echo 'import _auplc_amdsmi_init' > "${SITE}/_auplc_amdsmi_init.pth"
 
-# Install the bundled ROCm JupyterLab extension (frontend built in jupyterlab-rocm-builder)
-COPY dockerfiles/Base/jupyterlab-rocm /opt/jupyterlab-rocm
-COPY --from=jupyterlab-rocm-builder /build/jupyterlab-rocm/lib /opt/jupyterlab-rocm/lib
-COPY --from=jupyterlab-rocm-builder \
-    /build/jupyterlab-rocm/jupyterlab_rocm/labextension \
-    /opt/jupyterlab-rocm/jupyterlab_rocm/labextension
-RUN pip3 install --no-cache-dir /opt/jupyterlab-rocm && \
-    jupyter server extension enable jupyterlab_rocm
+# Install the roclens JupyterLab extension as a prebuilt wheel from the GitHub
+# Pages PEP 503 index (https://github.com/AMDResearch/roclens). The labextension
+# is compiled upstream in CI, so this image needs no Node build. Override
+# ROCLENS_INDEX_URL to pin the release channel or a specific build.
+ARG ROCLENS_INDEX_URL=https://amdresearch.github.io/roclens/develop/latest/simple/
+RUN pip3 install --no-cache-dir --extra-index-url "${ROCLENS_INDEX_URL}" roclens && \
+    jupyter server extension enable roclens
 
 # Remove the jenkins user if it exists (user with ID 1000)
 RUN if getent passwd 1000 > /dev/null; then \
