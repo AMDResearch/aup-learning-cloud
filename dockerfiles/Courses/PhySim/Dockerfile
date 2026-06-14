@@ -54,3 +54,5 @@ COPY ./course_data /opt/workspace/PhySim
 USER root
 RUN chown -R jovyan:1000 /opt/workspace
 USER jovyan
+
+WORKDIR /opt/workspace/PhySim
