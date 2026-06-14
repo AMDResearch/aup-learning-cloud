@@ -258,9 +258,15 @@ RUN SITE="$(python3 -c 'import site; print(site.getsitepackages()[0])')" && \
 # Pages PEP 503 index (https://github.com/AMDResearch/roclens). The labextension
 # is compiled upstream in CI, so this image needs no Node build. Override
 # ROCLENS_INDEX_URL to pin the release channel or a specific build.
-ARG ROCLENS_INDEX_URL=https://amdresearch.github.io/roclens/develop/latest/simple/
-RUN pip3 install --no-cache-dir --extra-index-url "${ROCLENS_INDEX_URL}" roclens && \
+ARG ROCLENS_INDEX_URL=https://amdresearch.github.io/roclens/develop/simple/
+RUN pip3 install --no-cache-dir --extra-index-url "${ROCLENS_INDEX_URL}" \
+    "roclens[agent]" && \
     jupyter server extension enable roclens
+
+# Autostart the roclens MCP server inside the notebook container so coding
+# agents can attach. Override host/port/CORS via build args or runtime env.
+ENV ROCLENS_MCP_AUTOSTART=1
+# optional: ROCLENS_MCP_HOST=0.0.0.0  ROCLENS_MCP_PORT=8000  ROCLENS_MCP_CORS_ORIGIN=http://localhost:8888
 
 # Remove the jenkins user if it exists (user with ID 1000)
 RUN if getent passwd 1000 > /dev/null; then \
