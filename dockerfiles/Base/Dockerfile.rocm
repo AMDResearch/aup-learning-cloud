@@ -260,7 +260,7 @@ RUN SITE="$(python3 -c 'import site; print(site.getsitepackages()[0])')" && \
 # ROCLENS_INDEX_URL to pin the release channel or a specific build.
 ARG ROCLENS_INDEX_URL=https://amdresearch.github.io/roclens/develop/simple/
 RUN pip3 install --no-cache-dir --extra-index-url "${ROCLENS_INDEX_URL}" \
-    "roclens[agent]" && \
+    "roclens" && \
     jupyter server extension enable roclens
 
 # Autostart the roclens MCP server inside the notebook container so coding
