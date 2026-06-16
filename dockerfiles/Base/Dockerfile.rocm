@@ -91,6 +91,9 @@ ARG PYTORCH_VERSION=2.9.1
 ARG TORCHVISION_VERSION=0.24.0
 ARG TORCHAUDIO_VERSION=2.9.0
 ARG JUPYTER_AI_VERSION=3.0.0
+ARG JUPYTER_RESOURCE_USAGE_VERSION=1.2.1
+ARG JUPYTER_RUFF_VERSION=0.3.1
+ARG JUPYTEXT_VERSION=1.19.3
 ARG OPENCODE_VERSION=1.17.7
 # PyTorch wheel target — only differs from GPU_TARGET for the generic
 # buckets (gfx110x → gfx110X-all, gfx120x → gfx120X-all). Specific targets
@@ -213,7 +216,10 @@ RUN pip3 install --no-cache-dir \
     tqdm
 
 RUN pip3 install --no-cache-dir \
-    jupyter-ai=="${JUPYTER_AI_VERSION}"
+    jupyter-ai=="${JUPYTER_AI_VERSION}" \
+    jupyter-resource-usage=="${JUPYTER_RESOURCE_USAGE_VERSION}" \
+    jupyter-ruff=="${JUPYTER_RUFF_VERSION}" \
+    jupytext=="${JUPYTEXT_VERSION}"
 
 RUN HOME=/tmp/opencode-install \
     bash -c "curl -fsSL https://opencode.ai/install | bash -s -- --version ${OPENCODE_VERSION} --no-modify-path" && \

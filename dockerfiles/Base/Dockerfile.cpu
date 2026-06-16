@@ -79,6 +79,9 @@ ARG NOTEBOOK_VERSION="7.5.5"
 ARG IPYWIDGETS_VERSION="8.1.8"
 ARG IPYKERNEL_VERSION="6.31.0"
 ARG JUPYTER_AI_VERSION="3.0.0"
+ARG JUPYTER_RESOURCE_USAGE_VERSION="1.2.1"
+ARG JUPYTER_RUFF_VERSION="0.3.1"
+ARG JUPYTEXT_VERSION="1.19.3"
 ARG OPENCODE_VERSION="1.17.7"
 ARG NB_UID=1000
 ARG PIP_INDEX_URL=
@@ -108,7 +111,10 @@ RUN if [ -n "$JUPYTERHUB_VERSION" ]; then python3 -mpip install --no-cache --upg
     ipykernel=="$IPYKERNEL_VERSION"; fi
 
 RUN python3 -mpip install --no-cache-dir \
-    jupyter-ai=="$JUPYTER_AI_VERSION"
+    jupyter-ai=="$JUPYTER_AI_VERSION" \
+    jupyter-resource-usage=="$JUPYTER_RESOURCE_USAGE_VERSION" \
+    jupyter-ruff=="$JUPYTER_RUFF_VERSION" \
+    jupytext=="$JUPYTEXT_VERSION"
 
 COPY dockerfiles/Base/jupyterlab-settings/overrides.json /tmp/auplc-jupyterlab-overrides.json
 
