@@ -207,6 +207,7 @@ RUN pip3 install --no-cache-dir \
     ipywidgets==8.1.8 \
     ipykernel==6.31.0 \
     matplotlib \
+    uv \
     seaborn \
     scikit-learn \
     numpy \
