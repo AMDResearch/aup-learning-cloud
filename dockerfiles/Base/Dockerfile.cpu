@@ -78,7 +78,24 @@ ARG JUPYTERLAB_VERSION="4.5.6"
 ARG NOTEBOOK_VERSION="7.5.5"
 ARG IPYWIDGETS_VERSION="8.1.8"
 ARG IPYKERNEL_VERSION="6.31.0"
+ARG JUPYTER_AI_VERSION="3.0.0"
+ARG OPENCODE_VERSION="1.17.7"
+ARG NB_UID=1000
 ARG PIP_INDEX_URL=
+
+USER root
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN HOME=/tmp/opencode-install \
+    bash -c "curl -fsSL https://opencode.ai/install | bash -s -- --version ${OPENCODE_VERSION} --no-modify-path" && \
+    install -m 0755 /tmp/opencode-install/.opencode/bin/opencode /usr/local/bin/opencode && \
+    rm -rf /tmp/opencode-install
+
+USER ${NB_UID}
 
 # Set pip index URL if specified
 RUN if [ -n "${PIP_INDEX_URL}" ]; then pip config set global.index-url "${PIP_INDEX_URL}"; fi
@@ -89,6 +106,13 @@ RUN if [ -n "$JUPYTERHUB_VERSION" ]; then python3 -mpip install --no-cache --upg
     notebook=="$NOTEBOOK_VERSION" \
     ipywidgets=="$IPYWIDGETS_VERSION" \
     ipykernel=="$IPYKERNEL_VERSION"; fi
+
+RUN python3 -mpip install --no-cache-dir \
+    jupyter-ai=="$JUPYTER_AI_VERSION"
+
+COPY dockerfiles/Base/jupyterlab-settings/overrides.json /tmp/auplc-jupyterlab-overrides.json
+
+RUN python3 -c "import pathlib, shutil, sys; target = pathlib.Path(sys.prefix) / 'share/jupyter/lab/settings/overrides.json'; target.parent.mkdir(parents=True, exist_ok=True); shutil.copyfile('/tmp/auplc-jupyterlab-overrides.json', target)"
 
 COPY --from=runtime-status-builder --chown=1000:100 /build/runtime/notebook/jupyterlab-runtime-status /tmp/auplc-jupyterlab-runtime-status
 

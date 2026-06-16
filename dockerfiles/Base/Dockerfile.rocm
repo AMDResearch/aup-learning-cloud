@@ -90,6 +90,8 @@ ARG ROCM_VERSION=7.13.0
 ARG PYTORCH_VERSION=2.9.1
 ARG TORCHVISION_VERSION=0.24.0
 ARG TORCHAUDIO_VERSION=2.9.0
+ARG JUPYTER_AI_VERSION=3.0.0
+ARG OPENCODE_VERSION=1.17.7
 # PyTorch wheel target — only differs from GPU_TARGET for the generic
 # buckets (gfx110x → gfx110X-all, gfx120x → gfx120X-all). Specific targets
 # like gfx1150/gfx1151/gfx1152 use the same name in both apt and wheel repos.
@@ -202,7 +204,6 @@ RUN pip3 install --no-cache-dir \
     ipywidgets==8.1.8 \
     ipykernel==6.31.0 \
     matplotlib \
-    uv \
     seaborn \
     scikit-learn \
     numpy \
@@ -210,6 +211,18 @@ RUN pip3 install --no-cache-dir \
     hiredis \
     pillow \
     tqdm
+
+RUN pip3 install --no-cache-dir \
+    jupyter-ai=="${JUPYTER_AI_VERSION}"
+
+RUN HOME=/tmp/opencode-install \
+    bash -c "curl -fsSL https://opencode.ai/install | bash -s -- --version ${OPENCODE_VERSION} --no-modify-path" && \
+    install -m 0755 /tmp/opencode-install/.opencode/bin/opencode /usr/local/bin/opencode && \
+    rm -rf /tmp/opencode-install
+
+COPY dockerfiles/Base/jupyterlab-settings/overrides.json /tmp/auplc-jupyterlab-overrides.json
+
+RUN python3 -c "import pathlib, shutil, sys; target = pathlib.Path(sys.prefix) / 'share/jupyter/lab/settings/overrides.json'; target.parent.mkdir(parents=True, exist_ok=True); shutil.copyfile('/tmp/auplc-jupyterlab-overrides.json', target)"
 
 COPY --from=runtime-status-builder /build/runtime/notebook/jupyterlab-runtime-status /tmp/auplc-jupyterlab-runtime-status
 

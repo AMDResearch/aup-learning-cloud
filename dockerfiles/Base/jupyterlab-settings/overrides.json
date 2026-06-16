@@ -1,0 +1,25 @@
+{
+  "@jupyterlab/application-extension:shell": {
+    "layout": {
+      "single": {
+        "Linked Console": {
+          "area": "down"
+        },
+        "Inspector": {
+          "area": "down"
+        },
+        "Cloned Output": {
+          "area": "down"
+        },
+        "JupyterlabChat:sidepanel": {
+          "area": "right"
+        }
+      },
+      "multiple": {
+        "JupyterlabChat:sidepanel": {
+          "area": "right"
+        }
+      }
+    }
+  }
+}
