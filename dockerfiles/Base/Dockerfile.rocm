@@ -255,18 +255,14 @@ RUN SITE="$(python3 -c 'import site; print(site.getsitepackages()[0])')" && \
     echo 'import _auplc_amdsmi_init' > "${SITE}/_auplc_amdsmi_init.pth"
 
 # Install the roclens JupyterLab extension as a prebuilt wheel from the GitHub
-# Pages PEP 503 index (https://github.com/AMDResearch/roclens). The labextension
-# is compiled upstream in CI, so this image needs no Node build. Override
-# ROCLENS_INDEX_URL to pin the release channel or a specific build.
-ARG ROCLENS_INDEX_URL=https://amdresearch.github.io/roclens/develop/simple/
+# Pages PEP 503 index (https://github.com/AMDResearch/rocLENS). The labextension
+# is compiled upstream in CI, so this image needs no Node build. The jupyter-ai
+# extra installs the MCP server runtime and registers the rocLENS Optimizer
+# persona when Jupyter AI is present.
+ARG ROCLENS_INDEX_URL=https://amdresearch.github.io/rocLENS/develop/simple/
 RUN pip3 install --no-cache-dir --extra-index-url "${ROCLENS_INDEX_URL}" \
-    "roclens" && \
+    "roclens[jupyter-ai]" && \
     jupyter server extension enable roclens
-
-# Autostart the roclens MCP server inside the notebook container so coding
-# agents can attach. Override host/port/CORS via build args or runtime env.
-ENV ROCLENS_MCP_AUTOSTART=1
-# optional: ROCLENS_MCP_HOST=0.0.0.0  ROCLENS_MCP_PORT=8000  ROCLENS_MCP_CORS_ORIGIN=http://localhost:8888
 
 # Remove the jenkins user if it exists (user with ID 1000)
 RUN if getent passwd 1000 > /dev/null; then \
@@ -291,8 +287,9 @@ RUN mkdir -p /home/$NB_USER/.jupyter && \
     chown -R $NB_UID:$NB_GID /home/$NB_USER/.jupyter && \
     chown -R $NB_UID:$NB_GID /home/$NB_USER/.local
 
-# Example notebook for rocprofv3 cell attach profiling (GEMM smoke test)
-RUN mkdir -p /opt/workspace/examples
+# Example notebooks and default Jupyter AI MCP settings for rocLENS.
+RUN mkdir -p /opt/workspace/.jupyter /opt/workspace/examples
+COPY dockerfiles/Base/jupyter-ai/mcp_settings.json /opt/workspace/.jupyter/mcp_settings.json
 COPY dockerfiles/Base/notebooks/*.ipynb /opt/workspace/examples/
 RUN chown -R $NB_UID:$NB_GID /opt/workspace
 
