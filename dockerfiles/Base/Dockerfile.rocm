@@ -293,6 +293,14 @@ COPY dockerfiles/Base/jupyter-ai/mcp_settings.json /opt/workspace/.jupyter/mcp_s
 COPY dockerfiles/Base/notebooks/*.ipynb /opt/workspace/examples/
 RUN chown -R $NB_UID:$NB_GID /opt/workspace
 
+# Template of Jupyter AI / LiteLLM API keys. The singleuser postStart hook
+# (singleuser.lifecycleHooks in the Helm chart) seeds this to the persistent
+# home (~/.env) on first launch and symlinks it into each course workspace, so
+# students set their key once and it survives across sessions and courses.
+RUN mkdir -p /opt/auplc
+COPY dockerfiles/Base/jupyter-ai/dot-env.example /opt/auplc/jupyter-ai.env.example
+RUN chown -R $NB_UID:$NB_GID /opt/auplc
+
 # Create startup script - ensuring it exists in the correct location
 RUN echo '#!/bin/bash' > /home/$NB_USER/start-jupyter.sh && \
     echo 'export USER=jovyan' >> /home/$NB_USER/start-jupyter.sh && \
