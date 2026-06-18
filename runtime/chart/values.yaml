@@ -521,7 +521,24 @@ singleuser:
     hub.jupyter.org/network-access-hub: "true"
   extraFiles: {}
   extraEnv: {}
-  lifecycleHooks: {}
+  # Seed a persistent ~/.env (for Jupyter AI / LiteLLM API keys) on first launch
+  # and symlink it into the server's working directory. Each course image sets a
+  # different, non-persistent WORKDIR as the JupyterLab root, where Jupyter AI
+  # reads its .env from; symlinking the persistent ~/.env there means students
+  # set their API key once and it survives across sessions and courses.
+  # Assumes the home PVC is mounted at /home/jovyan (storage.homeMountPath).
+  lifecycleHooks:
+    postStart:
+      exec:
+        command:
+          - "sh"
+          - "-c"
+          - >-
+            t=/opt/auplc/jupyter-ai.env.example;
+            e=/home/jovyan/.env;
+            if [ ! -e "$e" ] && [ -f "$t" ]; then cp "$t" "$e" && chmod 600 "$e"; fi;
+            d="$(pwd)";
+            [ "$d" = "/home/jovyan" ] || ln -sf "$e" "$d/.env" 2>/dev/null || true
   initContainers: []
   extraContainers: []
   allowPrivilegeEscalation: false

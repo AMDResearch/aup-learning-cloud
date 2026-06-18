@@ -1,0 +1,50 @@
+# ============================================================================
+# AUP Learning Cloud — Jupyter AI / LiteLLM API keys
+# ============================================================================
+# This file lives on your PERSISTENT home (~/.env) and is symlinked into every
+# course workspace automatically, so you only have to set your key ONCE and it
+# survives across sessions and across courses.
+#
+# How to use:
+#   1. Fill in the value for the provider whose model you want to use.
+#   2. Save the file. (The "Add secret" button on the Jupyter AI settings page
+#      writes here too — both ways update the same file.)
+#   3. Pick the matching model in the Jupyternaut settings panel.
+#
+# You normally only need ONE key — the one for the model you select.
+# Leave the rest blank. Lines starting with '#' are ignored.
+# The model strings below are illustrative; see your provider for exact names.
+# ----------------------------------------------------------------------------
+
+# OpenAI            e.g. openai/gpt-4o, openai/gpt-4o-mini
+OPENAI_API_KEY=
+
+# Anthropic         e.g. anthropic/claude-3-5-sonnet-latest
+ANTHROPIC_API_KEY=
+
+# Google Gemini     e.g. gemini/gemini-1.5-pro, gemini/gemini-1.5-flash
+GEMINI_API_KEY=
+
+# Mistral           e.g. mistral/mistral-large-latest
+MISTRAL_API_KEY=
+
+# Groq              e.g. groq/llama-3.1-70b-versatile
+GROQ_API_KEY=
+
+# Cohere            e.g. cohere/command-r-plus
+COHERE_API_KEY=
+
+# Together AI       e.g. together_ai/meta-llama/Llama-3-70b-chat-hf
+TOGETHERAI_API_KEY=
+
+# Hugging Face      e.g. huggingface/meta-llama/Llama-3-8B-Instruct
+HUGGINGFACE_API_KEY=
+
+# OpenRouter        e.g. openrouter/anthropic/claude-3.5-sonnet
+OPENROUTER_API_KEY=
+
+# --- Custom / self-hosted LiteLLM proxy or OpenAI-compatible endpoint -------
+# If you point Jupyternaut at your own LiteLLM proxy, set the key + base URL of
+# that endpoint instead (uncomment and fill in):
+# OPENAI_API_KEY=sk-...
+# OPENAI_BASE_URL=https://your-litellm-proxy.example.com
