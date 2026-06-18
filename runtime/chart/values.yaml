@@ -533,7 +533,12 @@ singleuser:
         command:
           - "sh"
           - "-c"
-          - 't=/opt/auplc/jupyter-ai.env.example; e=/home/jovyan/.env; if [ ! -e "$e" ] && [ -f "$t" ]; then cp "$t" "$e" && chmod 600 "$e"; fi; d="$(pwd)"; [ "$d" = "/home/jovyan" ] || ln -sf "$e" "$d/.env" 2>/dev/null || true'
+          - >-
+            t=/opt/auplc/jupyter-ai.env.example;
+            e=/home/jovyan/.env;
+            if [ ! -e "$e" ] && [ -f "$t" ]; then cp "$t" "$e" && chmod 600 "$e"; fi;
+            d="$(pwd)";
+            [ "$d" = "/home/jovyan" ] || ln -sf "$e" "$d/.env" 2>/dev/null || true
   initContainers: []
   extraContainers: []
   allowPrivilegeEscalation: false
