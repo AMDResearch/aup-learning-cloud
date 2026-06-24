@@ -251,6 +251,7 @@ custom:
       Course-DL: "ghcr.io/amdresearch/auplc-dl:latest"
       Course-LLM: "ghcr.io/amdresearch/auplc-llm:latest"
       Course-PhySim: "ghcr.io/amdresearch/auplc-physim:latest"
+      Course-MuJoCo: "ghcr.io/amdresearch/auplc-mujoco:latest"
       # Custom-URL: "ghcr.io/amdresearch/auplc-cv:latest"
 
     # Optional spawn/Home group display order. Groups not listed here are shown
@@ -291,6 +292,10 @@ custom:
         memory: "0Gi"
         amd.com/gpu: "1"
       Course-PhySim:
+        cpu: "0"
+        memory: "0Gi"
+        amd.com/gpu: "1"
+      Course-MuJoCo:
         cpu: "0"
         memory: "0Gi"
         amd.com/gpu: "1"
@@ -374,6 +379,14 @@ custom:
         acceleratorKeys:
           - strix-halo
         resourceType: "notebook"
+      Course-MuJoCo:
+        group: "TEACHING LABS"
+        description: "MuJoCo Course"
+        subDescription: "Suitable for MuJoCo simulation experiments with GPU"
+        accelerator: "GPU"
+        acceleratorKeys:
+          - strix-halo
+        resourceType: "notebook"
 
   # ============================================================================
   # Team Permission Configuration
@@ -390,6 +403,7 @@ custom:
         - Course-DL
         - Course-LLM
         - Course-PhySim
+        - Course-MuJoCo
       official:
         - cpu
         - gpu
@@ -399,11 +413,13 @@ custom:
         - Course-DL
         - Course-LLM
         - Course-PhySim
+        - Course-MuJoCo
       AUP:
         - Course-CV
         - Course-DL
         - Course-LLM
         - Course-PhySim
+        - Course-MuJoCo
       native-users:
         - code-cpu
         - code-gpu
@@ -411,6 +427,7 @@ custom:
         - Course-DL
         - Course-LLM
         - Course-PhySim
+        - Course-MuJoCo
         - cpu
         - gpu
       github-users:
@@ -422,6 +439,7 @@ custom:
         - Course-DL
         - Course-LLM
         - Course-PhySim
+        - Course-MuJoCo
 
   # ============================================================================
   # Quota Management

@@ -40,7 +40,7 @@ ifneq ($(MIRROR_NPM),)
   BUILD_ARGS += --build-arg NPM_REGISTRY=$(MIRROR_NPM)
 endif
 
-.PHONY: all base base-cpu base-rocm base-gfx1151 hub code code-cpu code-gpu courses cv dl llm physim
+.PHONY: all base base-cpu base-rocm base-gfx1151 hub code code-cpu code-gpu courses cv dl llm physim mujoco
 
 # Build all images
 all: base hub code courses
@@ -115,7 +115,7 @@ code-gpu:
 	$(MAKE) save-image IMAGE=ghcr.io/amdresearch/auplc-code-gpu:latest
 
 # --- Course Images ---
-courses: cv dl llm physim
+courses: cv dl llm physim mujoco
 
 cv:
 	@echo "-------------------------------------------"; \
@@ -152,6 +152,15 @@ physim:
 	cd Courses/PhySim && BASE_IMAGE=$(GPU_BASE_IMAGE) bash ./build.sh
 	docker tag ghcr.io/amdresearch/auplc-physim:latest ghcr.io/amdresearch/auplc-physim:latest-$(GPU_TARGET)
 	$(MAKE) save-image IMAGE=ghcr.io/amdresearch/auplc-physim:latest
+
+mujoco:
+	@echo "-------------------------------------------"; \
+		echo "Building MuJoCo Course Image..."; \
+		echo "-------------------------------------------";
+
+	cd Courses/MuJoCo && BASE_IMAGE=$(GPU_BASE_IMAGE) bash ./build.sh
+	docker tag ghcr.io/amdresearch/auplc-mujoco:latest ghcr.io/amdresearch/auplc-mujoco:latest-$(GPU_TARGET)
+	$(MAKE) save-image IMAGE=ghcr.io/amdresearch/auplc-mujoco:latest
 
 # --- Export Images ---
 save-image:
