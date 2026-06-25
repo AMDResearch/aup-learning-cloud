@@ -251,7 +251,8 @@ custom:
       Course-DL: "ghcr.io/amdresearch/auplc-dl:latest"
       Course-LLM: "ghcr.io/amdresearch/auplc-llm:latest"
       Course-PhySim: "ghcr.io/amdresearch/auplc-physim:latest"
-      Course-MuJoCo: "ghcr.io/amdresearch/auplc-mujoco:latest"
+      Course-MuJoCo-Torch: "ghcr.io/amdresearch/auplc-mujoco-torch:latest"
+      Course-MuJoCo-MJX: "ghcr.io/amdresearch/auplc-mujoco-mjx:latest"
       # Custom-URL: "ghcr.io/amdresearch/auplc-cv:latest"
 
     # Optional spawn/Home group display order. Groups not listed here are shown
@@ -295,7 +296,11 @@ custom:
         cpu: "0"
         memory: "0Gi"
         amd.com/gpu: "1"
-      Course-MuJoCo:
+      Course-MuJoCo-Torch:
+        cpu: "0"
+        memory: "0Gi"
+        amd.com/gpu: "1"
+      Course-MuJoCo-MJX:
         cpu: "0"
         memory: "0Gi"
         amd.com/gpu: "1"
@@ -379,10 +384,18 @@ custom:
         acceleratorKeys:
           - strix-halo
         resourceType: "notebook"
-      Course-MuJoCo:
+      Course-MuJoCo-Torch:
         group: "TEACHING LABS"
-        description: "MuJoCo Course"
-        subDescription: "Suitable for MuJoCo simulation experiments with GPU"
+        description: "MuJoCo (PyTorch) Course"
+        subDescription: "MuJoCo + robosuite/VLA experiments on PyTorch with GPU"
+        accelerator: "GPU"
+        acceleratorKeys:
+          - strix-halo
+        resourceType: "notebook"
+      Course-MuJoCo-MJX:
+        group: "TEACHING LABS"
+        description: "MuJoCo MJX Course"
+        subDescription: "MJX / MuJoCo Playground GPU-parallel simulation and RL"
         accelerator: "GPU"
         acceleratorKeys:
           - strix-halo
@@ -403,7 +416,8 @@ custom:
         - Course-DL
         - Course-LLM
         - Course-PhySim
-        - Course-MuJoCo
+        - Course-MuJoCo-Torch
+        - Course-MuJoCo-MJX
       official:
         - cpu
         - gpu
@@ -413,13 +427,15 @@ custom:
         - Course-DL
         - Course-LLM
         - Course-PhySim
-        - Course-MuJoCo
+        - Course-MuJoCo-Torch
+        - Course-MuJoCo-MJX
       AUP:
         - Course-CV
         - Course-DL
         - Course-LLM
         - Course-PhySim
-        - Course-MuJoCo
+        - Course-MuJoCo-Torch
+        - Course-MuJoCo-MJX
       native-users:
         - code-cpu
         - code-gpu
@@ -427,7 +443,8 @@ custom:
         - Course-DL
         - Course-LLM
         - Course-PhySim
-        - Course-MuJoCo
+        - Course-MuJoCo-Torch
+        - Course-MuJoCo-MJX
         - cpu
         - gpu
       github-users:
@@ -439,7 +456,8 @@ custom:
         - Course-DL
         - Course-LLM
         - Course-PhySim
-        - Course-MuJoCo
+        - Course-MuJoCo-Torch
+        - Course-MuJoCo-MJX
 
   # ============================================================================
   # Quota Management

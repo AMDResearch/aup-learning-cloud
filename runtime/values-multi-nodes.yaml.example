@@ -197,7 +197,8 @@ custom:
       Course-DL: "ghcr.io/amdresearch/auplc-dl:latest"
       Course-LLM: "ghcr.io/amdresearch/auplc-llm:latest"
       Course-PhySim: "ghcr.io/amdresearch/auplc-physim:latest"
-      Course-MuJoCo: "ghcr.io/amdresearch/auplc-mujoco:latest"
+      Course-MuJoCo-Torch: "ghcr.io/amdresearch/auplc-mujoco-torch:latest"
+      Course-MuJoCo-MJX: "ghcr.io/amdresearch/auplc-mujoco-mjx:latest"
       code-cpu: "ghcr.io/amdresearch/auplc-code-cpu:latest"
       code-gpu: "ghcr.io/amdresearch/auplc-code-gpu:latest"
 
@@ -233,7 +234,11 @@ custom:
         cpu: "0"
         memory: "0Gi"
         amd.com/gpu: "1"
-      Course-MuJoCo:
+      Course-MuJoCo-Torch:
+        cpu: "0"
+        memory: "0Gi"
+        amd.com/gpu: "1"
+      Course-MuJoCo-MJX:
         cpu: "0"
         memory: "0Gi"
         amd.com/gpu: "1"
@@ -326,10 +331,18 @@ custom:
         acceleratorKeys:
           - strix-halo
         resourceType: "notebook"
-      Course-MuJoCo:
+      Course-MuJoCo-Torch:
         group: "TEACHING LABS"
-        description: "MuJoCo Course"
-        subDescription: "Suitable for MuJoCo simulation experiments with GPU"
+        description: "MuJoCo (PyTorch) Course"
+        subDescription: "MuJoCo + robosuite/VLA experiments on PyTorch with GPU"
+        accelerator: "GPU"
+        acceleratorKeys:
+          - strix-halo
+        resourceType: "notebook"
+      Course-MuJoCo-MJX:
+        group: "TEACHING LABS"
+        description: "MuJoCo MJX Course"
+        subDescription: "MJX / MuJoCo Playground GPU-parallel simulation and RL"
         accelerator: "GPU"
         acceleratorKeys:
           - strix-halo
@@ -349,7 +362,8 @@ custom:
         - Course-DL
         - Course-LLM
         - Course-PhySim
-        - Course-MuJoCo
+        - Course-MuJoCo-Torch
+        - Course-MuJoCo-MJX
       official:
         - cpu
         - gpu
@@ -359,13 +373,15 @@ custom:
         - Course-DL
         - Course-LLM
         - Course-PhySim
-        - Course-MuJoCo
+        - Course-MuJoCo-Torch
+        - Course-MuJoCo-MJX
       AUP:
         - Course-CV
         - Course-DL
         - Course-LLM
         - Course-PhySim
-        - Course-MuJoCo
+        - Course-MuJoCo-Torch
+        - Course-MuJoCo-MJX
       native-users:
         - cpu
         - gpu
@@ -375,7 +391,8 @@ custom:
         - Course-DL
         - Course-LLM
         - Course-PhySim
-        - Course-MuJoCo
+        - Course-MuJoCo-Torch
+        - Course-MuJoCo-MJX
       github-users:
         - cpu
         - gpu
@@ -385,7 +402,8 @@ custom:
         - Course-DL
         - Course-LLM
         - Course-PhySim
-        - Course-MuJoCo
+        - Course-MuJoCo-Torch
+        - Course-MuJoCo-MJX
 
   # Native users in multi auth mode are managed by the built-in admin UI or the
   # batch scripts under scripts/. New native users are automatically assigned to

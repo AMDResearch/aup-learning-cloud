@@ -34,7 +34,8 @@ _RESOURCE_IMAGE_BASE: dict[str, str] = {
     "Course-DL": "auplc-dl",
     "Course-LLM": "auplc-llm",
     "Course-PhySim": "auplc-physim",
-    "Course-MuJoCo": "auplc-mujoco",
+    "Course-MuJoCo-Torch": "auplc-mujoco-torch",
+    "Course-MuJoCo-MJX": "auplc-mujoco-mjx",
 }
 
 

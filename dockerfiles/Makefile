@@ -40,7 +40,7 @@ ifneq ($(MIRROR_NPM),)
   BUILD_ARGS += --build-arg NPM_REGISTRY=$(MIRROR_NPM)
 endif
 
-.PHONY: all base base-cpu base-rocm base-gfx1151 hub code code-cpu code-gpu courses cv dl llm physim mujoco
+.PHONY: all base base-cpu base-rocm base-gfx1151 hub code code-cpu code-gpu courses cv dl llm physim mujoco-torch mujoco-mjx
 
 # Build all images
 all: base hub code courses
@@ -115,7 +115,7 @@ code-gpu:
 	$(MAKE) save-image IMAGE=ghcr.io/amdresearch/auplc-code-gpu:latest
 
 # --- Course Images ---
-courses: cv dl llm physim mujoco
+courses: cv dl llm physim mujoco-torch mujoco-mjx
 
 cv:
 	@echo "-------------------------------------------"; \
@@ -153,14 +153,23 @@ physim:
 	docker tag ghcr.io/amdresearch/auplc-physim:latest ghcr.io/amdresearch/auplc-physim:latest-$(GPU_TARGET)
 	$(MAKE) save-image IMAGE=ghcr.io/amdresearch/auplc-physim:latest
 
-mujoco:
+mujoco-torch:
 	@echo "-------------------------------------------"; \
-		echo "Building MuJoCo Course Image..."; \
+		echo "Building MuJoCo (PyTorch) Course Image..."; \
 		echo "-------------------------------------------";
 
-	cd Courses/MuJoCo && BASE_IMAGE=$(GPU_BASE_IMAGE) bash ./build.sh
-	docker tag ghcr.io/amdresearch/auplc-mujoco:latest ghcr.io/amdresearch/auplc-mujoco:latest-$(GPU_TARGET)
-	$(MAKE) save-image IMAGE=ghcr.io/amdresearch/auplc-mujoco:latest
+	cd Courses/MuJoCo-Torch && BASE_IMAGE=$(GPU_BASE_IMAGE) bash ./build.sh
+	docker tag ghcr.io/amdresearch/auplc-mujoco-torch:latest ghcr.io/amdresearch/auplc-mujoco-torch:latest-$(GPU_TARGET)
+	$(MAKE) save-image IMAGE=ghcr.io/amdresearch/auplc-mujoco-torch:latest
+
+mujoco-mjx:
+	@echo "-------------------------------------------"; \
+		echo "Building MuJoCo MJX Course Image..."; \
+		echo "-------------------------------------------";
+
+	cd Courses/MuJoCo-MJX && BASE_IMAGE=$(GPU_BASE_IMAGE) bash ./build.sh
+	docker tag ghcr.io/amdresearch/auplc-mujoco-mjx:latest ghcr.io/amdresearch/auplc-mujoco-mjx:latest-$(GPU_TARGET)
+	$(MAKE) save-image IMAGE=ghcr.io/amdresearch/auplc-mujoco-mjx:latest
 
 # --- Export Images ---
 save-image:
