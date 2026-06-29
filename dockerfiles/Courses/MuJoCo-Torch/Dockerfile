@@ -68,9 +68,6 @@ snapshot_download('HuggingFaceTB/SmolVLM2-500M-Video-Instruct')" \
 RUN mkdir -p /opt/workspace/MuJoCo-Torch
 COPY ./course_data /opt/workspace/MuJoCo-Torch
 
-# Bake any locally-trained SmolVLA checkpoints (empty if none were produced).
-COPY ./ckpt_data /opt/checkpoints
-
 USER root
-RUN chown -R jovyan:1000 /opt/workspace /opt/checkpoints
+RUN chown -R jovyan:1000 /opt/workspace
 USER jovyan

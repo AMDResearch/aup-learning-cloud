@@ -20,12 +20,7 @@
 
 cp -r ../../../projects/MuJoCo-Torch ./course_data
 
-# Stage trained SmolVLA checkpoints to bake in (if any have been produced locally).
-# The dir always exists so the Dockerfile COPY succeeds even when empty.
-mkdir -p ckpt_data
-if [ -d ../../../checkpoints ]; then cp -r ../../../checkpoints/. ckpt_data/; fi
-
 docker build ${BASE_IMAGE:+--build-arg BASE_IMAGE="$BASE_IMAGE"} \
   -t ghcr.io/amdresearch/auplc-mujoco-torch:latest .
 
-rm -r course_data ckpt_data
+rm -r course_data
