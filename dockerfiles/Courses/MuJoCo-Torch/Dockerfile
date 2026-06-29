@@ -35,11 +35,8 @@ RUN ln -sf /opt/rocm/lib/llvm/bin/ld.lld /usr/local/bin/ld.lld
 # IMPORTANT: must remain under USER root here. pip install as jovyan silently
 # falls back to ~/.local/, which gets masked by the PVC mount at runtime.
 
-# MuJoCo course Python packages not provided by auplc-base.
-# torch, numpy, tqdm, matplotlib, pillow and the jupyter stack (incl. PyYAML)
-# already ship in the base image, so they are intentionally omitted here.
-# Pin the MuJoCo-based simulation core (their APIs are tightly version-coupled);
-# leave the rest unpinned so they track compatible releases.
+# Course packages not already in auplc-base (torch / numpy / jupyter ship there).
+# The MuJoCo simulation core is pinned; the rest track compatible releases.
 RUN pip3 install --no-cache-dir \
     "mujoco==3.9.0" \
     "gymnasium==1.3.0" \
@@ -50,10 +47,30 @@ RUN pip3 install --no-cache-dir \
     imageio \
     imageio-ffmpeg
 
+# LeRobot (VLA policies) + the transformers version it requires (>=5.3.0,<6).
+RUN pip3 install --no-cache-dir "lerobot[smolvla,pi]==0.5.0" \
+ && pip3 install --no-cache-dir "transformers==5.3.0"
+
+# XLeRobot MuJoCo assets, baked for offline use at runtime.
+RUN git clone --depth 1 https://github.com/Vector-Wangel/XLeRobot.git /opt/xlerobot \
+ && chmod -R a+rX /opt/xlerobot
+
+# Bake the SmolVLA weights (+ SmolVLM2 backbone) so the labs run offline.
+# HF_HOME is owned by jovyan so runtime downloads cache alongside the baked weights.
+ENV HF_HOME=/opt/hf
+RUN mkdir -p /opt/hf \
+ && python3 -c "from huggingface_hub import snapshot_download; \
+snapshot_download('lerobot/smolvla_base'); \
+snapshot_download('HuggingFaceTB/SmolVLM2-500M-Video-Instruct')" \
+ && chown -R jovyan:1000 /opt/hf
+
 # Copy related rocm notebooks into the docker
 RUN mkdir -p /opt/workspace/MuJoCo-Torch
 COPY ./course_data /opt/workspace/MuJoCo-Torch
 
+# Bake any locally-trained SmolVLA checkpoints (empty if none were produced).
+COPY ./ckpt_data /opt/checkpoints
+
 USER root
-RUN chown -R jovyan:1000 /opt/workspace
+RUN chown -R jovyan:1000 /opt/workspace /opt/checkpoints
 USER jovyan
