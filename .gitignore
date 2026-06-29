@@ -395,3 +395,11 @@ runtime/values.local.yaml
 # Offline bundle artifacts
 auplc-bundle-*/
 auplc-bundle-*.tar.gz
+
+# Trained SmolVLA checkpoints (large binaries, host externally)
+checkpoints/
+
+# Hold MT06-08 back from publishing for now (LIBERO/pi0.5 work in progress)
+projects/MuJoCo-Torch/MT06_Pi05_FlowMatching_RTC.ipynb
+projects/MuJoCo-Torch/MT07_3DGS_Hybrid_Rendering.ipynb
+projects/MuJoCo-Torch/MT08_XLeRobot_SimToSim.ipynb
