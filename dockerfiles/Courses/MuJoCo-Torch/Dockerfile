@@ -55,13 +55,13 @@ RUN pip3 install --no-cache-dir "lerobot[smolvla,pi]==0.5.0" \
 RUN git clone --depth 1 https://github.com/Vector-Wangel/XLeRobot.git /opt/xlerobot \
  && chmod -R a+rX /opt/xlerobot
 
-# Bake the SmolVLA weights (+ SmolVLM2 backbone) so the labs run offline.
-# HF_HOME is owned by jovyan so runtime downloads cache alongside the baked weights.
+# Bake SmolVLA so the labs run offline. Loading the policy once caches only the
+# files actually needed (smolvla_base + the SmolVLM2 backbone weights, ~2.8 GB)
+# rather than the full SmolVLM2 repo. HF_HOME is owned by jovyan so runtime
+# downloads cache alongside the baked weights.
 ENV HF_HOME=/opt/hf
 RUN mkdir -p /opt/hf \
- && python3 -c "from huggingface_hub import snapshot_download; \
-snapshot_download('lerobot/smolvla_base'); \
-snapshot_download('HuggingFaceTB/SmolVLM2-500M-Video-Instruct')" \
+ && python3 -c "from huggingface_hub import snapshot_download; snapshot_download('lerobot/smolvla_base'); from lerobot.policies.smolvla.modeling_smolvla import SmolVLAPolicy; SmolVLAPolicy.from_pretrained('lerobot/smolvla_base')" \
  && chown -R jovyan:1000 /opt/hf
 
 # Copy related rocm notebooks into the docker
