@@ -53,10 +53,12 @@ Outputs are written under `output/videos`.
 ## Models & dependencies
 
 The Dockerfile installs `lerobot==0.5.0` + `transformers==5.3.0` (lerobot 0.5.0
-requires transformers ≥5.3.0,<6) on top of `auplc-base`'s ROCm PyTorch, and **bakes
-the non-gated SmolVLA** (and its SmolVLM2 backbone) into the image at
-`HF_HOME=/opt/hf`, so **MT05 runs fully offline** (no Hugging Face token needed).
-The fully-trained MT05 checkpoint is baked under `/opt/checkpoints`.
+requires transformers ≥5.3.0,<6) on top of `auplc-base`'s ROCm PyTorch. The model
+weights are **downloaded at runtime from the public Hugging Face Hub (no token):**
+MT05 fetches `lerobot/smolvla_base` + its SmolVLM2 backbone (~2.8 GB, first run only,
+then cached under `HF_HOME=/opt/hf`), and the appendix fetches the fully-trained
+checkpoint [`sonya-tw/mt05-smolvla-lift`](https://huggingface.co/sonya-tw/mt05-smolvla-lift).
+First-run cells therefore need network access.
 
 > Note: AMD flash-attention is still experimental on this stack; the models fall
 > back to PyTorch SDPA automatically (optionally enable with
