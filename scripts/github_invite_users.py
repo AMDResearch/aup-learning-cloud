@@ -51,9 +51,7 @@ def get_github_token():
     if token:
         return token
     try:
-        result = subprocess.run(
-            ["gh", "auth", "token"], capture_output=True, text=True, timeout=10, check=False
-        )
+        result = subprocess.run(["gh", "auth", "token"], capture_output=True, text=True, timeout=10, check=False)
         if result.returncode == 0 and result.stdout.strip():
             return result.stdout.strip()
     except (FileNotFoundError, subprocess.TimeoutExpired):
@@ -64,9 +62,7 @@ def get_github_token():
 
 def main():
     """Invite users in GITHUB_USERS to the org and add them to TEAMS."""
-    parser = argparse.ArgumentParser(
-        description="Invite GitHub users to an organization and add them to teams"
-    )
+    parser = argparse.ArgumentParser(description="Invite GitHub users to an organization and add them to teams")
     parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -111,7 +107,7 @@ def main():
     results = {"invited": 0, "already_member": 0, "failed": 0}
 
     for username in GITHUB_USERS:
-        print(f"\n{'='*50}")
+        print(f"\n{'=' * 50}")
         print(f"User: {username}")
 
         try:
@@ -148,7 +144,7 @@ def main():
                 print(f"  Failed to invite: {msg}")
                 results["failed"] += 1
 
-    print(f"\n{'='*50}")
+    print(f"\n{'=' * 50}")
     print("Results:")
     print(f"  Invited: {results['invited']}")
     print(f"  Already member (teams updated): {results['already_member']}")
