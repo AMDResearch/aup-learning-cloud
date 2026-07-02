@@ -186,7 +186,7 @@ def setup_hub(c: Any) -> None:
             {
                 "authenticator_class": CustomFirstUseAuthenticator,
                 "url_prefix": "/native",
-                "config": {"prefix": ""},
+                "config": {"prefix": "", "allow_all": True},
             },
         ]
 
