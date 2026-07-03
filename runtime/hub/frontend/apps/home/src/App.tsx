@@ -364,20 +364,7 @@ function App() {
   useEffect(() => {
     getResources()
       .then((data) => {
-        const allowedKeys = window.AVAILABLE_RESOURCES ?? [];
-        const hasFilter = allowedKeys.length > 0;
-        const allowedSet = new Set(allowedKeys);
-
-        const filtered = hasFilter
-          ? data.groups
-              .map((g) => ({
-                ...g,
-                resources: g.resources.filter((r) => allowedSet.has(r.key)),
-              }))
-              .filter((g) => g.resources.length > 0)
-          : data.groups.filter((g) => g.resources.length > 0);
-
-        setGroups(filtered);
+        setGroups(data.groups.filter((g) => g.resources.length > 0));
       })
       .catch((err) => {
         setResourcesError(

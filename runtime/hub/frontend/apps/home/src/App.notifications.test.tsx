@@ -22,6 +22,7 @@ import { render, screen, within } from "@testing-library/react";
 import { act } from "react";
 
 const sharedMocks = vi.hoisted(() => ({
+  fetchPlatformInfo: vi.fn(),
   getNotifications: vi.fn(),
   getMyQuota: vi.fn(),
   getMyUsage: vi.fn(),
@@ -32,6 +33,7 @@ const sharedMocks = vi.hoisted(() => ({
 
 vi.mock("@auplc/shared", () => ({
   PLATFORM_NAME: "AUP Learning Cloud",
+  fetchPlatformInfo: sharedMocks.fetchPlatformInfo,
   getNotifications: sharedMocks.getNotifications,
   getMyQuota: sharedMocks.getMyQuota,
   getMyUsage: sharedMocks.getMyUsage,
@@ -108,6 +110,9 @@ async function renderApp() {
 beforeEach(() => {
   vi.clearAllMocks();
 
+  sharedMocks.fetchPlatformInfo.mockResolvedValue({
+    platform: "AUP Learning Cloud",
+  });
   sharedMocks.getMyQuota.mockResolvedValue(null);
   sharedMocks.getMyUsage.mockResolvedValue(null);
   sharedMocks.getResources.mockResolvedValue({ groups: [] });
