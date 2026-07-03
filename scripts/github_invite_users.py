@@ -5,12 +5,33 @@
 """
 GitHub Organization User Invitation Script
 
-Invite GitHub users to an organization and add them to specified teams.
-Uses only Python standard library — no third-party dependencies required.
+This script invites GitHub users to an organization and adds them to specified
+teams in a single API call, using only the Python standard library.
 
-Authentication:
-    Set GITHUB_TOKEN environment variable with a token that has `admin:org` scope.
-    If not set, the script will try to read the token from `gh auth token`.
+Features:
+- Invite users to a GitHub organization as direct members
+- Assign users to one or more teams at invitation time
+- Fall back to team membership update if the user is already a member
+- Dry-run mode to preview actions without making API calls
+
+Requirements:
+- Python 3.9+
+- A GitHub token with `admin:org` scope, provided via one of:
+  - GITHUB_TOKEN environment variable (personal access token)
+  - gh CLI authenticated with the required scope:
+      Install: https://cli.github.com
+      Authenticate: gh auth login
+      Add required scope: gh auth refresh -s admin:org
+
+Environment Variables:
+- GITHUB_TOKEN: Personal access token with `admin:org` scope.
+  If not set, the token is read automatically from `gh auth token`.
+
+Configuration:
+    Edit the following variables at the top of the script before running:
+    - ORG_NAME: GitHub organization name to invite users to
+    - GITHUB_USERS: list of GitHub usernames to invite
+    - TEAMS: list of team slugs to assign to all invited users
 
 Usage:
     # Dry run (preview actions without making API calls)
