@@ -76,6 +76,8 @@ GITHUB_API = "https://api.github.com"
 
 def print_table(headers, rows):
     """Print a simple aligned table without external dependencies."""
+    if not rows:
+        return
     widths = [max(len(h), max((len(str(r[i])) for r in rows), default=0)) for i, h in enumerate(headers)]
     fmt = "  ".join(f"{{:<{w}}}" for w in widths)
     print(fmt.format(*headers))
@@ -102,28 +104,28 @@ def gh_request(token, method, path, body=None):
     """Make a GitHub API request and return the parsed JSON response."""
     url = f"{GITHUB_API}{path}"
     data = json.dumps(body).encode() if body is not None else None
-    req = urllib.request.Request(
-        url,
-        data=data,
-        method=method,
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Accept": "application/vnd.github+json",
-            "X-GitHub-Api-Version": "2022-11-28",
-            "Content-Type": "application/json",
-        },
-    )
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    if data is not None:
+        headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(url, data=data, method=method, headers=headers)
     try:
         with urllib.request.urlopen(req) as resp:
             return resp.status, json.loads(resp.read())
     except urllib.error.HTTPError as e:
         return e.code, json.loads(e.read())
+    except urllib.error.URLError as e:
+        return 0, {"message": str(e.reason)}
 
 
 def gh_paginate(token, path):
     """Fetch all pages of a GitHub API endpoint and return the combined list."""
     results = []
-    url = f"{GITHUB_API}{path}?per_page=100"
+    sep = "&" if "?" in path else "?"
+    url = f"{GITHUB_API}{path}{sep}per_page=100"
     while url:
         req = urllib.request.Request(
             url,
@@ -144,7 +146,10 @@ def gh_paginate(token, path):
         except urllib.error.HTTPError as e:
             data = json.loads(e.read())
             print(f"  ❌ API error {e.code} on {path}: {data.get('message', str(e))}")
-            return []
+            return None
+        except urllib.error.URLError as e:
+            print(f"  ❌ Network error on {path}: {e.reason}")
+            return None
     return results
 
 
@@ -184,8 +189,12 @@ def cmd_invite(args, token):
 
         # Resolve username to numeric ID (required by the invitations endpoint)
         status, data = gh_request(token, "GET", f"/users/{username}")
-        if status != 200:
+        if status == 404:
             print(f"  ❌ GitHub user not found: {username}")
+            results["failed"] += 1
+            continue
+        elif status != 200:
+            print(f"  ❌ Failed to look up {username}: {data.get('message', status)}")
             results["failed"] += 1
             continue
         user_id = data["id"]
@@ -210,11 +219,11 @@ def cmd_invite(args, token):
             print(f"  ⚠️  Already a member or pending invitation: {username}")
             results["already_member"] += 1
             for team_slug in team_ids:
-                status, data = gh_request(token, "PUT", f"/orgs/{ORG_NAME}/teams/{team_slug}/memberships/{username}", {"role": "member"})
-                if status == 200:
+                team_status, team_data = gh_request(token, "PUT", f"/orgs/{ORG_NAME}/teams/{team_slug}/memberships/{username}", {"role": "member"})
+                if team_status == 200:
                     print(f"  ✅ Added {username} to team: {team_slug}")
                 else:
-                    print(f"  ❌ Failed to add to team {team_slug}: {data.get('message', status)}")
+                    print(f"  ❌ Failed to add to team {team_slug}: {team_data.get('message', team_status)}")
         else:
             print(f"  ❌ Failed to invite: {data.get('message', status)}")
             results["failed"] += 1
@@ -227,30 +236,32 @@ def cmd_invite(args, token):
     print("=" * 50)
 
 
-def cmd_list(args, token):
+def cmd_list(token):
     """List all org members with their role and team memberships."""
     print(f"🔄 Fetching members for {ORG_NAME}...")
 
     members = gh_paginate(token, f"/orgs/{ORG_NAME}/members")
+    if members is None:
+        sys.exit(1)
     if not members:
         print("❌ No members returned. Check ORG_NAME and that your token has admin:org scope.")
         sys.exit(1)
 
     # Fetch all teams and their members once to avoid N*T API calls
-    teams = gh_paginate(token, f"/orgs/{ORG_NAME}/teams")
+    teams = gh_paginate(token, f"/orgs/{ORG_NAME}/teams") or []
     team_members = {}
     for team in teams:
         slug = team["slug"]
-        members_in_team = gh_paginate(token, f"/orgs/{ORG_NAME}/teams/{slug}/members")
+        members_in_team = gh_paginate(token, f"/orgs/{ORG_NAME}/teams/{slug}/members") or []
         for m in members_in_team:
             team_members.setdefault(m["login"], []).append(slug)
 
-    # Fetch each member's org role
+    admins = {m["login"] for m in (gh_paginate(token, f"/orgs/{ORG_NAME}/members?role=admin") or [])}
+
     rows = []
     for member in members:
         username = member["login"]
-        _, membership = gh_request(token, "GET", f"/orgs/{ORG_NAME}/memberships/{username}")
-        role = membership.get("role", "unknown")
+        role = "admin" if username in admins else "member"
         user_teams = ", ".join(sorted(team_members.get(username, []))) or "—"
         rows.append([username, role, user_teams])
 
@@ -260,11 +271,13 @@ def cmd_list(args, token):
     print_table(["Username", "Permission", "Teams"], rows)
 
 
-def cmd_pending(args, token):
+def cmd_pending(token):
     """List all pending (unaccepted) invitations for the org."""
     print(f"🔄 Fetching pending invitations for {ORG_NAME}...")
 
     invitations = gh_paginate(token, f"/orgs/{ORG_NAME}/invitations")
+    if invitations is None:
+        sys.exit(1)
     if not invitations:
         print("✅ No pending invitations.")
         return
@@ -307,9 +320,9 @@ def main():
     if args.command == "invite":
         cmd_invite(args, token)
     elif args.command == "list":
-        cmd_list(args, token)
+        cmd_list(token)
     elif args.command == "pending":
-        cmd_pending(args, token)
+        cmd_pending(token)
 
 
 if __name__ == "__main__":
