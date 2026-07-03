@@ -49,6 +49,10 @@ custom:
   # - multi: GitHub App + Local accounts
   authMode: "auto-login"
 
+  # GitHub organization name for team-based resource access
+  # Required for github and multi auth modes.
+  # githubOrgName: "<YOUR-ORG-NAME>"
+
   # Cluster display name (optional). Appended to "AUP Learning Cloud" in the UI.
   # Example: "City/University" → "AUP Learning Cloud City/University"
   clusterName: ""
@@ -278,7 +282,8 @@ custom:
     # Example: move DEVELOPMENT before COURSE by listing DEVELOPMENT first.
     groupOrder:
       - TEACHING LABS
-      - DEVELOPMENT ENVIRONMENT
+      - DEVELOPMENT ENVIRONMENTS
+      - TUTORIALS
       - CUSTOM REPOS
 
     # Course Resource Requirements
@@ -330,7 +335,7 @@ custom:
         allowGitClone: true
         resourceType: "notebook"
       code-cpu:
-        group: "DEVELOPMENT ENVIRONMENT"
+        group: "DEVELOPMENT ENVIRONMENTS"
         description: "VSCode Server CPU"
         subDescription: "CPU-only development workspace"
         accelerator: ""
@@ -348,7 +353,7 @@ custom:
         allowGitClone: true
         resourceType: "notebook"
       code-gpu:
-        group: "DEVELOPMENT ENVIRONMENT"
+        group: "DEVELOPMENT ENVIRONMENTS"
         description: "VSCode Server GPU"
         subDescription: "GPU-accelerated development workspace"
         accelerator: "GPU"
@@ -481,11 +486,11 @@ hub:
 
   extraFiles:
     announcement.txt:
-    # Replace stringData with login announcement content to show a notice on login.html.
-    # The default HTML comment is intentionally hidden by the login template.
+      # Replace stringData with login announcement content to show a notice on login.html.
+      # The default HTML comment is intentionally hidden by the login template.
       mountPath: /usr/local/share/jupyterhub/static/announcement.txt
       stringData: |
-          <!-- Add login announcement content here. -->
+        <!-- Add login announcement content here. -->
 
   config:
     # ---- Hub Core ----
@@ -510,9 +515,9 @@ hub:
       client_secret: "TODO"
       allowed_organizations:
         - <YOUR-ORG-NAME>
-      scope:
-        - read:user
-        - read:org
+      # Use [] for GitHub App credentials. For legacy OAuth Apps, use
+      # read:user and read:org instead.
+      scope: []
 
     # ---- KubeSpawner Prepuller Setup ----
     KubeSpawner:
@@ -562,7 +567,7 @@ singleuser:
     securityContext:
       fsGroup: 100
       supplementalGroups:
-        - 993  # render group for ROCm GPU access
+        - 993 # render group for ROCm GPU access
 
   storage:
     dynamic:

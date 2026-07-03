@@ -61,7 +61,7 @@ custom:
   clusterName: ""
 
   # GitHub organization name for team-based resource access
-  githubOrgName: "your-github-org"
+  githubOrgName: "<YOUR-ORG-NAME>"
 
   # Auto-create admin user on first install
   adminUser:
@@ -214,7 +214,8 @@ custom:
     # Example: move DEVELOPMENT before COURSE by listing DEVELOPMENT first.
     groupOrder:
       - TEACHING LABS
-      - DEVELOPMENT ENVIRONMENT
+      - DEVELOPMENT ENVIRONMENTS
+      - TUTORIALS
       - CUSTOM REPOS
 
     requirements:
@@ -262,8 +263,8 @@ custom:
         allowGitClone: true
         resourceType: "notebook"
       code-cpu:
-        group: "DEVELOPMENT ENVIRONMENT"
-        description: "VSCode Server - CPU Environment"
+        group: "DEVELOPMENT ENVIRONMENTS"
+        description: "VSCode Server CPU"
         subDescription: "CPU-only development workspace"
         accelerator: ""
         acceleratorKeys: []
@@ -280,8 +281,8 @@ custom:
         allowGitClone: true
         resourceType: "notebook"
       code-gpu:
-        group: "DEVELOPMENT ENVIRONMENT"
-        description: "VSCode Server - GPU Environment"
+        group: "DEVELOPMENT ENVIRONMENTS"
+        description: "VSCode Server GPU"
         subDescription: "GPU-accelerated development workspace"
         accelerator: "GPU"
         acceleratorKeys:
@@ -448,7 +449,7 @@ hub:
       client_id: "TODO"
       client_secret: "TODO"
       allowed_organizations:
-        - your-github-org
+        - <YOUR-ORG-NAME>
       # Use [] for GitHub App credentials. For legacy OAuth Apps, use
       # read:user and read:org instead.
       scope: []
