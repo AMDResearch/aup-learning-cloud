@@ -5,8 +5,8 @@
 """
 GitHub Organization User Invitation Script
 
-Invite GitHub users to an organization and add them to specified teams
-using the PyGithub library.
+Invite GitHub users to an organization and add them to specified teams.
+Uses only Python standard library — no third-party dependencies required.
 
 Authentication:
     Set GITHUB_TOKEN environment variable with a token that has `admin:org` scope.
@@ -21,11 +21,12 @@ Usage:
 """
 
 import argparse
+import json
 import os
 import subprocess
 import sys
-
-from github import Github, GithubException
+import urllib.error
+import urllib.request
 
 # =============================================================================
 # CONFIGURATION — Edit these values before running
@@ -33,16 +34,16 @@ from github import Github, GithubException
 
 ORG_NAME = "your-org-name"  # Replace with your GitHub organization name
 
-
 GITHUB_USERS = [
     # "username1",
     # "username2",
 ]
 
-
 TEAMS = ["code-cpu", "code-gpu", "cpu", "gpu", "npu", "official", "public"]
 
 # =============================================================================
+
+GITHUB_API = "https://api.github.com"
 
 
 def get_github_token():
@@ -56,18 +57,36 @@ def get_github_token():
             return result.stdout.strip()
     except (FileNotFoundError, subprocess.TimeoutExpired):
         pass
-
     return None
+
+
+def gh_request(token, method, path, body=None):
+    """Make a GitHub API request and return the parsed JSON response."""
+    url = f"{GITHUB_API}{path}"
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(
+        url,
+        data=data,
+        method=method,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "Content-Type": "application/json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req) as resp:
+            return resp.status, json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        return e.code, json.loads(e.read())
 
 
 def main():
     """Invite users in GITHUB_USERS to the org and add them to TEAMS."""
+
     parser = argparse.ArgumentParser(description="Invite GitHub users to an organization and add them to teams")
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Preview actions without making API calls",
-    )
+    parser.add_argument("--dry-run", action="store_true", help="Preview actions without making API calls")
     args = parser.parse_args()
 
     if not GITHUB_USERS:
@@ -84,22 +103,20 @@ def main():
         print("Set GITHUB_TOKEN env var or authenticate with: gh auth login")
         sys.exit(1)
 
-    g = Github(token)
-    org = g.get_organization(ORG_NAME)
-    print(f"Organization: {org.login}")
-
-    team_objects = []
+    # Resolve team slugs to team IDs
+    print(f"Organization: {ORG_NAME}")
+    team_ids = {}
     for team_slug in TEAMS:
-        try:
-            team = org.get_team_by_slug(team_slug)
-            team_objects.append(team)
-            print(f"  Team found: {team.name} (slug: {team.slug})")
-        except GithubException as e:
-            print(f"  Team not found: {team_slug} ({e.data.get('message', str(e))})")
+        status, data = gh_request(token, "GET", f"/orgs/{ORG_NAME}/teams/{team_slug}")
+        if status == 200:
+            team_ids[team_slug] = data["id"]
+            print(f"  ✅ Team found: {data['name']} (slug: {team_slug})")
+        else:
+            print(f"  ❌ Team not found: {team_slug} ({data.get('message', status)})")
             sys.exit(1)
 
-    print(f"\nUsers to process: {len(GITHUB_USERS)}")
-    print(f"Teams to assign: {', '.join(t.slug for t in team_objects)}")
+    print(f"\n🔄 Processing {len(GITHUB_USERS)} users...")
+    print(f"   Teams to assign: {', '.join(team_ids)}")
 
     if args.dry_run:
         print("\n--- DRY RUN ---\n")
@@ -110,45 +127,49 @@ def main():
         print(f"\n{'=' * 50}")
         print(f"User: {username}")
 
-        try:
-            user = g.get_user(username)
-        except GithubException:
-            print(f"  GitHub user not found: {username}")
+        # Resolve username to numeric ID (required by the invitations endpoint)
+        status, data = gh_request(token, "GET", f"/users/{username}")
+        if status != 200:
+            print(f"  ❌ GitHub user not found: {username}")
             results["failed"] += 1
             continue
+        user_id = data["id"]
 
         if args.dry_run:
-            print(f"  [DRY RUN] Would invite {username} to {ORG_NAME} as member")
-            for team in team_objects:
-                print(f"  [DRY RUN] Would add {username} to team: {team.slug}")
+            print(f"  [DRY RUN] Would invite {username} (id={user_id}) to {ORG_NAME} as member")
+            for team_slug in team_ids:
+                print(f"  [DRY RUN] Would add {username} to team: {team_slug}")
             results["invited"] += 1
             continue
 
-        try:
-            org.invite_user(user=user, role="direct_member", teams=team_objects)
-            print(f"  Invited {username} to {ORG_NAME}")
+        status, data = gh_request(
+            token,
+            "POST",
+            f"/orgs/{ORG_NAME}/invitations",
+            {"invitee_id": user_id, "role": "direct_member", "team_ids": list(team_ids.values())},
+        )
+        if status == 201:
+            print(f"  ✅ Invited {username} to {ORG_NAME}")
             results["invited"] += 1
-        except GithubException as e:
-            msg = e.data.get("message", str(e)) if isinstance(e.data, dict) else str(e)
-            if e.status == 422:
-                print(f"  Already a member or pending invitation: {username}")
-                results["already_member"] += 1
-                for team in team_objects:
-                    try:
-                        team.add_membership(member=user, role="member")
-                        print(f"  Added {username} to team: {team.slug}")
-                    except GithubException as te:
-                        team_msg = te.data.get("message", str(te)) if isinstance(te.data, dict) else str(te)
-                        print(f"  Failed to add to team {team.slug}: {team_msg}")
-            else:
-                print(f"  Failed to invite: {msg}")
-                results["failed"] += 1
+        elif status == 422:
+            print(f"  ⚠️  Already a member or pending invitation: {username}")
+            results["already_member"] += 1
+            for team_slug in team_ids:
+                status, data = gh_request(token, "PUT", f"/orgs/{ORG_NAME}/teams/{team_slug}/memberships/{username}", {"role": "member"})
+                if status == 200:
+                    print(f"  ✅ Added {username} to team: {team_slug}")
+                else:
+                    print(f"  ❌ Failed to add to team {team_slug}: {data.get('message', status)}")
+        else:
+            print(f"  ❌ Failed to invite: {data.get('message', status)}")
+            results["failed"] += 1
 
-    print(f"\n{'=' * 50}")
-    print("Results:")
-    print(f"  Invited: {results['invited']}")
-    print(f"  Already member (teams updated): {results['already_member']}")
-    print(f"  Failed: {results['failed']}")
+    print("\n" + "=" * 50)
+    print("📊 Results:")
+    print(f"  ✅ Invited: {results['invited']}")
+    print(f"  ⚠️  Already member (teams updated): {results['already_member']}")
+    print(f"  ❌ Failed: {results['failed']}")
+    print("=" * 50)
 
 
 if __name__ == "__main__":
