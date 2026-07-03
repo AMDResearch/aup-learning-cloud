@@ -13,6 +13,7 @@ Features:
 - Assign users to one or more teams at invitation time
 - Fall back to team membership update if the user is already a member
 - Dry-run mode to preview actions without making API calls
+- List org members with their role and team memberships
 
 Requirements:
 - Python 3.9+
@@ -34,11 +35,17 @@ Configuration:
     - TEAMS: list of team slugs to assign to all invited users
 
 Usage:
-    # Dry run (preview actions without making API calls)
-    python github_invite_users.py --dry-run
-
     # Invite users and add to teams
-    python github_invite_users.py
+    python github_invite_users.py invite
+
+    # Dry run (preview actions without making API calls)
+    python github_invite_users.py invite --dry-run
+
+    # List org members with their role and teams
+    python github_invite_users.py list
+
+    # List pending (unaccepted) invitations
+    python github_invite_users.py pending
 """
 
 import argparse
@@ -65,6 +72,16 @@ TEAMS = ["code-cpu", "code-gpu", "cpu", "gpu", "npu", "official", "public"]
 # =============================================================================
 
 GITHUB_API = "https://api.github.com"
+
+
+def print_table(headers, rows):
+    """Print a simple aligned table without external dependencies."""
+    widths = [max(len(h), max((len(str(r[i])) for r in rows), default=0)) for i, h in enumerate(headers)]
+    fmt = "  ".join(f"{{:<{w}}}" for w in widths)
+    print(fmt.format(*headers))
+    print("  ".join("-" * w for w in widths))
+    for row in rows:
+        print(fmt.format(*row))
 
 
 def get_github_token():
@@ -103,25 +120,42 @@ def gh_request(token, method, path, body=None):
         return e.code, json.loads(e.read())
 
 
-def main():
+def gh_paginate(token, path):
+    """Fetch all pages of a GitHub API endpoint and return the combined list."""
+    results = []
+    url = f"{GITHUB_API}{path}?per_page=100"
+    while url:
+        req = urllib.request.Request(
+            url,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+        )
+        try:
+            with urllib.request.urlopen(req) as resp:
+                results.extend(json.loads(resp.read()))
+                link = resp.headers.get("Link", "")
+                url = None
+                for part in link.split(","):
+                    if 'rel="next"' in part:
+                        url = part.split(";")[0].strip().strip("<>")
+        except urllib.error.HTTPError as e:
+            data = json.loads(e.read())
+            print(f"  ❌ API error {e.code} on {path}: {data.get('message', str(e))}")
+            return []
+    return results
+
+
+def cmd_invite(args, token):
     """Invite users in GITHUB_USERS to the org and add them to TEAMS."""
-
-    parser = argparse.ArgumentParser(description="Invite GitHub users to an organization and add them to teams")
-    parser.add_argument("--dry-run", action="store_true", help="Preview actions without making API calls")
-    args = parser.parse_args()
-
     if not GITHUB_USERS:
         print("No users specified. Edit GITHUB_USERS in the script.")
         sys.exit(1)
 
     if not TEAMS:
         print("No teams specified. Edit TEAMS in the script.")
-        sys.exit(1)
-
-    token = get_github_token()
-    if not token:
-        print("No GitHub token found.")
-        print("Set GITHUB_TOKEN env var or authenticate with: gh auth login")
         sys.exit(1)
 
     # Resolve team slugs to team IDs
@@ -191,6 +225,91 @@ def main():
     print(f"  ⚠️  Already member (teams updated): {results['already_member']}")
     print(f"  ❌ Failed: {results['failed']}")
     print("=" * 50)
+
+
+def cmd_list(args, token):
+    """List all org members with their role and team memberships."""
+    print(f"🔄 Fetching members for {ORG_NAME}...")
+
+    members = gh_paginate(token, f"/orgs/{ORG_NAME}/members")
+    if not members:
+        print("❌ No members returned. Check ORG_NAME and that your token has admin:org scope.")
+        sys.exit(1)
+
+    # Fetch all teams and their members once to avoid N*T API calls
+    teams = gh_paginate(token, f"/orgs/{ORG_NAME}/teams")
+    team_members = {}
+    for team in teams:
+        slug = team["slug"]
+        members_in_team = gh_paginate(token, f"/orgs/{ORG_NAME}/teams/{slug}/members")
+        for m in members_in_team:
+            team_members.setdefault(m["login"], []).append(slug)
+
+    # Fetch each member's org role
+    rows = []
+    for member in members:
+        username = member["login"]
+        _, membership = gh_request(token, "GET", f"/orgs/{ORG_NAME}/memberships/{username}")
+        role = membership.get("role", "unknown")
+        user_teams = ", ".join(sorted(team_members.get(username, []))) or "—"
+        rows.append([username, role, user_teams])
+
+    rows.sort(key=lambda r: r[0].lower())
+
+    print(f"\n📋 Members: {len(rows)}\n")
+    print_table(["Username", "Permission", "Teams"], rows)
+
+
+def cmd_pending(args, token):
+    """List all pending (unaccepted) invitations for the org."""
+    print(f"🔄 Fetching pending invitations for {ORG_NAME}...")
+
+    invitations = gh_paginate(token, f"/orgs/{ORG_NAME}/invitations")
+    if not invitations:
+        print("✅ No pending invitations.")
+        return
+
+    rows = []
+    for inv in invitations:
+        login = inv.get("login") or inv.get("email") or "—"
+        created_at = (inv.get("created_at") or "—")[:10]
+        rows.append([login, created_at])
+
+    rows.sort(key=lambda r: r[0].lower())
+
+    print(f"\n📋 Pending invitations: {len(rows)}\n")
+    print_table(["Username / Email", "Invited On"], rows)
+
+
+def main():
+    """Entry point — dispatch to invite, list, or pending subcommand."""
+    parser = argparse.ArgumentParser(description="GitHub organization user management")
+    subparsers = parser.add_subparsers(dest="command", help="Command to execute")
+
+    invite_parser = subparsers.add_parser("invite", help="Invite users to the org and assign to teams")
+    invite_parser.add_argument("--dry-run", action="store_true", help="Preview actions without making API calls")
+
+    subparsers.add_parser("list", help="List org members with their role and teams")
+    subparsers.add_parser("pending", help="List pending (unaccepted) invitations")
+
+    args = parser.parse_args()
+
+    if not args.command:
+        parser.print_help()
+        sys.exit(1)
+
+    token = get_github_token()
+    if not token:
+        print("❌ No GitHub token found.")
+        print("Set GITHUB_TOKEN env var or authenticate with: gh auth login")
+        sys.exit(1)
+
+    if args.command == "invite":
+        cmd_invite(args, token)
+    elif args.command == "list":
+        cmd_list(args, token)
+    elif args.command == "pending":
+        cmd_pending(args, token)
 
 
 if __name__ == "__main__":
