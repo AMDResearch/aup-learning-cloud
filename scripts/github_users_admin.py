@@ -36,16 +36,16 @@ Configuration:
 
 Usage:
     # Invite users and add to teams
-    python github_invite_users.py invite
+    python github_users_admin.py invite
 
     # Dry run (preview actions without making API calls)
-    python github_invite_users.py invite --dry-run
+    python github_users_admin.py invite --dry-run
 
     # List org members with their role and teams
-    python github_invite_users.py list
+    python github_users_admin.py list
 
     # List pending (unaccepted) invitations
-    python github_invite_users.py pending
+    python github_users_admin.py pending
 """
 
 import argparse
@@ -219,7 +219,9 @@ def cmd_invite(args, token):
             print(f"  ⚠️  Already a member or pending invitation: {username}")
             results["already_member"] += 1
             for team_slug in team_ids:
-                team_status, team_data = gh_request(token, "PUT", f"/orgs/{ORG_NAME}/teams/{team_slug}/memberships/{username}", {"role": "member"})
+                team_status, team_data = gh_request(
+                    token, "PUT", f"/orgs/{ORG_NAME}/teams/{team_slug}/memberships/{username}", {"role": "member"}
+                )
                 if team_status == 200:
                     print(f"  ✅ Added {username} to team: {team_slug}")
                 else:
