@@ -333,6 +333,7 @@ custom:
         accelerator: ""
         acceleratorKeys: []
         allowGitClone: true
+        defaultPath: "/home/jovyan"
         resourceType: "notebook"
       code-cpu:
         group: "DEVELOPMENT ENVIRONMENTS"
@@ -342,6 +343,7 @@ custom:
         acceleratorKeys: []
         allowGitClone: true
         launchMode: "code-server"
+        defaultPath: "/home/jovyan"
         resourceType: "browser-ide"
       gpu:
         group: "CUSTOM REPOS"
@@ -351,6 +353,7 @@ custom:
         acceleratorKeys:
           - strix-halo
         allowGitClone: true
+        defaultPath: "/home/jovyan"
         resourceType: "notebook"
       code-gpu:
         group: "DEVELOPMENT ENVIRONMENTS"
@@ -361,6 +364,7 @@ custom:
           - strix-halo
         allowGitClone: true
         launchMode: "code-server"
+        defaultPath: "/home/jovyan"
         resourceType: "browser-ide"
       Course-CV:
         group: "TEACHING LABS"
@@ -374,6 +378,7 @@ custom:
         #     image: "ghcr.io/your-org/auplc-cv:<tag-for-9070xt>"
         #   r9700:
         #     image: "ghcr.io/your-org/auplc-cv:<tag-for-r9700>"
+        defaultPath: "/opt/workspace/CV"
         resourceType: "notebook"
       Course-DL:
         group: "TEACHING LABS"
@@ -382,6 +387,7 @@ custom:
         accelerator: "GPU"
         acceleratorKeys:
           - strix-halo
+        defaultPath: "/opt/workspace/DL"
         resourceType: "notebook"
       Course-LLM:
         group: "TEACHING LABS"
@@ -390,6 +396,7 @@ custom:
         accelerator: "GPU"
         acceleratorKeys:
           - strix-halo
+        defaultPath: "/opt/workspace/LLM"
         resourceType: "notebook"
       Course-PhySim:
         group: "TEACHING LABS"
@@ -398,6 +405,7 @@ custom:
         accelerator: "GPU"
         acceleratorKeys:
           - strix-halo
+        defaultPath: "/opt/workspace/PhySim"
         resourceType: "notebook"
 
   # ============================================================================
