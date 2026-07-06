@@ -129,6 +129,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   run-one \
   libatomic1 \
   unzip \
+  libavutil-dev \
   && apt-get clean \
   && rm -rf /var/lib/apt/lists/*
 
