@@ -4,6 +4,8 @@ import sys
 import types
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 CORE = ROOT / "core"
 
@@ -68,16 +70,36 @@ def load_module(name: str, path: Path):
 config = load_module("core.config", CORE / "config.py")
 kubernetes = load_module("core.spawner.kubernetes", CORE / "spawner" / "kubernetes.py")
 GitCloneSettings = config.GitCloneSettings
+ResourceMetadata = config.ResourceMetadata
 RemoteLabKubeSpawner = kubernetes.RemoteLabKubeSpawner
 
 
-def make_spawner(git_clone_settings: GitCloneSettings | None = None):
+class StubHubConfig:
+    def __init__(
+        self,
+        git_clone_settings: GitCloneSettings | None = None,
+        resource_metadata: dict[str, ResourceMetadata] | None = None,
+    ):
+        self.git_clone = git_clone_settings or GitCloneSettings()
+        self._resource_metadata = resource_metadata or {}
+
+    def get_resource_metadata(self, resource_type: str):
+        return self._resource_metadata.get(resource_type)
+
+
+def make_spawner(
+    git_clone_settings: GitCloneSettings | None = None,
+    resource_metadata: dict[str, ResourceMetadata] | None = None,
+):
     spawner = object.__new__(RemoteLabKubeSpawner)
-    spawner._hub_config = types.SimpleNamespace(git_clone=git_clone_settings or GitCloneSettings())
+    spawner._hub_config = StubHubConfig(git_clone_settings, resource_metadata)
     spawner.MAX_CLONE_TIMEOUT = 123
     spawner.GIT_INIT_CONTAINER_IMAGE = "alpine/git:test"
     spawner.DEFAULT_ACCESS_TOKEN = False
     spawner.DEFAULT_ACCESS_TOKEN_SECRET = "unused-default-token-secret"
+    spawner.environment = {}
+    spawner.notebook_dir = "/home/jovyan"
+    spawner.default_url = ""
     return spawner
 
 
@@ -163,3 +185,67 @@ def test_ephemeral_init_container_sets_env_and_cleanup_preserves_existing_config
     assert merged_config["lifecycle"]["postStart"] == existing_config["lifecycle"]["postStart"]
     assert merged_config["lifecycle"]["preStop"] == {"exec": {"command": ["rm", "-rf", "/home/jovyan/course"]}}
     assert "preStop" not in existing_config["lifecycle"]
+
+
+def test_target_path_resolver_prefers_custom_repo_path_over_resource_default_path():
+    spawner = make_spawner(resource_metadata={"Course-CV": ResourceMetadata(defaultPath="/opt/workspace/CV")})
+
+    result = spawner._resolve_target_path("Course-CV", "/home/jovyan/custom-repo")
+
+    assert result == "/home/jovyan/custom-repo"
+
+
+def test_target_path_resolver_uses_resource_default_path_without_custom_repo():
+    spawner = make_spawner(resource_metadata={"Course-CV": ResourceMetadata(defaultPath="/opt/workspace/CV")})
+
+    result = spawner._resolve_target_path("Course-CV")
+
+    assert result == "/opt/workspace/CV"
+
+
+def test_target_path_resolver_falls_back_to_home_without_custom_repo_or_default_path():
+    spawner = make_spawner(resource_metadata={"cpu": ResourceMetadata()})
+
+    result = spawner._resolve_target_path("cpu")
+
+    assert result == "/home/jovyan"
+
+
+@pytest.mark.parametrize(
+    ("target_path", "expected_url"),
+    [
+        ("/", "/lab/tree/"),
+        ("/home/jovyan", "/lab/tree/home/jovyan"),
+        ("/opt/workspace/CV", "/lab/tree/opt/workspace/CV"),
+        ("/opt/workspace/My Course", "/lab/tree/opt/workspace/My%20Course"),
+        ("/opt/workspace/a#b", "/lab/tree/opt/workspace/a%23b"),
+    ],
+)
+def test_jupyterlab_target_path_mapping_uses_root_notebook_dir_and_encoded_tree_url(target_path, expected_url):
+    spawner = make_spawner()
+
+    spawner._apply_target_path_mapping("cpu", target_path)
+
+    assert spawner.notebook_dir == "/"
+    assert spawner.default_url == expected_url
+    assert "AUPLC_CODE_WORKDIR" not in spawner.environment
+
+
+@pytest.mark.parametrize(
+    "target_path",
+    [
+        "/",
+        "/home/jovyan",
+        "/opt/workspace/CV",
+        "/opt/workspace/My Course",
+        "/opt/workspace/a#b",
+    ],
+)
+def test_code_server_target_path_mapping_sets_workdir_without_replacing_default_url(target_path):
+    spawner = make_spawner()
+    spawner.default_url = "/existing-default"
+
+    spawner._apply_target_path_mapping("code-cpu", target_path)
+
+    assert spawner.environment["AUPLC_CODE_WORKDIR"] == target_path
+    assert spawner.default_url == "/existing-default"
