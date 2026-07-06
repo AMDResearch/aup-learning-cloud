@@ -36,6 +36,19 @@ Use the existing course target for course notebook images:
 make -C dockerfiles courses GPU_TARGET=gfx1151
 ```
 
+Course resources should land on their course content. Set each official course
+resource's `custom.resources.metadata.<resource>.defaultPath` to the same path as
+the image `WORKDIR`, such as `/opt/workspace/CV`. The official image contract
+verifier checks that metadata and image contract:
+
+```bash
+make -C dockerfiles verify-resource-contracts
+```
+
+The verifier is for official images. At runtime, the Hub doesn't check whether a
+configured path exists in arbitrary or custom images. Custom course images must
+create their configured landing path themselves.
+
 Use the code targets only for generic code-server environments:
 
 ```bash
