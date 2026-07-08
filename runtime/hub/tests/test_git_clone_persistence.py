@@ -102,9 +102,7 @@ def make_spawner(
     spawner.environment = {}
     spawner.notebook_dir = "/home/jovyan"
     spawner.default_url = ""
-    spawner.code_server_extra_trusted_domains = list(
-        (code_server_settings or CodeServerSettings()).extraTrustedDomains
-    )
+    spawner.code_server_extra_trusted_domains = list((code_server_settings or CodeServerSettings()).extraTrustedDomains)
     return spawner
 
 
