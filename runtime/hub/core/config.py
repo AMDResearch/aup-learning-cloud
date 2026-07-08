@@ -43,7 +43,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 # =============================================================================
 # YAML Configuration Models
@@ -94,6 +94,34 @@ class AcceleratorOverride(BaseModel):
     model_config = {"extra": "allow"}
 
 
+def _normalize_container_path(value: str | None) -> str | None:
+    """Normalize an absolute container path without touching the host filesystem."""
+
+    if value is None:
+        return None
+
+    if not isinstance(value, str):
+        raise ValueError("defaultPath must be a string or null")
+
+    stripped_value = value.strip()
+    if not stripped_value:
+        raise ValueError("defaultPath cannot be empty")
+    if "\x00" in stripped_value:
+        raise ValueError("defaultPath cannot contain NUL bytes")
+    if not stripped_value.startswith("/"):
+        raise ValueError("defaultPath must be an absolute container path")
+
+    normalized_segments: list[str] = []
+    for segment in stripped_value.split("/"):
+        if segment in {"", "."}:
+            continue
+        if segment == "..":
+            raise ValueError("defaultPath cannot contain '..' segments")
+        normalized_segments.append(segment)
+
+    return "/" if not normalized_segments else "/" + "/".join(normalized_segments)
+
+
 class ResourceMetadata(BaseModel):
     """Metadata for a resource (course/tutorial)."""
 
@@ -103,10 +131,18 @@ class ResourceMetadata(BaseModel):
     accelerator: str = ""
     acceleratorKeys: list[str] = Field(default_factory=list)
     allowGitClone: bool = False
+    defaultPath: str | None = None
     resourceType: Literal["notebook", "browser-ide"] | None = None
     launchMode: str | None = None
     env: dict[str, str] = Field(default_factory=dict)
     acceleratorOverrides: dict[str, AcceleratorOverride] | None = None
+
+    @field_validator("defaultPath", mode="before")
+    @classmethod
+    def validate_default_path(cls, value: str | None) -> str | None:
+        """Validate and normalize a resource's default container path."""
+
+        return _normalize_container_path(value)
 
     model_config = {"extra": "allow"}
 

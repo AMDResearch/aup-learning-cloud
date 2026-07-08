@@ -28,3 +28,4 @@ COPY ./course_data /opt/workspace/CV
 USER root
 RUN chown -R jovyan:1000 /opt/workspace
 USER jovyan
+WORKDIR /opt/workspace/CV

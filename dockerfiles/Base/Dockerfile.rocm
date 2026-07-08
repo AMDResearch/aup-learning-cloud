@@ -267,6 +267,6 @@ RUN echo '#!/bin/bash' > /entrypoint.sh && \
 EXPOSE 8888
 
 USER $NB_UID
-WORKDIR /opt/workspace
+WORKDIR /home/jovyan
 
 CMD ["/bin/bash", "/entrypoint.sh"]

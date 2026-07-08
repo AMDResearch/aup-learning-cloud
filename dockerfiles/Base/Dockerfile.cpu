@@ -94,3 +94,5 @@ COPY --from=runtime-status-builder --chown=1000:100 /build/runtime/notebook/jupy
 
 RUN python3 -mpip install --no-cache-dir /tmp/auplc-jupyterlab-runtime-status && \
     rm -rf /tmp/auplc-jupyterlab-runtime-status
+
+WORKDIR /home/jovyan
