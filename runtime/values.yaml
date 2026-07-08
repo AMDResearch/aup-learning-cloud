@@ -325,6 +325,10 @@ custom:
 
     # Course Metadata (for spawn UI)
     # Defines display information for each course
+    # defaultPath is an optional Hub launch-directory override, not the image
+    # WORKDIR. Custom Repo launches always open the cloned repository first. If
+    # defaultPath is omitted or null, Hub does not force a landing path and the
+    # image/application default normally follows the image WORKDIR.
     metadata:
       cpu:
         group: "CUSTOM REPOS"

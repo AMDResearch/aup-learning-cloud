@@ -86,7 +86,7 @@ images continue to share one package set and the Dockerfile remains small.
 The start script launches:
 
 ```bash
-code-server --auth none --bind-addr 127.0.0.1:8889 --ignore-last-opened "${AUPLC_CODE_WORKDIR:-/home/jovyan}"
+code-server --auth none --bind-addr 127.0.0.1:8889 --ignore-last-opened "${AUPLC_CODE_WORKDIR:-$(pwd)}"
 nginx -c /tmp/auplc-code-server-nginx.conf -g 'daemon off;'
 ```
 

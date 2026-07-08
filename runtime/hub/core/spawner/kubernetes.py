@@ -451,6 +451,10 @@ class RemoteLabKubeSpawner(KubeSpawner):
 
         resource_metadata = self._hub_config.get_resource_metadata(resource_type) if self._hub_config else None
         default_path = str(getattr(resource_metadata, "defaultPath", "") or "").strip()
+
+        # defaultPath is a Hub launch-dir override, not the image WORKDIR.
+        # If it is omitted, preserve the image/application default instead of
+        # guessing a path; this keeps non-standard images in their own WORKDIR.
         return default_path or None
 
     def _apply_target_path_mapping(self, resource_type: str, target_path: str | None) -> None:
