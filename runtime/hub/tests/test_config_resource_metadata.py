@@ -44,6 +44,7 @@ def load_module(name: str, path: Path):
 
 
 config = load_module("core.config", CORE / "config.py")
+ParsedConfig = config.ParsedConfig
 ResourceMetadata = config.ResourceMetadata
 
 
@@ -81,3 +82,17 @@ def test_resource_metadata_default_path_normalizes_valid_paths(default_path: str
     metadata = ResourceMetadata(defaultPath=default_path)
 
     assert metadata.defaultPath == expected_path
+
+
+def test_code_server_extra_trusted_domains_default_to_empty_list():
+    parsed_config = ParsedConfig()
+
+    assert parsed_config.codeServer.extraTrustedDomains == []
+
+
+def test_code_server_extra_trusted_domains_parse_from_config():
+    parsed_config = ParsedConfig.model_validate(
+        {"codeServer": {"extraTrustedDomains": ["docs.example.edu", "git.example.edu"]}}
+    )
+
+    assert parsed_config.codeServer.extraTrustedDomains == ["docs.example.edu", "git.example.edu"]

@@ -196,6 +196,14 @@ class NotebookNetworkSettings(BaseModel):
     model_config = {"extra": "allow"}
 
 
+class CodeServerSettings(BaseModel):
+    """Settings applied to code-server resources."""
+
+    extraTrustedDomains: list[str] = Field(default_factory=list)
+
+    model_config = {"extra": "allow"}
+
+
 class ParsedConfig(BaseModel):
     """Parsed configuration from values.yaml custom section."""
 
@@ -206,6 +214,7 @@ class ParsedConfig(BaseModel):
     gitClone: GitCloneSettings = Field(default_factory=GitCloneSettings)
     hub: HubNetworkSettings = Field(default_factory=HubNetworkSettings)
     notebook: NotebookNetworkSettings = Field(default_factory=NotebookNetworkSettings)
+    codeServer: CodeServerSettings = Field(default_factory=CodeServerSettings)
     notifications: dict[str, Any] = Field(default_factory=dict)
 
     model_config = {"extra": "allow"}
@@ -220,6 +229,7 @@ class ParsedConfig(BaseModel):
         git_clone: dict | None = None,
         hub: dict | None = None,
         notebook: dict | None = None,
+        code_server: dict | None = None,
         notifications: dict | None = None,
     ) -> ParsedConfig:
         """Create configuration from individual dicts."""
@@ -239,6 +249,8 @@ class ParsedConfig(BaseModel):
             raw_config["hub"] = hub
         if notebook:
             raw_config["notebook"] = notebook
+        if code_server:
+            raw_config["codeServer"] = code_server
         if notifications is not None:
             raw_config["notifications"] = notifications
 
@@ -325,6 +337,7 @@ class HubConfig:
             git_clone=raw_config.get("gitClone"),
             hub=raw_config.get("hub"),
             notebook=raw_config.get("notebook"),
+            code_server=raw_config.get("codeServer"),
             notifications=raw_config.get("notifications"),
         )
 
@@ -412,6 +425,11 @@ class HubConfig:
     def notebook_network(self) -> NotebookNetworkSettings:
         """Get notebook server network settings."""
         return self._config.notebook
+
+    @property
+    def code_server(self) -> CodeServerSettings:
+        """Get code-server settings."""
+        return self._config.codeServer
 
     @property
     def notifications(self) -> dict[str, Any]:

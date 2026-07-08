@@ -69,6 +69,7 @@ def load_module(name: str, path: Path):
 
 config = load_module("core.config", CORE / "config.py")
 kubernetes = load_module("core.spawner.kubernetes", CORE / "spawner" / "kubernetes.py")
+CodeServerSettings = config.CodeServerSettings
 GitCloneSettings = config.GitCloneSettings
 ResourceMetadata = config.ResourceMetadata
 RemoteLabKubeSpawner = kubernetes.RemoteLabKubeSpawner
@@ -90,6 +91,7 @@ class StubHubConfig:
 def make_spawner(
     git_clone_settings: GitCloneSettings | None = None,
     resource_metadata: dict[str, ResourceMetadata] | None = None,
+    code_server_settings: CodeServerSettings | None = None,
 ):
     spawner = object.__new__(RemoteLabKubeSpawner)
     spawner._hub_config = StubHubConfig(git_clone_settings, resource_metadata)
@@ -100,6 +102,9 @@ def make_spawner(
     spawner.environment = {}
     spawner.notebook_dir = "/home/jovyan"
     spawner.default_url = ""
+    spawner.code_server_extra_trusted_domains = list(
+        (code_server_settings or CodeServerSettings()).extraTrustedDomains
+    )
     return spawner
 
 
@@ -260,3 +265,46 @@ def test_code_server_target_path_mapping_sets_workdir_without_replacing_default_
 
     assert spawner.environment["AUPLC_CODE_WORKDIR"] == target_path
     assert spawner.default_url == "/existing-default"
+
+
+@pytest.mark.parametrize(
+    ("hub_url", "expected_domain"),
+    [
+        ("https://tpe.aupcloud.io/hub/home", "tpe.aupcloud.io"),
+        ("http://aup-k8s-test.amd.com/hub/home", "aup-k8s-test.amd.com"),
+        ("http://localhost:8000/hub/home", "localhost"),
+        ("http://127.0.0.1:8000/hub/home", "127.0.0.1"),
+        ("/hub/home", None),
+    ],
+)
+def test_code_server_trusted_domain_from_url_uses_absolute_hub_hosts(hub_url, expected_domain):
+    assert RemoteLabKubeSpawner._trusted_domain_from_url(hub_url) == expected_domain
+
+
+def test_code_server_trusted_domains_include_public_hub_host_and_extra_domains_once():
+    spawner = make_spawner(
+        code_server_settings=CodeServerSettings(
+            extraTrustedDomains=["docs.example.edu", " tpe.aupcloud.io ", "docs.example.edu"]
+        )
+    )
+
+    result = spawner._get_code_server_trusted_domains("https://tpe.aupcloud.io/hub/home")
+
+    assert result == "tpe.aupcloud.io,docs.example.edu"
+
+
+def test_code_server_trusted_domains_skip_urls_and_invalid_extra_entries():
+    spawner = make_spawner(
+        code_server_settings=CodeServerSettings(
+            extraTrustedDomains=[
+                "https://docs.example.edu",
+                "docs.example.edu/path",
+                "*",
+                "valid.example.edu",
+            ]
+        )
+    )
+
+    result = spawner._get_code_server_trusted_domains("/hub/home")
+
+    assert result == "valid.example.edu"
