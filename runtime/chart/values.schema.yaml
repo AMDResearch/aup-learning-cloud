@@ -3746,6 +3746,23 @@ properties:
               connections go through a reverse proxy or non-standard domain.
               Use ["*"] to allow all, or list specific domains.
 
+      codeServer:
+        type: object
+        additionalProperties: false
+        description: |
+          code-server settings for browser IDE resources.
+        properties:
+          extraTrustedDomains:
+            type: array
+            items:
+              type: string
+            description: |
+              Additional host/domain entries trusted by code-server's outgoing
+              link protection. The Hub automatically adds the current public Hub
+              host for Back-to-Hub links; use this list only for extra trusted
+              sites such as internal documentation or Git services. Provide
+              host/domain entries, not full URLs.
+
       apiService:
         type: object
         additionalProperties: false
