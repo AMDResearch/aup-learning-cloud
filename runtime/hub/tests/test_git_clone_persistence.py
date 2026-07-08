@@ -203,12 +203,23 @@ def test_target_path_resolver_uses_resource_default_path_without_custom_repo():
     assert result == "/opt/workspace/CV"
 
 
-def test_target_path_resolver_falls_back_to_home_without_custom_repo_or_default_path():
+def test_target_path_resolver_preserves_image_default_without_custom_repo_or_default_path():
     spawner = make_spawner(resource_metadata={"cpu": ResourceMetadata()})
 
     result = spawner._resolve_target_path("cpu")
 
-    assert result == "/home/jovyan"
+    assert result is None
+
+
+@pytest.mark.parametrize("resource_type", ["cpu", "code-cpu"])
+def test_empty_target_path_mapping_preserves_image_defaults(resource_type):
+    spawner = make_spawner()
+
+    spawner._apply_target_path_mapping(resource_type, None)
+
+    assert spawner.notebook_dir == "/home/jovyan"
+    assert spawner.default_url == ""
+    assert "AUPLC_CODE_WORKDIR" not in spawner.environment
 
 
 @pytest.mark.parametrize(

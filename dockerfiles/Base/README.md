@@ -97,7 +97,7 @@ The Hub chooses the target path in this order:
 
 1. Custom Repo clone path, when the user supplies a repository.
 2. Resource `defaultPath`, when configured.
-3. `/home/jovyan`.
+3. The image or single-user application default, normally the image `WORKDIR`.
 
 For official images, keep `custom.resources.metadata.<resource>.defaultPath` in
 sync with the image `WORKDIR`. Check the local image contracts with:
@@ -109,7 +109,8 @@ make -C dockerfiles verify-resource-contracts
 That verifier checks the official image contract. Runtime spawning still does
 not check path existence for arbitrary or custom images. If an environment
 points at a custom image, make sure the configured `defaultPath` exists in that
-image, or users may see application-level landing errors.
+image, or omit `defaultPath` to let the image `WORKDIR` control the initial
+folder.
 
 ## Generic Code Images
 

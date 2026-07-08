@@ -47,7 +47,9 @@ make -C dockerfiles verify-resource-contracts
 
 The verifier is for official images. At runtime, the Hub doesn't check whether a
 configured path exists in arbitrary or custom images. Custom course images must
-create their configured landing path themselves.
+create their configured landing path themselves. For non-official images that
+already declare the desired Docker `WORKDIR`, omit `defaultPath` to preserve the
+image's initial folder.
 
 Use the code targets only for generic code-server environments:
 

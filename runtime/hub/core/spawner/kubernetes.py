@@ -444,17 +444,20 @@ class RemoteLabKubeSpawner(KubeSpawner):
         path_without_leading_slash = target_path.lstrip("/")
         return f"/lab/tree/{quote(path_without_leading_slash, safe='/')}"
 
-    def _resolve_target_path(self, resource_type: str, custom_repo_path: str | None = None) -> str:
+    def _resolve_target_path(self, resource_type: str, custom_repo_path: str | None = None) -> str | None:
         """Resolve the effective landing path for the selected launch target."""
         if custom_repo_path:
             return custom_repo_path
 
         resource_metadata = self._hub_config.get_resource_metadata(resource_type) if self._hub_config else None
         default_path = str(getattr(resource_metadata, "defaultPath", "") or "").strip()
-        return default_path or DEFAULT_TARGET_PATH
+        return default_path or None
 
-    def _apply_target_path_mapping(self, resource_type: str, target_path: str) -> None:
+    def _apply_target_path_mapping(self, resource_type: str, target_path: str | None) -> None:
         """Apply the effective target path to the selected single-user adapter."""
+        if not target_path:
+            return
+
         if self._launches_code_server(resource_type):
             # Hub Spawner.default_url becomes JUPYTERHUB_DEFAULT_URL for single-user servers.
             # Hub spawn-pending redirects browsers to the server base URL, and code-server
@@ -823,7 +826,6 @@ class RemoteLabKubeSpawner(KubeSpawner):
             self.args = []
             self.environment["AUPLC_HUB_URL"] = "/hub/home"
             self.environment["AUPLC_LAUNCH_MODE"] = CODE_SERVER_LAUNCH_MODE
-            self.environment["AUPLC_CODE_WORKDIR"] = DEFAULT_TARGET_PATH
 
         # Special configuration for NPU resources
         if resource_type in ["Tutorial-NPU-Resnet", "ROSCON2025-GPU", "ROSCON2025-NPU"]:

@@ -3449,14 +3449,16 @@ properties:
                     - 'null'
                   description: |
                     Initial landing path inside the container for this resource.
-                    The effective target path is Custom Repo clone path,
-                    then `defaultPath`, then `/home/jovyan`. Omit the field or
-                    set it to null to use the fallback; an empty string is
-                    invalid; `/` lands at the container root. The Hub validates
-                    the path syntax and normalizes it before launch, but it does
-                    not check whether the path exists in the image. This value
-                    is not a security boundary or an access boundary. Use an
-                    absolute POSIX container path such as `/opt/workspace/CV`.
+                    The effective target path is Custom Repo clone path, then
+                    `defaultPath`, then the image or single-user application
+                    default, normally the image `WORKDIR`. Omit the field or set
+                    it to null to avoid a Hub landing override; an empty string
+                    is invalid; `/` lands at the container root. The Hub
+                    validates the path syntax and normalizes it before launch,
+                    but it does not check whether the path exists in the image.
+                    This value is not a security boundary or an access boundary.
+                    Use an absolute POSIX container path such as
+                    `/opt/workspace/CV`.
                 launchMode:
                   type: string
                   enum:
