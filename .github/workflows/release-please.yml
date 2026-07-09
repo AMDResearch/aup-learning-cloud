@@ -42,11 +42,22 @@ jobs:
       tag_name: ${{ steps.release.outputs.tag_name }}
       version: ${{ steps.release.outputs.version }}
     steps:
+      - name: Verify release automation token
+        env:
+          RELEASE_AUTOMATION_TOKEN: ${{ secrets.RELEASE_AUTOMATION_TOKEN }}
+        run: |
+          if [[ -z "${RELEASE_AUTOMATION_TOKEN}" ]]; then
+            echo "RELEASE_AUTOMATION_TOKEN is required for release automation." >&2
+            echo "Use a repository-scoped GitHub App token or fine-grained PAT." >&2
+            echo "The token must create release tags that trigger downstream workflows." >&2
+            exit 1
+          fi
+
       - name: Run release-please
         id: release
-        uses: googleapis/release-please-action@v4
+        uses: googleapis/release-please-action@8b8fd2cc23b2e18957157a9d923d75aa0c6f6ad5 # v4
         with:
-          token: ${{ secrets.RELEASE_AUTOMATION_TOKEN || github.token }}
+          token: ${{ secrets.RELEASE_AUTOMATION_TOKEN }}
           target-branch: main
           release-type: simple
 
@@ -59,7 +70,6 @@ jobs:
             echo "- Tag: \`${{ steps.release.outputs.tag_name || 'not created' }}\`"
             echo "- Version: \`${{ steps.release.outputs.version || 'not created' }}\`"
             echo
-            echo "Use a repository secret named \`RELEASE_AUTOMATION_TOKEN\` from a"
-            echo "GitHub App or fine-grained PAT if tag or release events must"
-            echo "trigger downstream workflows."
+            echo "\`RELEASE_AUTOMATION_TOKEN\` is required so release-created tags"
+            echo "can trigger downstream Docker image and bundle workflows."
           } >> "${GITHUB_STEP_SUMMARY}"

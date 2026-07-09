@@ -26,12 +26,16 @@ on:
         description: 'Integration branch to promote'
         required: true
         default: develop
-        type: string
+        type: choice
+        options:
+          - develop
       base_branch:
         description: 'Release branch that receives the promotion PR'
         required: true
         default: main
-        type: string
+        type: choice
+        options:
+          - main
       enable_auto_merge:
         description: 'Enable auto-merge for the promotion PR after checks pass'
         required: true
@@ -52,7 +56,7 @@ jobs:
     name: Open promotion PR
     runs-on: ubuntu-latest
     env:
-      GH_TOKEN: ${{ secrets.RELEASE_AUTOMATION_TOKEN || github.token }}
+      GH_TOKEN: ${{ github.token }}
       BASE_BRANCH: ${{ inputs.base_branch }}
       HEAD_BRANCH: ${{ inputs.head_branch }}
     steps:
