@@ -1,0 +1,142 @@
+# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+name: Promote Develop to Main
+
+on:
+  workflow_dispatch:
+    inputs:
+      head_branch:
+        description: 'Integration branch to promote'
+        required: true
+        default: develop
+        type: string
+      base_branch:
+        description: 'Release branch that receives the promotion PR'
+        required: true
+        default: main
+        type: string
+      enable_auto_merge:
+        description: 'Enable auto-merge for the promotion PR after checks pass'
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: promote-${{ inputs.head_branch }}-to-${{ inputs.base_branch }}
+  cancel-in-progress: false
+
+jobs:
+  open-promotion-pr:
+    name: Open promotion PR
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.RELEASE_AUTOMATION_TOKEN || github.token }}
+      BASE_BRANCH: ${{ inputs.base_branch }}
+      HEAD_BRANCH: ${{ inputs.head_branch }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create or reuse promotion PR
+        id: promote
+        run: |
+          set -euo pipefail
+
+          git fetch --no-tags origin "${BASE_BRANCH}" "${HEAD_BRANCH}"
+
+          ahead=$(git rev-list --count "origin/${BASE_BRANCH}..origin/${HEAD_BRANCH}")
+          behind=$(git rev-list --count "origin/${HEAD_BRANCH}..origin/${BASE_BRANCH}")
+
+          echo "ahead=${ahead}" >> "${GITHUB_OUTPUT}"
+          echo "behind=${behind}" >> "${GITHUB_OUTPUT}"
+
+          if [[ "${ahead}" == "0" ]]; then
+            echo "${HEAD_BRANCH} has no commits to promote into ${BASE_BRANCH}."
+            echo "pr_url=" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          existing_pr=$(
+            gh pr list \
+              --base "${BASE_BRANCH}" \
+              --head "${HEAD_BRANCH}" \
+              --state open \
+              --json url \
+              --jq '.[0].url // ""'
+          )
+
+          if [[ -n "${existing_pr}" ]]; then
+            echo "Reusing existing promotion PR: ${existing_pr}"
+            echo "pr_url=${existing_pr}" >> "${GITHUB_OUTPUT}"
+            gh pr comment "${existing_pr}" --body \
+              "Promotion check refreshed: ${HEAD_BRANCH} is ${ahead} commit(s) ahead of ${BASE_BRANCH} and ${behind} commit(s) behind."
+            exit 0
+          fi
+
+          body_file=$(mktemp)
+          cat > "${body_file}" <<BODY
+          ## Release promotion
+
+          This PR promotes \`${HEAD_BRANCH}\` into \`${BASE_BRANCH}\` for the next release.
+
+          - Commits ahead: ${ahead}
+          - Commits behind: ${behind}
+
+          After this PR merges, release automation on \`${BASE_BRANCH}\` can prepare
+          the release PR, tag, and GitHub Release.
+          BODY
+
+          pr_url=$(
+            gh pr create \
+              --base "${BASE_BRANCH}" \
+              --head "${HEAD_BRANCH}" \
+              --title "Release: promote ${HEAD_BRANCH} to ${BASE_BRANCH}" \
+              --body-file "${body_file}"
+          )
+
+          echo "Created promotion PR: ${pr_url}"
+          echo "pr_url=${pr_url}" >> "${GITHUB_OUTPUT}"
+
+      - name: Enable auto-merge
+        if: inputs.enable_auto_merge && steps.promote.outputs.pr_url != ''
+        run: gh pr merge --auto --merge "${{ steps.promote.outputs.pr_url }}"
+
+      - name: Summarize promotion
+        run: |
+          {
+            echo "## Promotion summary"
+            echo
+            echo "- Head branch: \`${HEAD_BRANCH}\`"
+            echo "- Base branch: \`${BASE_BRANCH}\`"
+            echo "- Commits ahead: \`${{ steps.promote.outputs.ahead }}\`"
+            echo "- Commits behind: \`${{ steps.promote.outputs.behind }}\`"
+            if [[ -n "${{ steps.promote.outputs.pr_url }}" ]]; then
+              echo "- Promotion PR: ${{ steps.promote.outputs.pr_url }}"
+            else
+              echo "- Promotion PR: not created because there are no commits to promote"
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"

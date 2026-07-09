@@ -157,8 +157,8 @@ jobs:
           BUNDLE=$(ls auplc-bundle-*.tar.gz)
           TAG="${{ github.event.workflow_run.head_branch }}"
 
-          # Upload to the existing release. Releases are created manually with
-          # proper release notes before tagging; CI only attaches the bundle.
+          # Upload to the release created by the release workflow. If the
+          # release is not available yet, keep the bundle artifact for retry.
           if gh release view "${TAG}" &>/dev/null; then
             gh release upload "${TAG}" "${BUNDLE}" --clobber
             echo "Bundle uploaded to release ${TAG}"
