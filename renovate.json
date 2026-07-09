@@ -50,6 +50,13 @@
       "addLabels": ["docker"]
     },
     {
+      "description": "Do not propose Ubuntu base image major upgrades",
+      "matchManagers": ["dockerfile"],
+      "matchPackageNames": ["ubuntu"],
+      "matchUpdateTypes": ["major"],
+      "enabled": false
+    },
+    {
       "description": "Group Helm chart and values updates",
       "matchManagers": ["helmv3"],
       "groupName": "helm dependencies",
