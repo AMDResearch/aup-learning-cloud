@@ -22,8 +22,10 @@ ARG BASE_IMAGE=ubuntu:24.04
 
 FROM ${NODE_IMAGE} AS runtime-status-builder
 
+# renovate: datasource=pypi depName=jupyterlab versioning=pep440
 ARG JUPYTERLAB_VERSION="4.5.6"
 ARG NPM_REGISTRY=
+# renovate: datasource=npm depName=pnpm versioning=npm
 ARG PNPM_VERSION="10.27.0"
 
 WORKDIR /build/runtime
@@ -86,6 +88,8 @@ ARG NB_GID=100
 # selects the concrete apt SDK package for size-conscious installs.
 ARG GPU_TARGET=gfx1151
 ARG ROCM_SDK_TARGET=gfx1151
+# ROCm and ROCm PyTorch wheels come from AMD-specific repositories and must be
+# upgraded as a validated stack, so they are intentionally not Renovate-managed.
 ARG ROCM_VERSION=7.13.0
 ARG PYTORCH_VERSION=2.9.1
 ARG TORCHVISION_VERSION=0.24.0
@@ -196,12 +200,22 @@ RUN WHL_TARGET="${PYTORCH_WHL_TARGET}" && \
 # Install JupyterHub and related packages
 # jupyterhub must match the Hub image version to ensure singleuser <-> hub
 # protocol compatibility. See runtime/chart/Chart.yaml appVersion.
+# renovate: datasource=pypi depName=jupyterhub versioning=pep440
+ARG JUPYTERHUB_VERSION="5.4.4"
+# renovate: datasource=pypi depName=jupyterlab versioning=pep440
+ARG JUPYTERLAB_VERSION="4.5.6"
+# renovate: datasource=pypi depName=notebook versioning=pep440
+ARG NOTEBOOK_VERSION="7.5.5"
+# renovate: datasource=pypi depName=ipywidgets versioning=pep440
+ARG IPYWIDGETS_VERSION="8.1.8"
+# renovate: datasource=pypi depName=ipykernel versioning=pep440
+ARG IPYKERNEL_VERSION="6.31.0"
 RUN pip3 install --no-cache-dir \
-    jupyterhub==5.4.4 \
-    jupyterlab==4.5.6 \
-    notebook==7.5.5 \
-    ipywidgets==8.1.8 \
-    ipykernel==6.31.0 \
+    jupyterhub=="${JUPYTERHUB_VERSION}" \
+    jupyterlab=="${JUPYTERLAB_VERSION}" \
+    notebook=="${NOTEBOOK_VERSION}" \
+    ipywidgets=="${IPYWIDGETS_VERSION}" \
+    ipykernel=="${IPYKERNEL_VERSION}" \
     matplotlib \
     uv \
     seaborn \

@@ -20,6 +20,7 @@
 ARG NODE_IMAGE=docker.io/library/node:22-bookworm-slim
 ARG BASE_IMAGE=ghcr.io/amdresearch/auplc-default:latest
 ARG IMAGE_FLAVOR=cpu
+# renovate: datasource=github-releases depName=coder/code-server
 ARG CODE_SERVER_VERSION=4.96.4
 
 FROM ${NODE_IMAGE} AS node-runtime
@@ -27,6 +28,7 @@ FROM ${NODE_IMAGE} AS node-runtime
 FROM node-runtime AS hub-link-builder
 
 ARG NPM_REGISTRY=
+# renovate: datasource=npm depName=pnpm versioning=npm
 ARG PNPM_VERSION=10.27.0
 WORKDIR /build/runtime
 
@@ -43,11 +45,14 @@ RUN pnpm --filter @auplc/runtime-status run build && \
 
 FROM ${BASE_IMAGE}
 
+# renovate: datasource=github-releases depName=coder/code-server
 ARG CODE_SERVER_VERSION=4.96.4
 ARG IMAGE_FLAVOR
 ARG NPM_REGISTRY=
+# renovate: datasource=npm depName=pnpm versioning=npm
 ARG PNPM_VERSION=10.27.0
 ARG CODE_GLOBAL_NPM_PACKAGES
+# renovate: datasource=github-releases depName=prefix-dev/pixi
 ARG PIXI_VERSION=v0.68.1
 ARG PIXI_DOWNLOAD_URL=
 ARG PIXI_CONDA_FORGE_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/conda-forge

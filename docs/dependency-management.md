@@ -100,6 +100,11 @@ Some dependencies are written directly in Dockerfiles, shell scripts, or Helm
 templates instead of standard manifests. Renovate can manage these with custom
 regex managers when the version line is annotated.
 
+Do not annotate ROCm, ROCm SDK, or ROCm PyTorch wheel pins until the target
+repository, wheel bucket, and GPU compatibility matrix have been validated. The
+AMD ROCm apt and wheel repositories are treated as a coordinated manual stack,
+not as independently updatable packages.
+
 Use this pattern for Docker `ARG` or `ENV` pins:
 
 ```dockerfile

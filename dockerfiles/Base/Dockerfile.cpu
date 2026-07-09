@@ -23,8 +23,10 @@ ARG BASE_IMAGE=quay.io/jupyter/base-notebook:python-3.12
 
 FROM ${NODE_IMAGE} AS runtime-status-builder
 
+# renovate: datasource=pypi depName=jupyterlab versioning=pep440
 ARG JUPYTERLAB_VERSION="4.5.6"
 ARG NPM_REGISTRY=
+# renovate: datasource=npm depName=pnpm versioning=npm
 ARG PNPM_VERSION="10.27.0"
 
 WORKDIR /build/runtime
@@ -73,10 +75,15 @@ LABEL maintainer="Jupyter Project <jupyter@googlegroups.com>"
 
 # Align jupyterhub package with the Hub image version (runtime/chart/Chart.yaml
 # appVersion) so the singleuser <-> hub protocol stays in sync.
+# renovate: datasource=pypi depName=jupyterhub versioning=pep440
 ARG JUPYTERHUB_VERSION="5.4.4"
+# renovate: datasource=pypi depName=jupyterlab versioning=pep440
 ARG JUPYTERLAB_VERSION="4.5.6"
+# renovate: datasource=pypi depName=notebook versioning=pep440
 ARG NOTEBOOK_VERSION="7.5.5"
+# renovate: datasource=pypi depName=ipywidgets versioning=pep440
 ARG IPYWIDGETS_VERSION="8.1.8"
+# renovate: datasource=pypi depName=ipykernel versioning=pep440
 ARG IPYKERNEL_VERSION="6.31.0"
 ARG PIP_INDEX_URL=
 

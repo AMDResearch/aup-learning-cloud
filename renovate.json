@@ -112,7 +112,8 @@
       "description": "Update annotated shell version pins",
       "managerFilePatterns": ["/\\.sh$/"],
       "matchStrings": [
-        "#\\s*renovate:\\s*datasource=(?<datasource>[a-z-]+)\\s+depName=(?<depName>[^\\s]+)(?:\\s+versioning=(?<versioning>[^\\s]+))?\\s+[A-Z0-9_]+(?:_VERSION|_IMAGE|_TAG)?=?\\\"?(?<currentValue>[^\\\"\\s]+)\\\"?"
+        "#\\s*renovate:\\s*datasource=(?<datasource>[a-z-]+)\\s+depName=(?<depName>[^\\s]+)(?:\\s+versioning=(?<versioning>[^\\s]+))?\\s+[A-Za-z0-9_]+(?:_VERSION|_IMAGE|_TAG)?=\\\"?\\$\\{[A-Z0-9_]+:-(?<currentValue>[^}\\\"\\s]+)\\}\\\"?",
+        "#\\s*renovate:\\s*datasource=(?<datasource>[a-z-]+)\\s+depName=(?<depName>[^\\s]+)(?:\\s+versioning=(?<versioning>[^\\s]+))?\\s+[A-Za-z0-9_]+(?:_VERSION|_IMAGE|_TAG)?=?\\\"?(?<currentValue>[^\\\"\\s]+)\\\"?"
       ]
     },
     {
@@ -120,18 +121,10 @@
       "description": "Update annotated YAML image tags",
       "managerFilePatterns": ["/\\.ya?ml$/"],
       "matchStrings": [
-        "#\\s*renovate:\\s*datasource=docker\\s+depName=(?<depName>[^\\s]+)(?:\\s+versioning=(?<versioning>[^\\s]+))?\\s+[^\\n]*image:\\s+[^:]+:(?<currentValue>[^\\s]+)"
+        "\\s*#\\s*renovate:\\s*datasource=docker\\s+depName=(?<depName>[^\\s]+)(?:\\s+versioning=(?<versioning>[^\\s]+))?\\s+[^\\n]*image:\\s+[^:]+:(?<currentValue>[^\\s]+)"
       ],
       "datasourceTemplate": "docker",
       "versioningTemplate": "{{#if versioning}}{{{versioning}}}{{else}}docker{{/if}}"
-    },
-    {
-      "customType": "regex",
-      "description": "Update the quota refresh curl image tag",
-      "managerFilePatterns": ["/runtime/chart/templates/hub/cronjob-quota-refresh\\.yaml$/"],
-      "matchStrings": ["image:\\s+(?<depName>curlimages/curl):(?<currentValue>[^\\s]+)"],
-      "datasourceTemplate": "docker",
-      "versioningTemplate": "docker"
     }
   ]
 }

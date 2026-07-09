@@ -22,6 +22,8 @@ ARG NODE_IMAGE=node:20-alpine
 ARG HUB_IMAGE=quay.io/jupyterhub/k8s-hub:4.3.3
 ARG NPM_REGISTRY=
 ARG PIP_INDEX_URL=
+# renovate: datasource=npm depName=pnpm versioning=npm
+ARG PNPM_VERSION="10.27.0"
 
 # Stage 1: Build frontend (monorepo)
 FROM ${NODE_IMAGE} AS frontend-builder
@@ -30,7 +32,7 @@ ARG NPM_REGISTRY
 WORKDIR /build/runtime
 
 RUN if [ -n "${NPM_REGISTRY}" ]; then npm config set registry "${NPM_REGISTRY}"; fi
-RUN npm install -g pnpm@10.27.0
+RUN npm install -g pnpm@"${PNPM_VERSION}"
 RUN if [ -n "${NPM_REGISTRY}" ]; then pnpm config set registry "${NPM_REGISTRY}"; fi
 
 # Copy monorepo configuration and lockfile

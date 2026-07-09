@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# renovate: datasource=github-releases depName=prefix-dev/pixi
 pixi_version="${PIXI_VERSION:-v0.68.1}"
 pixi_download_url="${PIXI_DOWNLOAD_URL:-}"
 pixi_conda_forge_mirror="${PIXI_CONDA_FORGE_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/conda-forge}"

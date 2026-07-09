@@ -54,6 +54,7 @@ spec:
           restartPolicy: OnFailure
           containers:
           - name: quota-refresh
+            # renovate: datasource=docker depName=curlimages/curl versioning=docker
             image: curlimages/curl:8.5.0
             command:
             - /bin/sh
