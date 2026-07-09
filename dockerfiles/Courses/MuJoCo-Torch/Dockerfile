@@ -55,12 +55,16 @@ RUN pip3 install --no-cache-dir "lerobot[smolvla,pi]==0.5.0" \
 RUN git clone --depth 1 https://github.com/Vector-Wangel/XLeRobot.git /opt/xlerobot \
  && chmod -R a+rX /opt/xlerobot
 
-# Models (SmolVLA + checkpoint) are downloaded at runtime from Hugging Face, not
-# baked. Provide a writable, jovyan-owned HF cache dir for those downloads.
+# Bake every Hugging Face model MT05 needs into the image
+#   - lerobot/smolvla_base                        pretrained SmolVLA (cell 4)
+#   - HuggingFaceTB/SmolVLM2-500M-Video-Instruct  its VLM backbone / tokenizer
+#   - sonya-tw/mt05-smolvla-lift                  fully-trained checkpoint (appendix)
 ENV HF_HOME=/opt/hf
-RUN mkdir -p /opt/hf && chown -R jovyan:1000 /opt/hf
+RUN mkdir -p /opt/hf \
+ && python3 -c "from huggingface_hub import snapshot_download; [snapshot_download(r) for r in ('lerobot/smolvla_base', 'HuggingFaceTB/SmolVLM2-500M-Video-Instruct', 'sonya-tw/mt05-smolvla-lift')]" \
+ && chown -R jovyan:1000 /opt/hf
 
-# Copy related rocm notebooks into the docker
+# Copy related rocm notebooks into the docker.
 RUN mkdir -p /opt/workspace/MuJoCo-Torch
 COPY ./course_data /opt/workspace/MuJoCo-Torch
 
