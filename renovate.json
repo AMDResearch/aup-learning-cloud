@@ -1,0 +1,137 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "dependencyDashboard": true,
+  "dependencyDashboardTitle": "Dependency Update Dashboard",
+  "minimumReleaseAge": "7 days",
+  "baseBranchPatterns": ["develop"],
+  "prConcurrentLimit": 5,
+  "prHourlyLimit": 2,
+  "schedule": ["before 6am on monday"],
+  "semanticCommits": "enabled",
+  "commitMessagePrefix": "chore(deps):",
+  "labels": ["dependencies"],
+  "automerge": false,
+  "rangeStrategy": "bump",
+  "pinDigests": false,
+  "rebaseWhen": "conflicted",
+  "enabledManagers": [
+    "custom.regex",
+    "dockerfile",
+    "github-actions",
+    "helmv3",
+    "npm",
+    "pip_requirements"
+  ],
+  "ignorePaths": [
+    "**/.venv/**",
+    "**/build/**",
+    "**/dist/**",
+    "**/node_modules/**"
+  ],
+  "packageRules": [
+    {
+      "description": "Group GitHub Actions updates",
+      "matchManagers": ["github-actions"],
+      "groupName": "github actions",
+      "addLabels": ["ci"]
+    },
+    {
+      "description": "Group frontend pnpm dependencies",
+      "matchManagers": ["npm"],
+      "matchFileNames": ["runtime/**"],
+      "groupName": "frontend pnpm dependencies",
+      "addLabels": ["frontend"]
+    },
+    {
+      "description": "Group Dockerfile base image updates",
+      "matchManagers": ["dockerfile"],
+      "groupName": "docker base images",
+      "addLabels": ["docker"]
+    },
+    {
+      "description": "Group Helm chart and values updates",
+      "matchManagers": ["helmv3"],
+      "groupName": "helm dependencies",
+      "addLabels": ["helm"]
+    },
+    {
+      "description": "Require manual validation for the Jupyter runtime stack",
+      "matchPackageNames": [
+        "jupyterhub",
+        "jupyterlab",
+        "notebook",
+        "jupyter-server",
+        "ipywidgets",
+        "ipykernel"
+      ],
+      "groupName": "jupyter stack",
+      "addLabels": ["jupyter", "manual-validation"],
+      "automerge": false,
+      "dependencyDashboardApproval": true
+    },
+    {
+      "description": "Require manual validation for the GPU and ML stack",
+      "matchPackageNames": ["torch", "torchvision", "torchaudio"],
+      "groupName": "gpu ml stack",
+      "addLabels": ["gpu", "manual-validation"],
+      "automerge": false,
+      "dependencyDashboardApproval": true
+    },
+    {
+      "description": "Require manual validation for code-server updates",
+      "matchPackageNames": ["coder/code-server"],
+      "groupName": "code-server stack",
+      "addLabels": ["code-server", "manual-validation"],
+      "automerge": false,
+      "dependencyDashboardApproval": true
+    },
+    {
+      "description": "Require manual validation for ROCm packages and image tags",
+      "matchPackageNames": ["rocm", "/.*rocm.*/"],
+      "groupName": "rocm stack",
+      "addLabels": ["rocm", "manual-validation"],
+      "automerge": false,
+      "dependencyDashboardApproval": true
+    }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Update annotated Docker ARG/ENV version pins",
+      "managerFilePatterns": [
+        "/(^|/)Dockerfile$/",
+        "/(^|/)Dockerfile\\.[^/]*$/"
+      ],
+      "matchStrings": [
+        "#\\s*renovate:\\s*datasource=(?<datasource>[a-z-]+)\\s+depName=(?<depName>[^\\s]+)(?:\\s+versioning=(?<versioning>[^\\s]+))?\\s+(?:ARG|ENV)\\s+[A-Z0-9_]+=?\\\"?(?<currentValue>[^\\\"\\s]+)\\\"?"
+      ]
+    },
+    {
+      "customType": "regex",
+      "description": "Update annotated shell version pins",
+      "managerFilePatterns": ["/\\.sh$/"],
+      "matchStrings": [
+        "#\\s*renovate:\\s*datasource=(?<datasource>[a-z-]+)\\s+depName=(?<depName>[^\\s]+)(?:\\s+versioning=(?<versioning>[^\\s]+))?\\s+[A-Z0-9_]+(?:_VERSION|_IMAGE|_TAG)?=?\\\"?(?<currentValue>[^\\\"\\s]+)\\\"?"
+      ]
+    },
+    {
+      "customType": "regex",
+      "description": "Update annotated YAML image tags",
+      "managerFilePatterns": ["/\\.ya?ml$/"],
+      "matchStrings": [
+        "#\\s*renovate:\\s*datasource=docker\\s+depName=(?<depName>[^\\s]+)(?:\\s+versioning=(?<versioning>[^\\s]+))?\\s+[^\\n]*image:\\s+[^:]+:(?<currentValue>[^\\s]+)"
+      ],
+      "datasourceTemplate": "docker",
+      "versioningTemplate": "{{#if versioning}}{{{versioning}}}{{else}}docker{{/if}}"
+    },
+    {
+      "customType": "regex",
+      "description": "Update the quota refresh curl image tag",
+      "managerFilePatterns": ["/runtime/chart/templates/hub/cronjob-quota-refresh\\.yaml$/"],
+      "matchStrings": ["image:\\s+(?<depName>curlimages/curl):(?<currentValue>[^\\s]+)"],
+      "datasourceTemplate": "docker",
+      "versioningTemplate": "docker"
+    }
+  ]
+}
