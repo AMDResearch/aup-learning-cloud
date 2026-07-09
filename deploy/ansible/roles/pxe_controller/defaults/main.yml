@@ -106,8 +106,8 @@ pxe_web_port: 8080
 pxe_ubuntu_codename: "noble"
 
 pxe_rootfs_packages:
-  - linux-image-6.14.0-1018-oem
-  - linux-headers-6.14.0-1018-oem
+  - linux-image-oem-6.14
+  - linux-headers-oem-6.14
   - initramfs-tools
   - linux-firmware
   - nfs-common
