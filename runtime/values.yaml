@@ -123,6 +123,15 @@ custom:
     allowedOrigins: ["*"]
 
   # ============================================================================
+  # Code Server
+  # ============================================================================
+  # code-server automatically trusts the current public Hub host for outgoing
+  # Back-to-Hub links. Add extra domains only when a deployment intentionally
+  # opens trusted links to additional sites. Use host/domain entries, not URLs.
+  codeServer:
+    extraTrustedDomains: []
+
+  # ============================================================================
   # Public Scheme (TLS termination outside the chart)
   # ============================================================================
   # When TLS is terminated by an external component (Cloudflare tunnel,

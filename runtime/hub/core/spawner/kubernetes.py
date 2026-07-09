@@ -118,6 +118,9 @@ class RemoteLabKubeSpawner(KubeSpawner):
     # Allowed origins for notebook server WebSocket connections
     notebook_allowed_origins: list[str] = []
 
+    # Extra domains trusted by code-server's outgoing link protection.
+    code_server_extra_trusted_domains: list[str] = []
+
     @classmethod
     def configure_from_config(cls, config: HubConfig) -> None:
         """
@@ -162,6 +165,9 @@ class RemoteLabKubeSpawner(KubeSpawner):
 
         # Extract singleuser allowed origins
         cls.notebook_allowed_origins = list(config.notebook_network.allowedOrigins)
+
+        # Extract code-server link protection settings
+        cls.code_server_extra_trusted_domains = list(config.code_server.extraTrustedDomains)
 
     async def get_user_resources(self) -> list[str]:
         """Get available resources for the user based on their JupyterHub group memberships.
@@ -362,6 +368,53 @@ class RemoteLabKubeSpawner(KubeSpawner):
             return f"{protocol}://{host}{hub_path}"
 
         return hub_path
+
+    @staticmethod
+    def _trusted_domain_from_url(url: str) -> str | None:
+        """Extract a code-server trusted-domain host from an absolute URL."""
+
+        try:
+            parsed = urlparse(str(url).strip())
+        except Exception:
+            return None
+
+        if parsed.scheme not in {"http", "https"}:
+            return None
+        return (parsed.hostname or "").strip().lower() or None
+
+    @staticmethod
+    def _normalize_code_server_trusted_domain(domain: str) -> str | None:
+        """Normalize a configured code-server trusted domain entry."""
+
+        value = str(domain).strip().lower()
+        if not value:
+            return None
+
+        # Administrators should provide host/domain patterns, not full URLs.
+        if "://" in value or "/" in value or "\x00" in value or any(char.isspace() for char in value):
+            return None
+        if value in {"*", "*."}:
+            return None
+
+        return value
+
+    def _get_code_server_trusted_domains(self, hub_url: str) -> str:
+        """Return comma-separated domains trusted by code-server link protection."""
+
+        domains: list[str] = []
+        auto_domain = self._trusted_domain_from_url(hub_url)
+        if auto_domain:
+            domains.append(auto_domain)
+
+        domains.extend(self.code_server_extra_trusted_domains)
+
+        normalized_domains: list[str] = []
+        for domain in domains:
+            normalized = self._normalize_code_server_trusted_domain(domain)
+            if normalized and normalized not in normalized_domains:
+                normalized_domains.append(normalized)
+
+        return ",".join(normalized_domains)
 
     def _validate_and_sanitize_repo_url(self, url: str) -> tuple[bool, str, str]:
         """
@@ -921,7 +974,13 @@ class RemoteLabKubeSpawner(KubeSpawner):
         launches_code_server = self._launches_code_server(resource_type)
 
         if launches_code_server:
-            self.environment["AUPLC_HUB_URL"] = self._get_public_hub_home_url()
+            hub_url = self._get_public_hub_home_url()
+            self.environment["AUPLC_HUB_URL"] = hub_url
+            trusted_domains = self._get_code_server_trusted_domains(hub_url)
+            if trusted_domains:
+                self.environment["AUPLC_CODE_TRUSTED_DOMAINS"] = trusted_domains
+            else:
+                self.environment.pop("AUPLC_CODE_TRUSTED_DOMAINS", None)
 
         # Inject allowed origins into notebook server startup args
         if self.notebook_allowed_origins and not launches_code_server:

@@ -73,6 +73,11 @@ custom:
   notebook:
     allowedOrigins: []
 
+  # code-server automatically trusts the current public Hub host for Back-to-Hub
+  # links. Use this only to add host/domain entries for additional trusted sites.
+  codeServer:
+    extraTrustedDomains: []
+
   # User quota management system
   quota:
     # Enable/disable quota system (auto-disabled for auto-login/dummy modes if not set)

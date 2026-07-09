@@ -116,6 +116,13 @@ home directory instead of `/usr/local`: `NPM_CONFIG_PREFIX` defaults to
 This lets users install small project CLIs with commands such as
 `npm install -g cowsay` without sudo or write access to system directories.
 
+For code-server's outgoing link protection, the Hub automatically injects the
+current public Hub host into `AUPLC_CODE_TRUSTED_DOMAINS` so the built-in
+Back-to-Hub action can open `/hub/home` without an external-site confirmation.
+Deployments that intentionally open additional trusted sites can set
+`custom.codeServer.extraTrustedDomains` to host/domain entries such as
+`docs.example.edu`; do not include URL schemes or paths.
+
 Pixi is provided as the sudo-free, apt-like package manager for user-space
 native tools and project environments. The image writes `/etc/pixi/config.toml`
 so requests for `https://conda.anaconda.org/conda-forge` are redirected to the
