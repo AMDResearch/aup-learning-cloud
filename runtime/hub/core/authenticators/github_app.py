@@ -35,6 +35,8 @@ from traitlets import Int, Unicode
 
 log = logging.getLogger("jupyterhub.auth.github")
 
+GITHUB_USERNAME_PREFIX = "github:"
+
 
 class _GitHubAppInstallCallbackHandler(OAuthCallbackHandler):
     """Callback handler that gracefully handles GitHub App installation redirects.
@@ -57,6 +59,7 @@ class CustomGitHubOAuthenticator(GitHubOAuthenticator):
     """GitHub App authenticator with access token preservation and refresh."""
 
     name = "github"
+    prefix = GITHUB_USERNAME_PREFIX
     callback_handler = _GitHubAppInstallCallbackHandler
 
     app_id = Unicode(

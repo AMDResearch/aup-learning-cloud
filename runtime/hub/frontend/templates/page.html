@@ -58,7 +58,7 @@ SOFTWARE.
     <meta charset="utf-8">
     <title>
       {%- block title -%}
-         AUP Learning Cloud
+         {{ platform_name or 'AUP Learning Cloud' }}
       {%- endblock title -%}
     </title>
     <meta http-equiv="X-UA-Compatible" content="chrome=1">
@@ -275,15 +275,15 @@ SOFTWARE.
     {% endblock require_config %}
     {# djlint: on #}
     {% block meta %}
-      <meta name="description" content="AUP Learning Cloud - AMD AI Learning Platform">
+      <meta name="description" content="{{ platform_name or 'AUP Learning Cloud' }} - AMD AI Learning Platform">
       <meta name="keywords" content="AMD, AI, Learning, Jupyter, Notebook">
-      <meta name="generator" content="{{ powered_by or 'AUP Learning Cloud' }}">
+      <meta name="generator" content="{{ powered_by or platform_name or 'AUP Learning Cloud' }}">
     {% endblock meta %}
   </head>
   <body>
     <noscript>
       <div id='noscript'>
-         AUP Learning Cloud requires JavaScript.
+         {{ platform_name or 'AUP Learning Cloud' }} requires JavaScript.
         <br>
         Please enable it to proceed.
       </div>
@@ -590,7 +590,7 @@ SOFTWARE.
                     target="_blank"
                     rel="noopener noreferrer"
                     style="font-weight:600;text-decoration:none;">
-        {{ powered_by or 'AUP Learning Cloud' }}
+        {{ powered_by or platform_name or 'AUP Learning Cloud' }}
       </a>
     </footer>
   </body>

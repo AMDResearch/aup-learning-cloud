@@ -38,7 +38,7 @@ those tools to Base notebook images or Course images. CPU and GPU Code images
 are built from the same Dockerfile and differ only by `BASE_IMAGE`, so the Code
 layer stays consistent across hardware targets.
 
-The default Hub resource keys are `code-cpu` and `code-gpu`. Code-server launch behavior is configured through `custom.resources.metadata.<resource>.launchMode: code-server`, alongside the same `custom.resources.images`, `custom.resources.requirements`, and `custom.teams.mapping` model as notebook resources in `runtime/values.yaml`.
+The default Hub resource keys are `code-cpu` and `code-gpu`. Code-server launch behavior is configured through `custom.resources.metadata.<resource>.launchMode: code-server`, alongside the same `custom.resources.images`, `custom.resources.requirements`, `custom.resources.metadata.<resource>.defaultPath`, and `custom.teams.mapping` model as notebook resources in `runtime/values.yaml`.
 
 ## Build Commands
 
@@ -86,7 +86,7 @@ images continue to share one package set and the Dockerfile remains small.
 The start script launches:
 
 ```bash
-code-server --auth none --bind-addr 127.0.0.1:8889 --ignore-last-opened "${AUPLC_CODE_WORKDIR:-/home/jovyan}"
+code-server --auth none --bind-addr 127.0.0.1:8889 --ignore-last-opened "${AUPLC_CODE_WORKDIR:-$(pwd)}"
 nginx -c /tmp/auplc-code-server-nginx.conf -g 'daemon off;'
 ```
 
@@ -95,6 +95,14 @@ service prefix such as `/user/<name>/`, and proxies HTTP/WebSocket traffic to
 code-server on loopback. The proxy must preserve the full browser `Host` value
 with `X-Forwarded-Host` so code-server's WebSocket origin check succeeds behind
 JupyterHub and NodePort-style local URLs.
+
+`defaultPath` is the initial landing path for a resource. The target path is
+chosen in this order: Custom Repo clone path, resource `defaultPath`, then the
+image or single-user application default, normally the image `WORKDIR`. Omitted
+and `null` `defaultPath` values do not force a Hub landing override; empty
+strings are invalid; `/` means land at the container root. This setting doesn't
+limit what users can access. It only selects the first workspace shown by the
+application.
 
 Git, Node.js LTS, `npm`, `npx`, `corepack`, pinned `pnpm`, TypeScript/frontend
 helpers, Pixi, and native build tools are installed in the image so cloned
@@ -107,6 +115,13 @@ home directory instead of `/usr/local`: `NPM_CONFIG_PREFIX` defaults to
 `/home/jovyan/.local`, and `/home/jovyan/.local/bin` is prepended to `PATH`.
 This lets users install small project CLIs with commands such as
 `npm install -g cowsay` without sudo or write access to system directories.
+
+For code-server's outgoing link protection, the Hub automatically injects the
+current public Hub host into `AUPLC_CODE_TRUSTED_DOMAINS` so the built-in
+Back-to-Hub action can open `/hub/home` without an external-site confirmation.
+Deployments that intentionally open additional trusted sites can set
+`custom.codeServer.extraTrustedDomains` to host/domain entries such as
+`docs.example.edu`; do not include URL schemes or paths.
 
 Pixi is provided as the sudo-free, apt-like package manager for user-space
 native tools and project environments. The image writes `/etc/pixi/config.toml`
@@ -138,7 +153,28 @@ downgrading a user-installed newer copy.
 
 `--auth none` is acceptable only because JupyterHub and the JupyterHub proxy remain the authentication boundary. The user pod's port `8888` must stay private to the Hub/proxy path and must not be exposed directly through an unauthenticated service, ingress, or port-forward shared with untrusted users.
 
-When users provide a Git repository on the spawn form, the existing init-container clone flow is reused. For resources with `launchMode: code-server`, the spawner points `AUPLC_CODE_WORKDIR` and the code-server `folder` URL parameter at the cloned directory so code-server opens the repository workspace. The launcher also passes `--ignore-last-opened` so a persisted previous workspace cannot override the requested folder.
+When users provide a Git repository on the spawn form, the existing init-container clone flow is reused. For resources with `launchMode: code-server`, the spawner points `AUPLC_CODE_WORKDIR` at the cloned directory or explicit resource target path, and the launcher starts code-server with that folder so it opens the requested workspace. If neither Custom Repo nor `defaultPath` is set, the launcher opens the image `WORKDIR`. The launcher also passes `--ignore-last-opened` so a persisted previous workspace cannot override the requested folder.
+
+A direct code-server URL with `?folder=<path>` works when the browser reaches
+the proxied code-server root route. Hub spawn completion, however, redirects the
+browser to the server base URL, and code-server doesn't consume
+`JUPYTERHUB_DEFAULT_URL` by itself. AUPLC therefore keeps `AUPLC_CODE_WORKDIR` as
+the reliable adapter between Hub resource selection and the code-server process.
+The local proof is recorded in
+`.sisyphus/evidence/task-1-codeserver-default-url-proof.md`.
+
+Official Code images are checked by the resource contract verifier:
+
+```bash
+make -C dockerfiles verify-resource-contracts
+```
+
+The verifier checks official image metadata, image `WORKDIR`, path existence,
+and the code-server launcher contract. Runtime spawning doesn't check path
+existence for arbitrary or custom images. If a custom code image sets a
+`defaultPath`, create that path in the image or code-server may show its own
+landing error. If the image already declares the desired `WORKDIR`, omit
+`defaultPath` to preserve it.
 
 ## Extensions
 

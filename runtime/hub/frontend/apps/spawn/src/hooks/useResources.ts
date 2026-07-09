@@ -35,6 +35,8 @@ interface UseResourcesResult {
   acceleratorKeys: string[];
   allowedGitProviders: string[];
   githubAppName: string;
+  allowPersistenceChoice: boolean;
+  defaultPersistence: boolean;
   loading: boolean;
   error: string | null;
 }
@@ -45,6 +47,8 @@ export function useResources(): UseResourcesResult {
   const [acceleratorKeys, setAcceleratorKeys] = useState<string[]>([]);
   const [allowedGitProviders, setAllowedGitProviders] = useState<string[]>([]);
   const [githubAppName, setGithubAppName] = useState('');
+  const [allowPersistenceChoice, setAllowPersistenceChoice] = useState(false);
+  const [defaultPersistence, setDefaultPersistence] = useState(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -81,6 +85,8 @@ export function useResources(): UseResourcesResult {
         setAcceleratorKeys(response.acceleratorKeys);
         setAllowedGitProviders(response.allowedGitProviders ?? []);
         setGithubAppName(response.githubAppName ?? '');
+        setAllowPersistenceChoice(response.allowPersistenceChoice ?? false);
+        setDefaultPersistence(response.defaultPersistence ?? true);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load resources');
       } finally {
@@ -91,5 +97,15 @@ export function useResources(): UseResourcesResult {
     fetchResources();
   }, []);
 
-  return { resources, groups, acceleratorKeys, allowedGitProviders, githubAppName, loading, error };
+  return {
+    resources,
+    groups,
+    acceleratorKeys,
+    allowedGitProviders,
+    githubAppName,
+    allowPersistenceChoice,
+    defaultPersistence,
+    loading,
+    error,
+  };
 }

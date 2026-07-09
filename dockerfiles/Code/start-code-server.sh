@@ -10,10 +10,12 @@ export NPM_CONFIG_PREFIX="${NPM_CONFIG_PREFIX:-${HOME:-/home/jovyan}/.local}"
 public_port="${PORT:-8888}"
 code_server_port="${AUPLC_CODE_SERVER_PORT:-8889}"
 service_prefix="${JUPYTERHUB_SERVICE_PREFIX:-/}"
-workdir="${AUPLC_CODE_WORKDIR:-/home/jovyan}"
+# Without a Hub-provided launch override, open code-server in the image WORKDIR.
+workdir="${AUPLC_CODE_WORKDIR:-$(pwd)}"
 extensions_list="${AUPLC_CODE_EXTENSIONS_LIST:-/opt/auplc/extensions/extensions.txt}"
 local_extensions_dir="${AUPLC_CODE_LOCAL_EXTENSIONS_DIR:-/opt/auplc/extensions/local}"
 extensions_dir="${AUPLC_CODE_EXTENSIONS_DIR:-/home/jovyan/.local/share/code-server/extensions}"
+trusted_domains="${AUPLC_CODE_TRUSTED_DOMAINS:-}"
 
 mkdir -p "${NPM_CONFIG_PREFIX}/bin"
 mkdir -p "${PIXI_HOME}/bin"
@@ -49,6 +51,28 @@ seed_builtin_extensions() {
   fi
 }
 
+trim() {
+  local value="$1"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf '%s' "${value}"
+}
+
+build_trusted_domain_args() {
+  local domains_csv="$1"
+  local -n output_args="$2"
+  local -a domains=()
+  local domain
+
+  IFS=',' read -ra domains <<<"${domains_csv}"
+  for domain in "${domains[@]}"; do
+    domain="$(trim "${domain}")"
+    if [ -n "${domain}" ]; then
+      output_args+=(--link-protection-trusted-domains "${domain}")
+    fi
+  done
+}
+
 case "${service_prefix}" in
   /*) ;;
   *) service_prefix="/${service_prefix}" ;;
@@ -65,6 +89,8 @@ nginx_conf="/tmp/auplc-code-server-nginx.conf"
 redirect_block=""
 
 seed_builtin_extensions
+trusted_domain_args=()
+build_trusted_domain_args "${trusted_domains}" trusted_domain_args
 
 if [ "${service_prefix}" != "/" ]; then
   redirect_block="
@@ -120,6 +146,7 @@ code-server \
   --auth none \
   --bind-addr "127.0.0.1:${code_server_port}" \
   --extensions-dir "${extensions_dir}" \
+  "${trusted_domain_args[@]}" \
   --ignore-last-opened \
   "${workdir}" &
 code_server_pid="$!"

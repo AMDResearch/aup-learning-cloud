@@ -72,8 +72,8 @@
     pxe_apt_mirror: "http://tw.archive.ubuntu.com/ubuntu"
 
     pxe_rootfs_packages:
-      - linux-image-6.14.0-1018-oem
-      - linux-headers-6.14.0-1018-oem
+      - linux-image-oem-6.14
+      - linux-headers-oem-6.14
       - initramfs-tools
       - linux-firmware
       - nfs-common

@@ -19,7 +19,7 @@
 
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import type { Resource, Accelerator, GitHubRepo } from '@auplc/shared';
-import { validateRepo, fetchGitHubRepos, isCurrentUserGitHub, PLATFORM_NAME } from '@auplc/shared';
+import { validateRepo, fetchGitHubRepos, isCurrentUserGitHub, PLATFORM_NAME, fetchPlatformInfo } from '@auplc/shared';
 
 type Theme = 'light' | 'dark';
 function getInitialTheme(): Theme {
@@ -80,7 +80,16 @@ function App() {
   const initialResourceKey = searchParams.get('resource') ?? '';
   const initialAcceleratorKey = searchParams.get('accelerator') ?? '';
 
-  const { resources, groups, allowedGitProviders, githubAppName, loading: resourcesLoading, error: resourcesError } = useResources();
+  const {
+    resources,
+    groups,
+    allowedGitProviders,
+    githubAppName,
+    allowPersistenceChoice,
+    defaultPersistence,
+    loading: resourcesLoading,
+    error: resourcesError,
+  } = useResources();
   const { accelerators, loading: acceleratorsLoading } = useAccelerators();
   const { quota, loading: quotaLoading } = useQuota();
 
@@ -91,7 +100,9 @@ function App() {
   const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
   const [runtime, setRuntime] = useState(20);
   const [runtimeInput, setRuntimeInput] = useState('20');
+  const [platformName, setPlatformName] = useState<string>(PLATFORM_NAME);
   const [repoUrl, setRepoUrl] = useState(initialRepoUrl);
+  const [repoPersist, setRepoPersist] = useState<boolean | null>(null);
   const [repoUrlError, setRepoUrlError] = useState('');
   const [repoValidating, setRepoValidating] = useState(false);
   const [repoValid, setRepoValid] = useState(false);
@@ -116,6 +127,10 @@ function App() {
   );
 
   const loading = resourcesLoading || acceleratorsLoading || quotaLoading;
+
+  useEffect(() => {
+    fetchPlatformInfo().then(info => setPlatformName(info.platform)).catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (!initialRepoUrl || allowedGitProviders.length === 0) return;
@@ -180,6 +195,12 @@ function App() {
   }, [availableAccelerators, selectedAcceleratorKey]);
 
   const allowGitClone = selectedResource?.metadata?.allowGitClone ?? false;
+  const repoPersistValue = repoPersist ?? defaultPersistence;
+  const showRepoPersistenceChoice = Boolean(selectedResource && allowGitClone && allowPersistenceChoice);
+
+  useEffect(() => {
+    setRepoPersist(defaultPersistence);
+  }, [defaultPersistence]);
 
   const shareableUrl = useMemo(() => {
     if (!selectedResource) return '';
@@ -339,6 +360,7 @@ function App() {
         <input type="hidden" name={`gpu_selection_${selectedResource.key}`} value={selectedAccelerator?.key ?? ''} />
       )}
       {allowGitClone && <input type="hidden" name="repo_url" value={repoUrl} />}
+      {allowGitClone && <input type="hidden" name="repo_persist" value={repoPersistValue ? 'true' : 'false'} />}
 
       {/* Page header */}
       <div className="spawn-header">
@@ -351,7 +373,7 @@ function App() {
           </button>
         </div>
         <h1>Launch Your Server</h1>
-        <p>Select a resource, configure your environment, and launch on {PLATFORM_NAME}</p>
+        <p>Select a resource, configure your environment, and launch on {platformName}</p>
       </div>
 
       {/* Warnings */}
@@ -504,6 +526,22 @@ function App() {
                     </small>
                   )}
                   {repoUrlError && !repoValidating && <small className="sidebar-git-status error">{repoUrlError}</small>}
+                  {showRepoPersistenceChoice && (
+                    <label className="sidebar-runtime-row">
+                      <input
+                        type="checkbox"
+                        className="sidebar-gpu-radio"
+                        checked={repoPersistValue}
+                        onChange={e => setRepoPersist(e.target.checked)}
+                      />
+                      <span className="sidebar-label">Keep this repository after the server stops</span>
+                    </label>
+                  )}
+                  {showRepoPersistenceChoice && (
+                    <small className="sidebar-git-status">
+                      If enabled, an existing repository folder will be reused and not overwritten.
+                    </small>
+                  )}
                   {githubAppName && isGitHub && (
                     <a
                       className="sidebar-github-link"

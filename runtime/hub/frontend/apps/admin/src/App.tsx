@@ -22,7 +22,8 @@ import { UserList } from './pages/UserList';
 import { GroupList } from './pages/GroupList';
 import { Dashboard } from './pages/Dashboard';
 import { NavBar } from './components/NavBar';
-import { PLATFORM_NAME } from '@auplc/shared';
+import { useState, useEffect } from 'react';
+import { PLATFORM_NAME, fetchPlatformInfo } from '@auplc/shared';
 
 function App() {
 
@@ -30,9 +31,14 @@ function App() {
   const baseUrl = (jhdata.base_url || '/hub/').replace(/\/+$/, '');
   const basePath = `${baseUrl}/admin`;
 
+  const [platformName, setPlatformName] = useState<string>(PLATFORM_NAME);
+  useEffect(() => {
+    fetchPlatformInfo().then(info => setPlatformName(info.platform)).catch(() => {});
+  }, []);
+
   return (
     <BrowserRouter basename={basePath}>
-      <div className="admin-page" data-platform={PLATFORM_NAME}>
+      <div className="admin-page" data-platform={platformName}>
         <NavBar />
         <Routes>
           <Route path="/users" element={<UserList />} />

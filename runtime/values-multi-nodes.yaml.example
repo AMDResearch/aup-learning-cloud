@@ -1,5 +1,4 @@
 # Modifications Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
-# Portions of this file consist of AI-generated content.
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
@@ -57,8 +56,12 @@ custom:
   # - multi: GitHub App + native first-use accounts
   authMode: "multi"
 
+  # Cluster display name (optional). Appended to "AUP Learning Cloud" in the UI.
+  # Example: "City/University" → "AUP Learning Cloud City/University"
+  clusterName: ""
+
   # GitHub organization name for team-based resource access
-  githubOrgName: "your-github-org"
+  githubOrgName: "<YOUR-ORG-NAME>"
 
   # Auto-create admin user on first install
   adminUser:
@@ -88,15 +91,15 @@ custom:
   # --------------------------------------------------------------------------
   # Git Repository Cloning
   # --------------------------------------------------------------------------
-  # Users can provide an optional Git URL on the spawn form; the repo will be
-  # cloned into ~/home at container start via an init container.
+  # Users can provide an optional Git URL on the spawn form. The repo is cloned
+  # into ~/home at container start via an init container.
   #
-  # Private repo access — two independent mechanisms (can be used together):
+  # Private repo access, two independent mechanisms that can be used together:
   #
   #   1. GitHub App (githubAppName)
   #      For GitHub App users. Users authorize per-repo read-only access via
   #      the GitHub App UI. Token is obtained automatically from OAuth session.
-  #      Requires migrating from OAuth App to GitHub App — see below.
+  #      Requires migrating from OAuth App to GitHub App. See below.
   #
   #   2. Default Access Token (defaultAccessToken)
   #      A bot/service-account PAT configured by the admin. Applied transparently
@@ -117,7 +120,7 @@ custom:
   #        client_secret: "<GitHub App Client Secret>"
   #        scope: []  # GitHub App does not use OAuth scopes
   #   3. Set githubAppName below to the App slug
-  #   4. helm upgrade — existing user sessions continue, new logins use GitHub App
+  #   4. helm upgrade. Existing user sessions continue, new logins use GitHub App.
   gitClone:
     # GitHub App slug, e.g. "aup-learning-cloud".
     githubAppName: ""
@@ -129,6 +132,12 @@ custom:
       - bitbucket.org
     maxCloneTimeout: 300
     initContainerImage: "alpine/git:2.47.2"
+    # Cloned repositories are kept by default after the user's server stops.
+    # Set to false to restore ephemeral cleanup as the admin-enforced default.
+    # Set allowPersistenceChoice to true to let users choose on the spawn form.
+    # Existing unmanaged same-name directories are preserved and not overwritten.
+    defaultPersistence: true
+    allowPersistenceChoice: false
 
   # --------------------------------------------------------------------------
   # Accelerator Configuration
@@ -200,6 +209,15 @@ custom:
       code-cpu: "ghcr.io/amdresearch/auplc-code-cpu:latest"
       code-gpu: "ghcr.io/amdresearch/auplc-code-gpu:latest"
 
+    # Optional spawn/Home group display order. Groups not listed here are shown
+    # after these entries using the default alphabetical order.
+    # Example: move DEVELOPMENT before COURSE by listing DEVELOPMENT first.
+    groupOrder:
+      - TEACHING LABS
+      - DEVELOPMENT ENVIRONMENTS
+      - TUTORIALS
+      - CUSTOM REPOS
+
     requirements:
       cpu:
         cpu: "0"
@@ -237,7 +255,7 @@ custom:
 
     metadata:
       cpu:
-        group: "CUSTOM REPO"
+        group: "CUSTOM REPOS"
         description: "Basic Python Environment"
         subDescription: "CPU Only Environment"
         accelerator: ""
@@ -245,8 +263,8 @@ custom:
         allowGitClone: true
         resourceType: "notebook"
       code-cpu:
-        group: "DEVELOPMENT"
-        description: "VSCode Server CPU Environment"
+        group: "DEVELOPMENT ENVIRONMENTS"
+        description: "VSCode Server CPU"
         subDescription: "CPU-only development workspace"
         accelerator: ""
         acceleratorKeys: []
@@ -254,7 +272,7 @@ custom:
         launchMode: "code-server"
         resourceType: "browser-ide"
       gpu:
-        group: "CUSTOM REPO"
+        group: "CUSTOM REPOS"
         description: "Basic GPU Environment"
         subDescription: "GPU Accelerated Environment"
         accelerator: "GPU"
@@ -263,8 +281,8 @@ custom:
         allowGitClone: true
         resourceType: "notebook"
       code-gpu:
-        group: "DEVELOPMENT"
-        description: "VSCode Server GPU Environment"
+        group: "DEVELOPMENT ENVIRONMENTS"
+        description: "VSCode Server GPU"
         subDescription: "GPU-accelerated development workspace"
         accelerator: "GPU"
         acceleratorKeys:
@@ -273,7 +291,7 @@ custom:
         launchMode: "code-server"
         resourceType: "browser-ide"
       Course-CV:
-        group: "COURSE"
+        group: "TEACHING LABS"
         description: "Computer Vision Course"
         subDescription: "Suitable for CV experiments with GPU"
         accelerator: "GPU"
@@ -290,7 +308,7 @@ custom:
         #   strix-halo:
         #     image: "ghcr.io/your-org/auplc-cv:latest-gfx1151"
       Course-DL:
-        group: "COURSE"
+        group: "TEACHING LABS"
         description: "Deep Learning Course"
         subDescription: "Suitable for DL experiments with GPU"
         accelerator: "GPU"
@@ -298,7 +316,7 @@ custom:
           - strix-halo
         resourceType: "notebook"
       Course-LLM:
-        group: "COURSE"
+        group: "TEACHING LABS"
         description: "Large Language Models Course"
         subDescription: "Suitable for LLM experiments with GPU"
         accelerator: "GPU"
@@ -306,7 +324,7 @@ custom:
           - strix-halo
         resourceType: "notebook"
       Course-PhySim:
-        group: "COURSE"
+        group: "TEACHING LABS"
         description: "Genesis Physical Simulation Course"
         subDescription: "Suitable for physical simulation experiments with GPU"
         accelerator: "GPU"
@@ -431,7 +449,7 @@ hub:
       client_id: "TODO"
       client_secret: "TODO"
       allowed_organizations:
-        - your-github-org
+        - <YOUR-ORG-NAME>
       # Use [] for GitHub App credentials. For legacy OAuth Apps, use
       # read:user and read:org instead.
       scope: []

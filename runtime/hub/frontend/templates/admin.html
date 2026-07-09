@@ -30,5 +30,5 @@ SOFTWARE.
   </div>
 {% endblock main %}
 {% block footer %}
-  <div class="py-2 px-4 bg-body-tertiary small version_footer">AUP Learning Cloud {{ server_version }}</div>
+  <div class="py-2 px-4 bg-body-tertiary small version_footer">{{ platform_name or 'AUP Learning Cloud' }} {{ server_version }}</div>
 {% endblock footer %}

@@ -42,7 +42,7 @@ The simplest way to deploy AUP Learning Cloud on a single machine in a developme
 
 ```bash
 # Ryzen AI APU only: OEM kernel for ROCm on Ubuntu 24.04 (reboot required)
-sudo apt update && sudo apt install linux-image-6.14.0-1018-oem
+sudo apt update && sudo apt install linux-oem-6.14
 
 # Install Docker
 curl -fsSL https://get.docker.com | sh

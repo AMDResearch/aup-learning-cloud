@@ -1,5 +1,4 @@
 # Modifications Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
-# Portions of this file consist of AI-generated content.
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
@@ -49,6 +48,14 @@ custom:
   # - github: GitHub App authentication
   # - multi: GitHub App + Local accounts
   authMode: "auto-login"
+
+  # GitHub organization name for team-based resource access
+  # Required for github and multi auth modes.
+  # githubOrgName: "<YOUR-ORG-NAME>"
+
+  # Cluster display name (optional). Appended to "AUP Learning Cloud" in the UI.
+  # Example: "City/University" → "AUP Learning Cloud City/University"
+  clusterName: ""
 
   # Auto-create admin user on first install
   adminUser:
@@ -116,6 +123,15 @@ custom:
     allowedOrigins: ["*"]
 
   # ============================================================================
+  # Code Server
+  # ============================================================================
+  # code-server automatically trusts the current public Hub host for outgoing
+  # Back-to-Hub links. Add extra domains only when a deployment intentionally
+  # opens trusted links to additional sites. Use host/domain entries, not URLs.
+  codeServer:
+    extraTrustedDomains: []
+
+  # ============================================================================
   # Public Scheme (TLS termination outside the chart)
   # ============================================================================
   # When TLS is terminated by an external component (Cloudflare tunnel,
@@ -130,15 +146,15 @@ custom:
   # ============================================================================
   # Git Repository Cloning
   # ============================================================================
-  # Users can provide an optional Git URL on the spawn form; the repo will be
-  # cloned into ~/home at container start via an init container.
+  # Users can provide an optional Git URL on the spawn form. The repo is cloned
+  # into ~/home at container start via an init container.
   #
-  # Private repo access — two independent mechanisms (can be used together):
+  # Private repo access, two independent mechanisms that can be used together:
   #
   #   1. GitHub App (githubAppName)
   #      For GitHub App users. Users authorize per-repo read-only access via
   #      the GitHub App UI. Token is obtained automatically from OAuth session.
-  #      Requires migrating from OAuth App to GitHub App — see below.
+  #      Requires migrating from OAuth App to GitHub App. See below.
   #
   #   2. Default Access Token (defaultAccessToken)
   #      A bot/service-account PAT configured by the admin. Applied transparently
@@ -161,7 +177,7 @@ custom:
   #        client_secret: "<GitHub App Client Secret>"
   #        scope: []  # GitHub App does not use OAuth scopes
   #   3. Set githubAppName below to the App slug
-  #   4. helm upgrade — existing user sessions continue, new logins use GitHub App
+  #   4. helm upgrade. Existing user sessions continue, new logins use GitHub App.
   #
   gitClone:
     # -- Private Repo Access --
@@ -184,6 +200,23 @@ custom:
     maxCloneTimeout: 300
     # Container image used for git operations (must include git and sh)
     initContainerImage: "alpine/git:2.47.2"
+    # -- Persistence Behavior --
+    # Cloned repositories are kept by default after the user's server stops.
+    # Set to false to restore ephemeral cleanup as the admin-enforced default.
+    #
+    # Behavior table:
+    #   defaultPersistence | allowPersistenceChoice | Result
+    #   true               | false                  | Repos are kept after stop.
+    #   false              | false                  | Repos are cleaned when the server stops.
+    #   true or false      | true                   | Users choose on the spawn form. The default checkbox state follows defaultPersistence.
+    #   any                | any                    | Existing unmanaged same-name directories are preserved and not overwritten.
+    #
+    # Persistent mode reuses an existing compatible clone. It does not auto-pull,
+    # reset, or sync repository contents after the first successful clone.
+    defaultPersistence: true
+    # Allow users to choose whether cloned repositories persist in the spawn form.
+    # When false, the admin default is enforced without exposing a user toggle.
+    allowPersistenceChoice: false
 
   # ============================================================================
   # Accelerator Configuration
@@ -258,7 +291,8 @@ custom:
     # Example: move DEVELOPMENT before COURSE by listing DEVELOPMENT first.
     groupOrder:
       - TEACHING LABS
-      - DEVELOPMENT ENVIRONMENT
+      - DEVELOPMENT ENVIRONMENTS
+      - TUTORIALS
       - CUSTOM REPOS
 
     # Course Resource Requirements
@@ -300,6 +334,10 @@ custom:
 
     # Course Metadata (for spawn UI)
     # Defines display information for each course
+    # defaultPath is an optional Hub launch-directory override, not the image
+    # WORKDIR. Custom Repo launches always open the cloned repository first. If
+    # defaultPath is omitted or null, Hub does not force a landing path and the
+    # image/application default normally follows the image WORKDIR.
     metadata:
       cpu:
         group: "CUSTOM REPOS"
@@ -308,15 +346,17 @@ custom:
         accelerator: ""
         acceleratorKeys: []
         allowGitClone: true
+        defaultPath: "/home/jovyan"
         resourceType: "notebook"
       code-cpu:
-        group: "DEVELOPMENT ENVIRONMENT"
-        description: "VSCode Server - CPU Environment"
+        group: "DEVELOPMENT ENVIRONMENTS"
+        description: "VSCode Server CPU"
         subDescription: "CPU-only development workspace"
         accelerator: ""
         acceleratorKeys: []
         allowGitClone: true
         launchMode: "code-server"
+        defaultPath: "/home/jovyan"
         resourceType: "browser-ide"
       gpu:
         group: "CUSTOM REPOS"
@@ -326,16 +366,18 @@ custom:
         acceleratorKeys:
           - strix-halo
         allowGitClone: true
+        defaultPath: "/home/jovyan"
         resourceType: "notebook"
       code-gpu:
-        group: "DEVELOPMENT ENVIRONMENT"
-        description: "VSCode Server - GPU Environment"
+        group: "DEVELOPMENT ENVIRONMENTS"
+        description: "VSCode Server GPU"
         subDescription: "GPU-accelerated development workspace"
         accelerator: "GPU"
         acceleratorKeys:
           - strix-halo
         allowGitClone: true
         launchMode: "code-server"
+        defaultPath: "/home/jovyan"
         resourceType: "browser-ide"
       Course-CV:
         group: "TEACHING LABS"
@@ -349,6 +391,7 @@ custom:
         #     image: "ghcr.io/your-org/auplc-cv:<tag-for-9070xt>"
         #   r9700:
         #     image: "ghcr.io/your-org/auplc-cv:<tag-for-r9700>"
+        defaultPath: "/opt/workspace/CV"
         resourceType: "notebook"
       Course-DL:
         group: "TEACHING LABS"
@@ -357,6 +400,7 @@ custom:
         accelerator: "GPU"
         acceleratorKeys:
           - strix-halo
+        defaultPath: "/opt/workspace/DL"
         resourceType: "notebook"
       Course-LLM:
         group: "TEACHING LABS"
@@ -365,6 +409,7 @@ custom:
         accelerator: "GPU"
         acceleratorKeys:
           - strix-halo
+        defaultPath: "/opt/workspace/LLM"
         resourceType: "notebook"
       Course-PhySim:
         group: "TEACHING LABS"
@@ -373,6 +418,7 @@ custom:
         accelerator: "GPU"
         acceleratorKeys:
           - strix-halo
+        defaultPath: "/opt/workspace/PhySim"
         resourceType: "notebook"
 
   # ============================================================================
@@ -448,6 +494,11 @@ hub:
     tag: latest
     pullPolicy: IfNotPresent
 
+  # Optional Jinja template variables for Hub-rendered pages.
+  # Example:
+  #   login_github_helper_text: "Optional helper text shown under the GitHub sign-in button."
+  templateVars: {}
+
   # Additional Python config snippets (executed after core/setup.py)
   # Example:
   #   myconfig: |
@@ -456,10 +507,11 @@ hub:
 
   extraFiles:
     announcement.txt:
-    # If you want to edit the notice on login.html, change here.
+      # Replace stringData with login announcement content to show a notice on login.html.
+      # The default HTML comment is intentionally hidden by the login template.
       mountPath: /usr/local/share/jupyterhub/static/announcement.txt
       stringData: |
-          Hello, World!
+        <!-- Add login announcement content here. -->
 
   config:
     # ---- Hub Core ----
@@ -484,9 +536,9 @@ hub:
       client_secret: "TODO"
       allowed_organizations:
         - <YOUR-ORG-NAME>
-      scope:
-        - read:user
-        - read:org
+      # Use [] for GitHub App credentials. For legacy OAuth Apps, use
+      # read:user and read:org instead.
+      scope: []
 
     # ---- KubeSpawner Prepuller Setup ----
     KubeSpawner:
@@ -536,7 +588,7 @@ singleuser:
     securityContext:
       fsGroup: 100
       supplementalGroups:
-        - 993  # render group for ROCm GPU access
+        - 993 # render group for ROCm GPU access
 
   storage:
     dynamic:

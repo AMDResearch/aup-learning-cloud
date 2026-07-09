@@ -86,6 +86,32 @@ docker build \
 docker build -t ghcr.io/amdresearch/auplc-default:latest --file Dockerfile.cpu .
 ```
 
+## Resource Path Contract
+
+Resource metadata in `runtime/values.yaml` can set `defaultPath` for the
+initial landing path inside the container. It controls where JupyterLab or
+code-server opens first. It is not a security boundary, an access boundary, or a
+runtime guarantee that the directory exists.
+
+The Hub chooses the target path in this order:
+
+1. Custom Repo clone path, when the user supplies a repository.
+2. Resource `defaultPath`, when configured.
+3. The image or single-user application default, normally the image `WORKDIR`.
+
+For official images, keep `custom.resources.metadata.<resource>.defaultPath` in
+sync with the image `WORKDIR`. Check the local image contracts with:
+
+```bash
+make -C dockerfiles verify-resource-contracts
+```
+
+That verifier checks the official image contract. Runtime spawning still does
+not check path existence for arbitrary or custom images. If an environment
+points at a custom image, make sure the configured `defaultPath` exists in that
+image, or omit `defaultPath` to let the image `WORKDIR` control the initial
+folder.
+
 ## Generic Code Images
 
 The base images remain the foundation for notebook and coding environments. Generic code-server images are built separately from `dockerfiles/Code/`:

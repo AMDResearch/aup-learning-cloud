@@ -40,10 +40,13 @@ ifneq ($(MIRROR_NPM),)
   BUILD_ARGS += --build-arg NPM_REGISTRY=$(MIRROR_NPM)
 endif
 
-.PHONY: all base base-cpu base-rocm base-gfx1151 hub code code-cpu code-gpu courses cv dl llm physim
+.PHONY: all base base-cpu base-rocm base-gfx1151 hub code code-cpu code-gpu courses cv dl llm physim verify-resource-contracts
 
 # Build all images
 all: base hub code courses
+
+verify-resource-contracts:
+	python3 ../scripts/verify-resource-contracts.py
 
 # --- Base Images ---
 base: base-cpu base-rocm

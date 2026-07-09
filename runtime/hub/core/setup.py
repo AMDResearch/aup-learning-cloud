@@ -65,6 +65,7 @@ def setup_hub(c: Any) -> None:
     """
     from core import z2jh
     from core.authenticators import (
+        GITHUB_USERNAME_PREFIX,
         CustomFirstUseAuthenticator,
         CustomGitHubOAuthenticator,
         create_authenticator,
@@ -121,7 +122,7 @@ def setup_hub(c: Any) -> None:
         if auth_state is None:
             spawner.github_access_token = None
             # Still assign native users to their default group
-            if not spawner.user.name.startswith("github:"):
+            if not spawner.user.name.startswith(GITHUB_USERNAME_PREFIX):
                 try:
                     from core.groups import assign_user_to_group
 
@@ -131,7 +132,7 @@ def setup_hub(c: Any) -> None:
             return
         spawner.github_access_token = auth_state.get("access_token")
 
-        if spawner.user.name.startswith("github:"):
+        if spawner.user.name.startswith(GITHUB_USERNAME_PREFIX):
             try:
                 from core.groups import sync_github_teams_for_user
 
@@ -160,7 +161,7 @@ def setup_hub(c: Any) -> None:
                 assign_user_to_group(spawner.user, "github-users", spawner.user.db)
             except Exception as e:
                 print(f"[GROUPS] Warning: Failed to assign github-users group for {spawner.user.name}: {e}")
-        elif not spawner.user.name.startswith("github:"):
+        elif not spawner.user.name.startswith(GITHUB_USERNAME_PREFIX):
             # Native user with auth_state but no GitHub teams
             try:
                 from core.groups import assign_user_to_group
@@ -185,7 +186,7 @@ def setup_hub(c: Any) -> None:
             {
                 "authenticator_class": CustomFirstUseAuthenticator,
                 "url_prefix": "/native",
-                "config": {"prefix": ""},
+                "config": {"prefix": "", "allow_all": True},
             },
         ]
 
@@ -202,6 +203,7 @@ def setup_hub(c: Any) -> None:
         team_resource_mapping=dict(config.teams.mapping),
         github_org=config.github_org_name,
         auth_mode=config.auth_mode,
+        platform_name=config.platform_display_name,
     )
 
     if not hasattr(c.JupyterHub, "extra_handlers") or c.JupyterHub.extra_handlers is None:
@@ -381,6 +383,8 @@ def setup_hub(c: Any) -> None:
         c.JupyterHub.template_vars = {}
     c.JupyterHub.template_vars["authenticator_mode"] = config.auth_mode  # type: ignore[assignment]
     c.JupyterHub.template_vars["hide_logout"] = config.auth_mode == "auto-login"  # type: ignore[assignment]
+    c.JupyterHub.template_vars["cluster_name"] = config.cluster_name  # type: ignore[assignment]
+    c.JupyterHub.template_vars["platform_name"] = config.platform_display_name  # type: ignore[assignment]
 
     print(f"[SETUP] Hub setup complete: auth_mode={config.auth_mode}")
     print(f"[SETUP] template_vars: {c.JupyterHub.template_vars}")

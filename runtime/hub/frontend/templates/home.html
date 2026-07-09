@@ -24,7 +24,7 @@ SOFTWARE.
   {% set announcement = announcement_home %}
 {% endif %}
 
-{%- block title -%}Home - AUP Learning Cloud{%- endblock title -%}
+{%- block title -%}Home - {{ platform_name or 'AUP Learning Cloud' }}{%- endblock title -%}
 
 {% block stylesheet %}
 {{ super() }}

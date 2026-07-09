@@ -27,6 +27,7 @@ import {
   getResourceType,
   getResourceTypeLabel,
   PLATFORM_NAME,
+  fetchPlatformInfo,
 } from "@auplc/shared";
 import onboardingLaunchWorkspaceUrl from "./onboarding-launch-workspace.png";
 import onboardingResourcePickerUrl from "./onboarding-resource-picker.png";
@@ -193,6 +194,8 @@ function App() {
   const [showOnboardingModal, setShowOnboardingModal] = useState(false);
   const [onboardingStep, setOnboardingStep] = useState<OnboardingStep>(0);
 
+  const [platformName, setPlatformName] = useState<string>(PLATFORM_NAME);
+
   const [theme, setTheme] = useState<Theme>(getInitialTheme);
   const toggleTheme = useCallback(() => {
     setTheme(t => {
@@ -200,6 +203,10 @@ function App() {
       applyTheme(next);
       return next;
     });
+  }, []);
+
+  useEffect(() => {
+    fetchPlatformInfo().then(info => setPlatformName(info.platform)).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -357,20 +364,7 @@ function App() {
   useEffect(() => {
     getResources()
       .then((data) => {
-        const allowedKeys = window.AVAILABLE_RESOURCES ?? [];
-        const hasFilter = allowedKeys.length > 0;
-        const allowedSet = new Set(allowedKeys);
-
-        const filtered = hasFilter
-          ? data.groups
-              .map((g) => ({
-                ...g,
-                resources: g.resources.filter((r) => allowedSet.has(r.key)),
-              }))
-              .filter((g) => g.resources.length > 0)
-          : data.groups.filter((g) => g.resources.length > 0);
-
-        setGroups(filtered);
+        setGroups(data.groups.filter((g) => g.resources.length > 0));
       })
       .catch((err) => {
         setResourcesError(
@@ -457,7 +451,7 @@ function App() {
             {getGreeting()}, {jhdata.user ?? "student"}
           </p>
           <h1>
-            Welcome to <span className="accent">{PLATFORM_NAME}</span>
+            Welcome to <span className="accent">{platformName}</span>
           </h1>
           <p className="hero-desc">
             Experience next-generation AI acceleration with AMD ROCm. Launch
@@ -874,7 +868,7 @@ function App() {
                 <div className="onboarding-step-layout onboarding-step-layout-welcome">
                   <div className="onboarding-panel-copy">
                     <span className="onboarding-kicker">Welcome</span>
-                    <h2 id="onboarding-modal-title">Welcome to {PLATFORM_NAME}</h2>
+                    <h2 id="onboarding-modal-title">Welcome to {platformName}</h2>
                     <p>
                       This short guide will show you how to get started, where to launch your environment,
                       and where to find AMD developer resources later.

@@ -51,6 +51,16 @@ if "core" not in sys.modules:
     core_module.__path__ = [str(CORE)]
     sys.modules["core"] = core_module
 
+if "core.authenticators" not in sys.modules:
+    authenticators_module = types.ModuleType("core.authenticators")
+    authenticators_module.__path__ = [str(CORE / "authenticators")]
+    sys.modules["core.authenticators"] = authenticators_module
+
+if "core.authenticators.github_app" not in sys.modules:
+    github_app_module = types.ModuleType("core.authenticators.github_app")
+    github_app_module.GITHUB_USERNAME_PREFIX = "github:"
+    sys.modules["core.authenticators.github_app"] = github_app_module
+
 
 def load_module(name: str, path: Path):
     spec = importlib.util.spec_from_file_location(name, path)

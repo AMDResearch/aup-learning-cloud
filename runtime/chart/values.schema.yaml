@@ -3443,6 +3443,22 @@ properties:
                     Allow users to clone a Git repository into their home
                     directory at spawn time. Should be false for course
                     resources that already include their own content.
+                defaultPath:
+                  type:
+                    - string
+                    - 'null'
+                  description: |
+                    Initial landing path inside the container for this resource.
+                    The effective target path is Custom Repo clone path, then
+                    `defaultPath`, then the image or single-user application
+                    default, normally the image `WORKDIR`. Omit the field or set
+                    it to null to avoid a Hub landing override; an empty string
+                    is invalid; `/` lands at the container root. The Hub
+                    validates the path syntax and normalizes it before launch,
+                    but it does not check whether the path exists in the image.
+                    This value is not a security boundary or an access boundary.
+                    Use an absolute POSIX container path such as
+                    `/opt/workspace/CV`.
                 launchMode:
                   type: string
                   enum:
@@ -3649,8 +3665,10 @@ properties:
         additionalProperties: false
         description: |
           Git repository cloning configuration.
-          Users can optionally provide a Git URL on the spawn form; the repo is
+          Users can optionally provide a Git URL on the spawn form. The repo is
           cloned into their home directory via an init container at startup.
+          By default, cloned repositories are kept after the user's server stops.
+          Existing unmanaged same-name directories are preserved and not overwritten.
         properties:
           initContainerImage:
             type: string
@@ -3683,6 +3701,19 @@ properties:
               Used as fallback when user provides no PAT and no OAuth token is available.
               Priority: user PAT > OAuth token > defaultAccessToken.
               Helm auto-creates a K8s Secret (jupyterhub-git-default-token) from this value.
+          defaultPersistence:
+            type: boolean
+            description: |
+              Whether cloned repositories are kept by default after the user's server stops.
+              Defaults to true, so cloned repos persist unless an admin sets this
+              to false or allows users to choose ephemeral cleanup. Persistent mode
+              does not auto-pull, reset, or sync repository contents after clone.
+          allowPersistenceChoice:
+            type: boolean
+            description: |
+              Allow users to choose whether cloned repositories persist in the spawn form.
+              When false, the admin default is enforced and no user toggle is shown.
+              When true, the spawn form choice defaults to `defaultPersistence`.
 
       hub:
         type: object
@@ -3714,6 +3745,23 @@ properties:
               --ServerApp.allow_origin_pat. Needed when kernel WebSocket
               connections go through a reverse proxy or non-standard domain.
               Use ["*"] to allow all, or list specific domains.
+
+      codeServer:
+        type: object
+        additionalProperties: false
+        description: |
+          code-server settings for browser IDE resources.
+        properties:
+          extraTrustedDomains:
+            type: array
+            items:
+              type: string
+            description: |
+              Additional host/domain entries trusted by code-server's outgoing
+              link protection. The Hub automatically adds the current public Hub
+              host for Back-to-Hub links; use this list only for extra trusted
+              sites such as internal documentation or Git services. Provide
+              host/domain entries, not full URLs.
 
       apiService:
         type: object

@@ -43,7 +43,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 # =============================================================================
 # YAML Configuration Models
@@ -94,6 +94,34 @@ class AcceleratorOverride(BaseModel):
     model_config = {"extra": "allow"}
 
 
+def _normalize_container_path(value: str | None) -> str | None:
+    """Normalize an absolute container path without touching the host filesystem."""
+
+    if value is None:
+        return None
+
+    if not isinstance(value, str):
+        raise ValueError("defaultPath must be a string or null")
+
+    stripped_value = value.strip()
+    if not stripped_value:
+        raise ValueError("defaultPath cannot be empty")
+    if "\x00" in stripped_value:
+        raise ValueError("defaultPath cannot contain NUL bytes")
+    if not stripped_value.startswith("/"):
+        raise ValueError("defaultPath must be an absolute container path")
+
+    normalized_segments: list[str] = []
+    for segment in stripped_value.split("/"):
+        if segment in {"", "."}:
+            continue
+        if segment == "..":
+            raise ValueError("defaultPath cannot contain '..' segments")
+        normalized_segments.append(segment)
+
+    return "/" if not normalized_segments else "/" + "/".join(normalized_segments)
+
+
 class ResourceMetadata(BaseModel):
     """Metadata for a resource (course/tutorial)."""
 
@@ -103,10 +131,18 @@ class ResourceMetadata(BaseModel):
     accelerator: str = ""
     acceleratorKeys: list[str] = Field(default_factory=list)
     allowGitClone: bool = False
+    defaultPath: str | None = None
     resourceType: Literal["notebook", "browser-ide"] | None = None
     launchMode: str | None = None
     env: dict[str, str] = Field(default_factory=dict)
     acceleratorOverrides: dict[str, AcceleratorOverride] | None = None
+
+    @field_validator("defaultPath", mode="before")
+    @classmethod
+    def validate_default_path(cls, value: str | None) -> str | None:
+        """Validate and normalize a resource's default container path."""
+
+        return _normalize_container_path(value)
 
     model_config = {"extra": "allow"}
 
@@ -138,6 +174,8 @@ class GitCloneSettings(BaseModel):
     maxCloneTimeout: int = 300
     githubAppName: str = ""
     defaultAccessToken: str = ""
+    allowPersistenceChoice: bool = False
+    defaultPersistence: bool = True
 
     model_config = {"extra": "allow"}
 
@@ -158,6 +196,14 @@ class NotebookNetworkSettings(BaseModel):
     model_config = {"extra": "allow"}
 
 
+class CodeServerSettings(BaseModel):
+    """Settings applied to code-server resources."""
+
+    extraTrustedDomains: list[str] = Field(default_factory=list)
+
+    model_config = {"extra": "allow"}
+
+
 class ParsedConfig(BaseModel):
     """Parsed configuration from values.yaml custom section."""
 
@@ -168,6 +214,7 @@ class ParsedConfig(BaseModel):
     gitClone: GitCloneSettings = Field(default_factory=GitCloneSettings)
     hub: HubNetworkSettings = Field(default_factory=HubNetworkSettings)
     notebook: NotebookNetworkSettings = Field(default_factory=NotebookNetworkSettings)
+    codeServer: CodeServerSettings = Field(default_factory=CodeServerSettings)
     notifications: dict[str, Any] = Field(default_factory=dict)
 
     model_config = {"extra": "allow"}
@@ -182,6 +229,7 @@ class ParsedConfig(BaseModel):
         git_clone: dict | None = None,
         hub: dict | None = None,
         notebook: dict | None = None,
+        code_server: dict | None = None,
         notifications: dict | None = None,
     ) -> ParsedConfig:
         """Create configuration from individual dicts."""
@@ -201,6 +249,8 @@ class ParsedConfig(BaseModel):
             raw_config["hub"] = hub
         if notebook:
             raw_config["notebook"] = notebook
+        if code_server:
+            raw_config["codeServer"] = code_server
         if notifications is not None:
             raw_config["notifications"] = notifications
 
@@ -231,6 +281,7 @@ class HubConfig:
         self.auth_mode: str = "auto-login"
         self.single_node_mode: bool = False
         self.github_org_name: str = ""
+        self.cluster_name: str = ""
         self.quota_enabled: bool = False
 
         # Parsed configuration
@@ -268,6 +319,7 @@ class HubConfig:
         # Extract runtime settings
         instance.auth_mode = raw_config.get("authMode", "auto-login")
         instance.github_org_name = raw_config.get("githubOrgName", "")
+        instance.cluster_name = raw_config.get("clusterName", "")
 
         # Single-node mode: from config or auto-enable for auto-login
         single_node_mode = raw_config.get("singleNodeMode")
@@ -285,6 +337,7 @@ class HubConfig:
             git_clone=raw_config.get("gitClone"),
             hub=raw_config.get("hub"),
             notebook=raw_config.get("notebook"),
+            code_server=raw_config.get("codeServer"),
             notifications=raw_config.get("notifications"),
         )
 
@@ -332,6 +385,13 @@ class HubConfig:
     # =========================================================================
 
     @property
+    def platform_display_name(self) -> str:
+        base = "AUP Learning Cloud"
+        if self.cluster_name:
+            return f"{base} {self.cluster_name}"
+        return base
+
+    @property
     def resources(self) -> ResourcesConfig:
         """Get resources configuration."""
         return self._config.resources
@@ -365,6 +425,11 @@ class HubConfig:
     def notebook_network(self) -> NotebookNetworkSettings:
         """Get notebook server network settings."""
         return self._config.notebook
+
+    @property
+    def code_server(self) -> CodeServerSettings:
+        """Get code-server settings."""
+        return self._config.codeServer
 
     @property
     def notifications(self) -> dict[str, Any]:

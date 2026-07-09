@@ -41,7 +41,7 @@ from multiauthenticator import MultiAuthenticator
 from pydantic import ValidationError
 from tornado import web
 
-from core.authenticators import CustomFirstUseAuthenticator
+from core.authenticators import GITHUB_USERNAME_PREFIX, CustomFirstUseAuthenticator
 from core.git_validation import validate_and_sanitize_repo_url
 from core.notifications import get_normalized_notifications
 from core.quota import (
@@ -73,6 +73,7 @@ _handler_config: dict[str, Any] = {
     "default_quota": 0,
     "team_resource_mapping": {},
     "auth_mode": "auto-login",
+    "platform_name": "AUP Learning Cloud",
 }
 
 
@@ -121,6 +122,7 @@ def configure_handlers(
     team_resource_mapping: dict[str, list[str]] | None = None,
     github_org: str = "",
     auth_mode: str = "auto-login",
+    platform_name: str = "AUP Learning Cloud",
 ) -> None:
     """Configure handler module with runtime settings."""
     if accelerator_options is not None:
@@ -134,6 +136,7 @@ def configure_handlers(
         _handler_config["team_resource_mapping"] = team_resource_mapping
     _handler_config["github_org"] = github_org
     _handler_config["auth_mode"] = auth_mode
+    _handler_config["platform_name"] = platform_name
 
 
 # =============================================================================
@@ -265,7 +268,7 @@ class ChangePasswordHandler(BaseHandler):
             return self.finish(html)
 
         username = user.name
-        if username.startswith("github:"):
+        if username.startswith(GITHUB_USERNAME_PREFIX):
             html = await _render_error("GitHub users cannot change password here")
             self.set_status(400)
             return self.finish(html)
@@ -322,7 +325,7 @@ class AdminResetPasswordHandler(BaseHandler):
         from jupyterhub.orm import User
 
         for user in self.db.query(User).all():
-            if not user.name.startswith("github:") and user.name != "admin":
+            if not user.name.startswith(GITHUB_USERNAME_PREFIX) and user.name != "admin":
                 native_users.append(user.name)
 
         html = await self.render_template(
@@ -356,7 +359,7 @@ class AdminResetPasswordHandler(BaseHandler):
             )
 
         username = target_user
-        if username.startswith("github:"):
+        if username.startswith(GITHUB_USERNAME_PREFIX):
             return self.redirect(
                 self.hub.base_url
                 + f"admin/reset-password?user={target_user}&error=Cannot+reset+password+for+GitHub+users"
@@ -438,7 +441,7 @@ class AdminAPISetPasswordHandler(APIHandler):
                 self.set_header("Content-Type", "application/json")
                 return self.finish(json.dumps({"error": "Username and password are required"}))
 
-            if username.startswith("github:"):
+            if username.startswith(GITHUB_USERNAME_PREFIX):
                 self.set_status(400)
                 self.set_header("Content-Type", "application/json")
                 return self.finish(json.dumps({"error": "Cannot set password for GitHub users"}))
@@ -532,7 +535,7 @@ class AdminAPIBatchSetPasswordHandler(APIHandler):
                     self.set_status(400)
                     self.set_header("Content-Type", "application/json")
                     return self.finish(json.dumps({"error": "Each entry must have username and password"}))
-                if entry.get("username", "").startswith("github:"):
+                if entry.get("username", "").startswith(GITHUB_USERNAME_PREFIX):
                     self.set_status(400)
                     self.set_header("Content-Type", "application/json")
                     return self.finish(
@@ -998,6 +1001,8 @@ class ResourcesAPIHandler(APIHandler):
                     "acceleratorKeys": list(config.accelerators.keys()),
                     "allowedGitProviders": list(config.git_clone.allowedProviders),
                     "githubAppName": config.git_clone.githubAppName,
+                    "allowPersistenceChoice": config.git_clone.allowPersistenceChoice,
+                    "defaultPersistence": config.git_clone.defaultPersistence,
                 }
             )
         )
@@ -1313,14 +1318,15 @@ class PlatformInfoHandler(APIHandler):
     """
 
     async def get(self):
+        name = _handler_config.get("platform_name", "AUP Learning Cloud")
         self.set_header("Content-Type", "application/json")
-        self.set_header("X-Powered-By", "AUP Learning Cloud")
+        self.set_header("X-Powered-By", name)
         self.finish(
             json.dumps(
                 {
-                    "platform": "AUP Learning Cloud",
+                    "platform": name,
                     "vendor": "Advanced Micro Devices, Inc.",
-                    "powered_by": "AUP Learning Cloud",
+                    "powered_by": name,
                     "website": "https://github.com/AMDResearch/aup-learning-cloud",
                 }
             )
@@ -1591,7 +1597,7 @@ class GroupSyncAPIHandler(APIHandler):
         skipped = 0
 
         for user in self.users.values():
-            if not user.name.startswith("github:"):
+            if not user.name.startswith(GITHUB_USERNAME_PREFIX):
                 skipped += 1
                 continue
 

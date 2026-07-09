@@ -44,7 +44,7 @@ Usage:
     # Create users from file (with optional password column)
     python manage_users.py create users.csv
 
-    # Set passwords for users (requires kubectl access)
+    # Set passwords for users (via admin API)
     python manage_users.py set-passwords users.csv
 
     # Delete users from file
@@ -117,6 +117,56 @@ class JupyterHubUserManager:
         if not username:
             return username
         return username.strip().lower()
+
+    def set_password(self, username: str, password: str, force_change: bool = True) -> tuple[bool, str]:
+        """
+        Set password for a native user via the admin API.
+
+        Args:
+            username: Username (without prefix)
+            password: Password to set
+            force_change: If True, mark user for forced password change
+
+        Returns:
+            (success, message) tuple
+        """
+        username = self.normalize_username(username)
+        try:
+            response = requests.post(
+                f"{self.hub_url}/hub/admin/api/set-password",
+                headers=self.headers,
+                json={"username": username, "password": password, "force_change": force_change},
+            )
+            data = response.json()
+            if response.status_code == 200:
+                return True, data.get("message", "Password set")
+            return False, data.get("error", f"HTTP {response.status_code}")
+        except requests.exceptions.RequestException as e:
+            return False, str(e)
+
+    def batch_set_passwords(self, users: list[dict], force_change: bool = True) -> tuple[bool, dict]:
+        """
+        Set passwords for multiple users in a single API call.
+
+        Args:
+            users: List of dicts with 'username' and 'password' keys
+            force_change: If True, mark users for forced password change
+
+        Returns:
+            (success, result_dict) tuple
+        """
+        try:
+            response = requests.post(
+                f"{self.hub_url}/hub/admin/api/batch-set-password",
+                headers=self.headers,
+                json={"users": users, "force_change": force_change},
+            )
+            data = response.json()
+            if response.status_code == 200:
+                return True, data
+            return False, data
+        except requests.exceptions.RequestException as e:
+            return False, {"error": str(e)}
 
     def _check_connection(self) -> bool:
         """Check if connection to JupyterHub is working"""
@@ -511,75 +561,18 @@ def cmd_set_admin(args, manager: JupyterHubUserManager):
 
 
 def generate_password(length: int = 12) -> str:
-    """Generate a random password"""
-    alphabet = string.ascii_letters + string.digits
-    return "".join(secrets.choice(alphabet) for _ in range(length))
-
-
-def set_password_in_pod(username: str, password: str, force_change: bool = True, namespace: str = "jupyterhub") -> bool:
-    """
-    Set password for a user by executing Python code in the hub pod.
-
-    Args:
-        username: Username (without prefix)
-        password: Password to set
-        force_change: If True, mark user for forced password change
-        namespace: Kubernetes namespace
-
-    Returns:
-        True if successful
-    """
-    # Normalize username to lowercase
-    username = username.strip().lower()
-
-    # Python code to execute in the pod
-    python_code = f'''
-import dbm
-import bcrypt
-
-# Password database paths
-passwords_dbm = "/srv/jupyterhub/passwords.dbm"
-force_change_dbm = "/srv/jupyterhub/force_password_change.dbm"
-
-username = "{username}"
-password = "{password}"
-force_change = {force_change}
-
-# Set password
-with dbm.open(passwords_dbm, "c", 0o600) as db:
-    db[username] = bcrypt.hashpw(password.encode("utf8"), bcrypt.gensalt())
-
-# Mark for forced password change
-if force_change:
-    with dbm.open(force_change_dbm, "c", 0o600) as db:
-        db[username] = b"1"
-
-print(f"OK: Password set for {{username}}")
-'''
-
-    try:
-        result = subprocess.run(
-            ["kubectl", "--namespace", namespace, "exec", "deployment/hub", "--", "python3", "-c", python_code],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-
-        if result.returncode == 0 and "OK:" in result.stdout:
-            return True
-        else:
-            print(f"  Error: {result.stderr or result.stdout}")
-            return False
-
-    except subprocess.TimeoutExpired:
-        print(f"  Timeout setting password for {username}")
-        return False
-    except FileNotFoundError:
-        print("  Error: kubectl not found. Please install kubectl.")
-        return False
-    except Exception as e:
-        print(f"  Error: {e}")
-        return False
+    """Generate a random password that meets Hub strength requirements."""
+    special = "!@#$%^&*_+-="
+    alphabet = string.ascii_letters + string.digits + special
+    while True:
+        password = "".join(secrets.choice(alphabet) for _ in range(length))
+        if (
+            any(c in string.ascii_uppercase for c in password)
+            and any(c in string.ascii_lowercase for c in password)
+            and any(c in string.digits for c in password)
+            and any(c in special for c in password)
+        ):
+            return password
 
 
 def cmd_set_passwords(args, manager: JupyterHubUserManager):
@@ -594,17 +587,15 @@ def cmd_set_passwords(args, manager: JupyterHubUserManager):
         print("   Or add a 'password' column to your file.")
         return
 
-    results = {"success": 0, "failed": 0}
+    force_change = not args.no_force_change
     output_data = []
-
-    print(f"\n🔄 Setting passwords for {len(users)} users...")
+    batch_entries = []
 
     for user in users:
         username = user.get("username", "").strip()
         if not username:
             continue
 
-        # Get or generate password
         password = user.get("password", "")
         if pd.isna(password) or not password:
             if args.generate:
@@ -614,24 +605,50 @@ def cmd_set_passwords(args, manager: JupyterHubUserManager):
                 continue
 
         password = str(password).strip()
+        username = manager.normalize_username(username)
+        batch_entries.append({"username": username, "password": password})
+        output_data.append({"username": username, "password": password, "force_change": force_change})
 
-        # Set password in pod
-        force_change = not args.no_force_change
-        success = set_password_in_pod(username, password, force_change, args.namespace)
+    if not batch_entries:
+        print("⚠️  No users to process.")
+        return
 
-        if success:
-            print(f"  ✅ Set password for: {username}" + (" (force change)" if force_change else ""))
-            results["success"] += 1
-            output_data.append({"username": username, "password": password, "force_change": force_change})
-        else:
-            print(f"  ❌ Failed: {username}")
-            results["failed"] += 1
+    print(f"\n🔄 Setting passwords for {len(batch_entries)} users...")
 
-    print("\n" + "=" * 50)
-    print("📊 Results:")
-    print(f"  ✅ Success: {results['success']}")
-    print(f"  ❌ Failed: {results['failed']}")
-    print("=" * 50)
+    success, result = manager.batch_set_passwords(batch_entries, force_change=force_change)
+
+    if success:
+        print(f"  ✅ Success: {result.get('success', 0)}")
+        print(f"  ❌ Failed: {result.get('failed', 0)}")
+        failed_usernames = set()
+        for entry in result.get("results", []):
+            if entry.get("status") == "failed":
+                print(f"     {entry.get('username', '?')}: {entry.get('error', 'unknown')}")
+                failed_usernames.add(entry.get("username"))
+        if failed_usernames:
+            output_data = [e for e in output_data if e["username"] not in failed_usernames]
+    else:
+        error = result.get("error", "Unknown error")
+        print(f"  ❌ Batch request failed: {error}")
+        print("  Falling back to per-user API calls...")
+
+        succeeded = 0
+        failed_count = 0
+        output_data = []
+        for entry in batch_entries:
+            ok, msg = manager.set_password(entry["username"], entry["password"], force_change=force_change)
+            if ok:
+                print(f"  ✅ Set password for: {entry['username']}" + (" (force change)" if force_change else ""))
+                succeeded += 1
+                output_data.append(
+                    {"username": entry["username"], "password": entry["password"], "force_change": force_change}
+                )
+            else:
+                print(f"  ❌ Failed: {entry['username']}: {msg}")
+                failed_count += 1
+
+        print(f"\n  ✅ Success: {succeeded}")
+        print(f"  ❌ Failed: {failed_count}")
 
     # Save output with passwords if requested
     if args.output and output_data:
@@ -949,7 +966,7 @@ Environment Variables:
     admin_parser.add_argument("--revoke", "-r", action="store_true", help="Revoke admin privileges instead of granting")
 
     # Set-passwords command
-    setpw_parser = subparsers.add_parser("set-passwords", help="Set default passwords for users (requires kubectl)")
+    setpw_parser = subparsers.add_parser("set-passwords", help="Set default passwords for users via admin API")
     setpw_parser.add_argument("file", help="CSV or Excel file with user data")
     setpw_parser.add_argument(
         "--generate", "-g", action="store_true", help="Generate passwords for users without password column"
@@ -959,9 +976,6 @@ Environment Variables:
         "--no-force-change", action="store_true", help="Do not require password change on first login"
     )
     setpw_parser.add_argument("--output", "-o", help="Output file to save usernames and passwords")
-    setpw_parser.add_argument(
-        "--namespace", "-n", default="jupyterhub", help="Kubernetes namespace (default: jupyterhub)"
-    )
 
     # Set-quota command
     setquota_parser = subparsers.add_parser("set-quota", help="Set quota for users (requires kubectl)")

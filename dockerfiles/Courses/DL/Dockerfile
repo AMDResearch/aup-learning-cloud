@@ -33,3 +33,4 @@ RUN cd /opt/workspace/DL/data/FashionMNIST && bash ./download_data.sh
 
 RUN chown -R jovyan:1000 /opt/workspace
 USER jovyan
+WORKDIR /opt/workspace/DL

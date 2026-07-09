@@ -38,6 +38,10 @@ custom:
   #   - multi: GitHub App + Local accounts
   authMode: "auto-login"
 
+  # Cluster display name (optional). Appended to "AUP Learning Cloud" in the UI.
+  # Example: "City/University" → "AUP Learning Cloud City/University"
+  clusterName: ""
+
   # Auto-create admin user on first install (optional)
   adminUser:
     enabled: false
@@ -68,6 +72,11 @@ custom:
   # Needed when kernel WebSocket connections go through a reverse proxy.
   notebook:
     allowedOrigins: []
+
+  # code-server automatically trusts the current public Hub host for Back-to-Hub
+  # links. Use this only to add host/domain entries for additional trusted sites.
+  codeServer:
+    extraTrustedDomains: []
 
   # User quota management system
   quota:

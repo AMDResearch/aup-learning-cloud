@@ -41,3 +41,142 @@
  */
 @import "tailwindcss" source(none);
 @source "../../../templates/**/*.html";
+
+@layer components {
+  .login-main-panel {
+    background: #f9fafb;
+  }
+
+  .login-card {
+    background: #ffffff;
+    border: 1px solid transparent;
+  }
+
+  .login-heading {
+    color: #1f2937;
+  }
+
+  .login-announcement {
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    color: #1e3a8a;
+  }
+
+  .login-error {
+    color: #ef4444;
+  }
+
+  .login-dev-mode {
+    color: #ea580c;
+  }
+
+  .login-github-button,
+  .login-input {
+    background: #ffffff;
+    border: 1px solid #d1d5db;
+    color: #374151;
+  }
+
+  .login-github-button:hover {
+    background: #f9fafb;
+  }
+
+  .login-helper {
+    color: #4b5563;
+  }
+
+  .login-field-label {
+    color: #374151;
+  }
+
+  .login-input {
+    color: #111827;
+  }
+
+  .login-input::placeholder {
+    color: #9ca3af;
+  }
+
+  .login-submit {
+    background: #2563eb;
+  }
+
+  .login-submit:hover {
+    background: #1d4ed8;
+  }
+
+  .login-divider .border-t {
+    border-color: #d1d5db;
+  }
+
+  .login-divider span {
+    background: #ffffff;
+    color: #6b7280;
+  }
+
+  [data-bs-theme="dark"] .login-main-panel {
+    background: #030712 !important;
+  }
+
+  [data-bs-theme="dark"] .login-card {
+    background: #111827 !important;
+    border-color: #374151 !important;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.4) !important;
+  }
+
+  [data-bs-theme="dark"] .login-heading {
+    color: #f9fafb !important;
+  }
+
+  [data-bs-theme="dark"] .login-announcement {
+    background: #172554 !important;
+    border-color: #1e40af !important;
+    color: #dbeafe !important;
+  }
+
+  [data-bs-theme="dark"] .login-error {
+    color: #fca5a5 !important;
+  }
+
+  [data-bs-theme="dark"] .login-dev-mode {
+    color: #fdba74 !important;
+  }
+
+  [data-bs-theme="dark"] .login-github-button,
+  [data-bs-theme="dark"] .login-input {
+    background: #1f2937 !important;
+    border-color: #4b5563 !important;
+    color: #f9fafb !important;
+  }
+
+  [data-bs-theme="dark"] .login-github-button:hover {
+    background: #374151 !important;
+  }
+
+  [data-bs-theme="dark"] .login-helper,
+  [data-bs-theme="dark"] .login-divider span {
+    color: #d1d5db !important;
+  }
+
+  [data-bs-theme="dark"] .login-field-label {
+    color: #e5e7eb !important;
+  }
+
+  [data-bs-theme="dark"] .login-input::placeholder {
+    color: #9ca3af !important;
+  }
+
+  [data-bs-theme="dark"] .login-divider .border-t {
+    border-color: #374151 !important;
+  }
+
+  [data-bs-theme="dark"] .login-divider span {
+    background: #111827 !important;
+  }
+
+  [data-bs-theme="dark"] .login-submit:focus,
+  [data-bs-theme="dark"] .login-github-button:focus,
+  [data-bs-theme="dark"] .login-input:focus {
+    --tw-ring-offset-color: #111827;
+  }
+}

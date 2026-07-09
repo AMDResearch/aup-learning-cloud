@@ -58,4 +58,6 @@ export interface ResourcesResponse {
   acceleratorKeys: string[];
   allowedGitProviders: string[];
   githubAppName?: string;
+  allowPersistenceChoice: boolean;
+  defaultPersistence: boolean;
 }
