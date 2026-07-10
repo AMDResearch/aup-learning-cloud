@@ -169,7 +169,7 @@ class EvalManager(object):
                 tqdm.write(f"[Eval] step={steps} | rew={eval_rews:.2f} | len={eval_lens:.1f}")
         return eval_rews, eval_lens, sucess
     
-def construct_env(env_name, render_mode=None):
+def construct_env(env_name, seed=0, render_mode=None):
     import os
     import gymnasium as gym
     
@@ -227,6 +227,7 @@ def construct_env(env_name, render_mode=None):
             suite.make(
                 task,
                 robots=robot,
+                seed=seed,
                 reward_shaping=True,
                 use_camera_obs=False,
                 use_object_obs=True,
