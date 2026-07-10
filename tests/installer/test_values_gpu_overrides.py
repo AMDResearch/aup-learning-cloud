@@ -42,13 +42,18 @@ def test_default_values_expose_supported_gpu_accelerators() -> None:
     for values_file in VALUES_FILES:
         values = _load_values(values_file)
         accelerators = values["custom"]["accelerators"]
-        metadata = values["custom"]["resources"]["metadata"]
 
         for accelerator_key in expected_keys:
             assert accelerator_key in accelerators, values_file
 
+
+def test_default_values_keep_visible_gpu_accelerators_conservative() -> None:
+    for values_file in VALUES_FILES:
+        values = _load_values(values_file)
+        metadata = values["custom"]["resources"]["metadata"]
+
         for resource_key in GPU_RESOURCE_IMAGES:
-            assert metadata[resource_key]["acceleratorKeys"] == expected_keys, values_file
+            assert metadata[resource_key]["acceleratorKeys"] == ["strix-halo"], values_file
 
 
 def test_default_values_route_gpu_resources_to_supported_image_tags() -> None:

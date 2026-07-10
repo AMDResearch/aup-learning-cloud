@@ -370,13 +370,12 @@ custom:
         description: "Basic GPU Environment"
         subDescription: "GPU Accelerated Environment"
         accelerator: "GPU"
+        # Add only accelerators that this deployment should expose to users.
+        # Image overrides for the curated accelerators are preconfigured below,
+        # so enabling another GPU family normally only requires adding its key
+        # here from custom.accelerators.
         acceleratorKeys:
-          - phx
-          - strix
           - strix-halo
-          - 9070xt
-          - r9700
-          - 9600gre
         acceleratorOverrides:
           phx:
             image: "ghcr.io/amdresearch/auplc-base:latest-gfx110x"
@@ -399,12 +398,7 @@ custom:
         subDescription: "GPU-accelerated development workspace"
         accelerator: "GPU"
         acceleratorKeys:
-          - phx
-          - strix
           - strix-halo
-          - 9070xt
-          - r9700
-          - 9600gre
         acceleratorOverrides:
           phx:
             image: "ghcr.io/amdresearch/auplc-code-gpu:latest-gfx110x"
@@ -428,12 +422,7 @@ custom:
         subDescription: "Suitable for CV experiments with GPU"
         accelerator: "GPU"
         acceleratorKeys:
-          - phx
-          - strix
           - strix-halo
-          - 9070xt
-          - r9700
-          - 9600gre
         acceleratorOverrides:
           phx:
             image: "ghcr.io/amdresearch/auplc-cv:latest-gfx110x"
@@ -455,12 +444,7 @@ custom:
         subDescription: "Suitable for DL experiments with GPU"
         accelerator: "GPU"
         acceleratorKeys:
-          - phx
-          - strix
           - strix-halo
-          - 9070xt
-          - r9700
-          - 9600gre
         acceleratorOverrides:
           phx:
             image: "ghcr.io/amdresearch/auplc-dl:latest-gfx110x"
@@ -482,12 +466,7 @@ custom:
         subDescription: "Suitable for LLM experiments with GPU"
         accelerator: "GPU"
         acceleratorKeys:
-          - phx
-          - strix
           - strix-halo
-          - 9070xt
-          - r9700
-          - 9600gre
         acceleratorOverrides:
           phx:
             image: "ghcr.io/amdresearch/auplc-llm:latest-gfx110x"
@@ -509,12 +488,7 @@ custom:
         subDescription: "Suitable for physical simulation experiments with GPU"
         accelerator: "GPU"
         acceleratorKeys:
-          - phx
-          - strix
           - strix-halo
-          - 9070xt
-          - r9700
-          - 9600gre
         acceleratorOverrides:
           phx:
             image: "ghcr.io/amdresearch/auplc-physim:latest-gfx110x"
