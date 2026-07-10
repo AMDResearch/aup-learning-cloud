@@ -122,6 +122,18 @@ def test_curated_sku_with_product_name_emits_node_selector() -> None:
     assert accelerators["strix-halo"]["nodeSelector"]["amd.com/gpu.product-name"] == "AMD_Radeon_8060S_Graphics"
 
 
+def test_9600gre_uses_curated_overlay_path() -> None:
+    cfg = GpuConfig()
+    append_product(cfg, "AMD_Radeon_RX_9600_GRE")
+    text, parsed = _render(cfg, courses=CourseSelection.default())
+    accel = parsed["custom"]["accelerators"]["9600gre"]
+    assert accel["nodeSelector"]["amd.com/gpu.product-name"] == "AMD_Radeon_RX_9600_GRE"
+    assert "displayName" not in accel
+    assert "description" not in accel
+    assert "quotaRate" not in accel
+    assert "SKU '9600gre' is not curated in values.yaml" not in text
+
+
 def test_basic_emits_filtered_teams_mapping() -> None:
     _, parsed = _render(
         _strix_halo_cfg(),
