@@ -284,7 +284,25 @@ custom:
         subDescription: "GPU Accelerated Environment"
         accelerator: "GPU"
         acceleratorKeys:
+          - phx
+          - strix
           - strix-halo
+          - 9070xt
+          - r9700
+          - 9600gre
+        acceleratorOverrides:
+          phx:
+            image: "ghcr.io/amdresearch/auplc-base:latest-gfx110x"
+          strix:
+            image: "ghcr.io/amdresearch/auplc-base:latest-gfx1150"
+          strix-halo:
+            image: "ghcr.io/amdresearch/auplc-base:latest-gfx1151"
+          9070xt:
+            image: "ghcr.io/amdresearch/auplc-base:latest-gfx120x"
+          r9700:
+            image: "ghcr.io/amdresearch/auplc-base:latest-gfx120x"
+          9600gre:
+            image: "ghcr.io/amdresearch/auplc-base:latest-gfx120x"
         allowGitClone: true
         resourceType: "notebook"
       code-gpu:
@@ -293,7 +311,25 @@ custom:
         subDescription: "GPU-accelerated development workspace"
         accelerator: "GPU"
         acceleratorKeys:
+          - phx
+          - strix
           - strix-halo
+          - 9070xt
+          - r9700
+          - 9600gre
+        acceleratorOverrides:
+          phx:
+            image: "ghcr.io/amdresearch/auplc-code-gpu:latest-gfx110x"
+          strix:
+            image: "ghcr.io/amdresearch/auplc-code-gpu:latest-gfx1150"
+          strix-halo:
+            image: "ghcr.io/amdresearch/auplc-code-gpu:latest-gfx1151"
+          9070xt:
+            image: "ghcr.io/amdresearch/auplc-code-gpu:latest-gfx120x"
+          r9700:
+            image: "ghcr.io/amdresearch/auplc-code-gpu:latest-gfx120x"
+          9600gre:
+            image: "ghcr.io/amdresearch/auplc-code-gpu:latest-gfx120x"
         allowGitClone: true
         launchMode: "code-server"
         resourceType: "browser-ide"
@@ -303,41 +339,104 @@ custom:
         subDescription: "Suitable for CV experiments with GPU"
         accelerator: "GPU"
         acceleratorKeys:
+          - phx
+          - strix
           - strix-halo
+          - 9070xt
+          - r9700
+          - 9600gre
         resourceType: "notebook"
-        # acceleratorOverrides: (optional) per-accelerator image and env overrides
-        # Use this when one course is available on multiple GPU targets with
-        # different image tags.
-        #   9070xt:
-        #     image: "ghcr.io/your-org/auplc-cv:latest-gfx120x"
-        #   r9700:
-        #     image: "ghcr.io/your-org/auplc-cv:latest-gfx120x"
-        #   strix-halo:
-        #     image: "ghcr.io/your-org/auplc-cv:latest-gfx1151"
+        acceleratorOverrides:
+          phx:
+            image: "ghcr.io/amdresearch/auplc-cv:latest-gfx110x"
+          strix:
+            image: "ghcr.io/amdresearch/auplc-cv:latest-gfx1150"
+          strix-halo:
+            image: "ghcr.io/amdresearch/auplc-cv:latest-gfx1151"
+          9070xt:
+            image: "ghcr.io/amdresearch/auplc-cv:latest-gfx120x"
+          r9700:
+            image: "ghcr.io/amdresearch/auplc-cv:latest-gfx120x"
+          9600gre:
+            image: "ghcr.io/amdresearch/auplc-cv:latest-gfx120x"
       Course-DL:
         group: "TEACHING LABS"
         description: "Deep Learning Course"
         subDescription: "Suitable for DL experiments with GPU"
         accelerator: "GPU"
         acceleratorKeys:
+          - phx
+          - strix
           - strix-halo
+          - 9070xt
+          - r9700
+          - 9600gre
         resourceType: "notebook"
+        acceleratorOverrides:
+          phx:
+            image: "ghcr.io/amdresearch/auplc-dl:latest-gfx110x"
+          strix:
+            image: "ghcr.io/amdresearch/auplc-dl:latest-gfx1150"
+          strix-halo:
+            image: "ghcr.io/amdresearch/auplc-dl:latest-gfx1151"
+          9070xt:
+            image: "ghcr.io/amdresearch/auplc-dl:latest-gfx120x"
+          r9700:
+            image: "ghcr.io/amdresearch/auplc-dl:latest-gfx120x"
+          9600gre:
+            image: "ghcr.io/amdresearch/auplc-dl:latest-gfx120x"
       Course-LLM:
         group: "TEACHING LABS"
         description: "Large Language Models Course"
         subDescription: "Suitable for LLM experiments with GPU"
         accelerator: "GPU"
         acceleratorKeys:
+          - phx
+          - strix
           - strix-halo
+          - 9070xt
+          - r9700
+          - 9600gre
         resourceType: "notebook"
+        acceleratorOverrides:
+          phx:
+            image: "ghcr.io/amdresearch/auplc-llm:latest-gfx110x"
+          strix:
+            image: "ghcr.io/amdresearch/auplc-llm:latest-gfx1150"
+          strix-halo:
+            image: "ghcr.io/amdresearch/auplc-llm:latest-gfx1151"
+          9070xt:
+            image: "ghcr.io/amdresearch/auplc-llm:latest-gfx120x"
+          r9700:
+            image: "ghcr.io/amdresearch/auplc-llm:latest-gfx120x"
+          9600gre:
+            image: "ghcr.io/amdresearch/auplc-llm:latest-gfx120x"
       Course-PhySim:
         group: "TEACHING LABS"
         description: "Genesis Physical Simulation Course"
         subDescription: "Suitable for physical simulation experiments with GPU"
         accelerator: "GPU"
         acceleratorKeys:
+          - phx
+          - strix
           - strix-halo
+          - 9070xt
+          - r9700
+          - 9600gre
         resourceType: "notebook"
+        acceleratorOverrides:
+          phx:
+            image: "ghcr.io/amdresearch/auplc-physim:latest-gfx110x"
+          strix:
+            image: "ghcr.io/amdresearch/auplc-physim:latest-gfx1150"
+          strix-halo:
+            image: "ghcr.io/amdresearch/auplc-physim:latest-gfx1151"
+          9070xt:
+            image: "ghcr.io/amdresearch/auplc-physim:latest-gfx120x"
+          r9700:
+            image: "ghcr.io/amdresearch/auplc-physim:latest-gfx120x"
+          9600gre:
+            image: "ghcr.io/amdresearch/auplc-physim:latest-gfx120x"
 
   # --------------------------------------------------------------------------
   # Team Permission Configuration
