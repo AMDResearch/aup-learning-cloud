@@ -287,6 +287,9 @@ custom:
         # this resource. Image overrides for the curated accelerators are
         # preconfigured below, so enabling one normally only requires adding its
         # key here.
+        # If you override GPU resource images with custom tags or registries,
+        # also override the matching acceleratorOverrides entries so accelerator
+        # selection does not fall back to the default latest-* images.
         acceleratorKeys:
           - strix-halo
         acceleratorOverrides:
