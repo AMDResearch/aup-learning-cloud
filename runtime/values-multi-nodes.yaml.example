@@ -189,6 +189,13 @@ custom:
         amd.com/gpu.product-name: "AMD_Radeon_AI_PRO_R9700"
       env: {}
       quotaRate: 4
+    9600gre:
+      displayName: "AMD Radeon™ RX 9600 GRE (Desktop GPU)"
+      description: "RDNA 4.0 (gfx120x) | Compute Units 32 | 12GB GDDR6"
+      nodeSelector:
+        amd.com/gpu.product-name: "AMD_Radeon_RX_9600_GRE"
+      env: {}
+      quotaRate: 4
 
   # --------------------------------------------------------------------------
   # Course Resources
