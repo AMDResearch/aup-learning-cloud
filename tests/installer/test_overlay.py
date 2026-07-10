@@ -115,6 +115,17 @@ def test_resource_images_use_primary_tag() -> None:
     assert images["Course-PhySim"] == "ghcr.io/amdresearch/auplc-physim:v1.0-gfx1151"
 
 
+def test_homogeneous_target_emits_matching_accelerator_overrides() -> None:
+    _, parsed = _render(_strix_halo_cfg(), courses=CourseSelection.default())
+    gpu_metadata = parsed["custom"]["resources"]["metadata"]["gpu"]
+    overrides = gpu_metadata["acceleratorOverrides"]
+    assert overrides == {
+        "strix-halo": {
+            "image": "ghcr.io/amdresearch/auplc-base:v1.0-gfx1151",
+        },
+    }
+
+
 def test_curated_sku_with_product_name_emits_node_selector() -> None:
     _, parsed = _render(_strix_halo_cfg(), courses=CourseSelection.default())
     accelerators = parsed["custom"]["accelerators"]
@@ -206,6 +217,7 @@ def test_mixed_targets_emit_accelerator_overrides() -> None:
     gpu_metadata = parsed["custom"]["resources"]["metadata"]["gpu"]
     assert "acceleratorOverrides" in gpu_metadata
     overrides = gpu_metadata["acceleratorOverrides"]
+    assert overrides["strix-halo"]["image"] == "ghcr.io/amdresearch/auplc-base:v1.0-gfx1151"
     assert "r9700" in overrides
     assert overrides["r9700"]["image"] == "ghcr.io/amdresearch/auplc-base:v1.0-gfx120x"
 

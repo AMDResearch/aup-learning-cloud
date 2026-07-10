@@ -122,16 +122,11 @@ def emit_overlay(
             buf.write("        acceleratorKeys:\n")
             for sku in cfg.skus:
                 buf.write(f"          - {sku.accel_key}\n")
-            if not homogeneous_target:
-                base_name = _RESOURCE_IMAGE_BASE[resource]
-                wrote_overrides = False
-                for sku in cfg.skus:
-                    if sku.gpu_target != cfg.gpu_target:
-                        if not wrote_overrides:
-                            buf.write("        acceleratorOverrides:\n")
-                            wrote_overrides = True
-                        buf.write(f"          {sku.accel_key}:\n")
-                        buf.write(f'            image: "{image_registry}/{base_name}:{image_tag}-{sku.gpu_target}"\n')
+            base_name = _RESOURCE_IMAGE_BASE[resource]
+            buf.write("        acceleratorOverrides:\n")
+            for sku in cfg.skus:
+                buf.write(f"          {sku.accel_key}:\n")
+                buf.write(f'            image: "{image_registry}/{base_name}:{image_tag}-{sku.gpu_target}"\n')
 
     # --- teams.mapping filter (only when course selection is in effect) ---
     if filter_courses:
