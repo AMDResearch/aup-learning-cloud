@@ -115,11 +115,34 @@ def test_resource_images_use_primary_tag() -> None:
     assert images["Course-PhySim"] == "ghcr.io/amdresearch/auplc-physim:v1.0-gfx1151"
 
 
+def test_homogeneous_target_emits_matching_accelerator_overrides() -> None:
+    _, parsed = _render(_strix_halo_cfg(), courses=CourseSelection.default())
+    gpu_metadata = parsed["custom"]["resources"]["metadata"]["gpu"]
+    overrides = gpu_metadata["acceleratorOverrides"]
+    assert overrides == {
+        "strix-halo": {
+            "image": "ghcr.io/amdresearch/auplc-base:v1.0-gfx1151",
+        },
+    }
+
+
 def test_curated_sku_with_product_name_emits_node_selector() -> None:
     _, parsed = _render(_strix_halo_cfg(), courses=CourseSelection.default())
     accelerators = parsed["custom"]["accelerators"]
     assert "strix-halo" in accelerators
     assert accelerators["strix-halo"]["nodeSelector"]["amd.com/gpu.product-name"] == "AMD_Radeon_8060S_Graphics"
+
+
+def test_9600gre_uses_curated_overlay_path() -> None:
+    cfg = GpuConfig()
+    append_product(cfg, "AMD_Radeon_RX_9600_GRE")
+    text, parsed = _render(cfg, courses=CourseSelection.default())
+    accel = parsed["custom"]["accelerators"]["9600gre"]
+    assert accel["nodeSelector"]["amd.com/gpu.product-name"] == "AMD_Radeon_RX_9600_GRE"
+    assert "displayName" not in accel
+    assert "description" not in accel
+    assert "quotaRate" not in accel
+    assert "SKU '9600gre' is not curated in values.yaml" not in text
 
 
 def test_basic_emits_filtered_teams_mapping() -> None:
@@ -194,6 +217,7 @@ def test_mixed_targets_emit_accelerator_overrides() -> None:
     gpu_metadata = parsed["custom"]["resources"]["metadata"]["gpu"]
     assert "acceleratorOverrides" in gpu_metadata
     overrides = gpu_metadata["acceleratorOverrides"]
+    assert overrides["strix-halo"]["image"] == "ghcr.io/amdresearch/auplc-base:v1.0-gfx1151"
     assert "r9700" in overrides
     assert overrides["r9700"]["image"] == "ghcr.io/amdresearch/auplc-base:v1.0-gfx120x"
 

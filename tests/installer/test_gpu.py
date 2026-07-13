@@ -136,8 +136,12 @@ def test_is_curated_sku(key: str) -> None:
     assert is_curated_sku(key)
 
 
+def test_is_curated_sku_true_for_9600gre() -> None:
+    assert is_curated_sku("9600gre")
+
+
 def test_is_curated_sku_false_for_unknown() -> None:
-    assert not is_curated_sku("9600gre")
+    assert not is_curated_sku("totally-unknown")
 
 
 def test_resolve_gpu_config_known_short_name() -> None:

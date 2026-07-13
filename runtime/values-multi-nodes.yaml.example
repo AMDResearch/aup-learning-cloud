@@ -189,6 +189,13 @@ custom:
         amd.com/gpu.product-name: "AMD_Radeon_AI_PRO_R9700"
       env: {}
       quotaRate: 4
+    9600gre:
+      displayName: "AMD Radeon™ RX 9600 GRE (Desktop GPU)"
+      description: "RDNA 4.0 (gfx120x) | Compute Units 32 | 12GB GDDR6"
+      nodeSelector:
+        amd.com/gpu.product-name: "AMD_Radeon_RX_9600_GRE"
+      env: {}
+      quotaRate: 4
 
   # --------------------------------------------------------------------------
   # Course Resources
@@ -276,8 +283,28 @@ custom:
         description: "Basic GPU Environment"
         subDescription: "GPU Accelerated Environment"
         accelerator: "GPU"
+        # Add only accelerators that exist in this cluster and are validated for
+        # this resource. Image overrides for the curated accelerators are
+        # preconfigured below, so enabling one normally only requires adding its
+        # key here.
+        # If you override GPU resource images with custom tags or registries,
+        # also override the matching acceleratorOverrides entries so accelerator
+        # selection does not fall back to the default latest-* images.
         acceleratorKeys:
           - strix-halo
+        acceleratorOverrides:
+          phx:
+            image: "ghcr.io/amdresearch/auplc-base:latest-gfx110x"
+          strix:
+            image: "ghcr.io/amdresearch/auplc-base:latest-gfx1150"
+          strix-halo:
+            image: "ghcr.io/amdresearch/auplc-base:latest-gfx1151"
+          9070xt:
+            image: "ghcr.io/amdresearch/auplc-base:latest-gfx120x"
+          r9700:
+            image: "ghcr.io/amdresearch/auplc-base:latest-gfx120x"
+          9600gre:
+            image: "ghcr.io/amdresearch/auplc-base:latest-gfx120x"
         allowGitClone: true
         resourceType: "notebook"
       code-gpu:
@@ -287,6 +314,19 @@ custom:
         accelerator: "GPU"
         acceleratorKeys:
           - strix-halo
+        acceleratorOverrides:
+          phx:
+            image: "ghcr.io/amdresearch/auplc-code-gpu:latest-gfx110x"
+          strix:
+            image: "ghcr.io/amdresearch/auplc-code-gpu:latest-gfx1150"
+          strix-halo:
+            image: "ghcr.io/amdresearch/auplc-code-gpu:latest-gfx1151"
+          9070xt:
+            image: "ghcr.io/amdresearch/auplc-code-gpu:latest-gfx120x"
+          r9700:
+            image: "ghcr.io/amdresearch/auplc-code-gpu:latest-gfx120x"
+          9600gre:
+            image: "ghcr.io/amdresearch/auplc-code-gpu:latest-gfx120x"
         allowGitClone: true
         launchMode: "code-server"
         resourceType: "browser-ide"
@@ -298,15 +338,19 @@ custom:
         acceleratorKeys:
           - strix-halo
         resourceType: "notebook"
-        # acceleratorOverrides: (optional) per-accelerator image and env overrides
-        # Use this when one course is available on multiple GPU targets with
-        # different image tags.
-        #   9070xt:
-        #     image: "ghcr.io/your-org/auplc-cv:latest-gfx120x"
-        #   r9700:
-        #     image: "ghcr.io/your-org/auplc-cv:latest-gfx120x"
-        #   strix-halo:
-        #     image: "ghcr.io/your-org/auplc-cv:latest-gfx1151"
+        acceleratorOverrides:
+          phx:
+            image: "ghcr.io/amdresearch/auplc-cv:latest-gfx110x"
+          strix:
+            image: "ghcr.io/amdresearch/auplc-cv:latest-gfx1150"
+          strix-halo:
+            image: "ghcr.io/amdresearch/auplc-cv:latest-gfx1151"
+          9070xt:
+            image: "ghcr.io/amdresearch/auplc-cv:latest-gfx120x"
+          r9700:
+            image: "ghcr.io/amdresearch/auplc-cv:latest-gfx120x"
+          9600gre:
+            image: "ghcr.io/amdresearch/auplc-cv:latest-gfx120x"
       Course-DL:
         group: "TEACHING LABS"
         description: "Deep Learning Course"
@@ -315,6 +359,19 @@ custom:
         acceleratorKeys:
           - strix-halo
         resourceType: "notebook"
+        acceleratorOverrides:
+          phx:
+            image: "ghcr.io/amdresearch/auplc-dl:latest-gfx110x"
+          strix:
+            image: "ghcr.io/amdresearch/auplc-dl:latest-gfx1150"
+          strix-halo:
+            image: "ghcr.io/amdresearch/auplc-dl:latest-gfx1151"
+          9070xt:
+            image: "ghcr.io/amdresearch/auplc-dl:latest-gfx120x"
+          r9700:
+            image: "ghcr.io/amdresearch/auplc-dl:latest-gfx120x"
+          9600gre:
+            image: "ghcr.io/amdresearch/auplc-dl:latest-gfx120x"
       Course-LLM:
         group: "TEACHING LABS"
         description: "Large Language Models Course"
@@ -323,6 +380,19 @@ custom:
         acceleratorKeys:
           - strix-halo
         resourceType: "notebook"
+        acceleratorOverrides:
+          phx:
+            image: "ghcr.io/amdresearch/auplc-llm:latest-gfx110x"
+          strix:
+            image: "ghcr.io/amdresearch/auplc-llm:latest-gfx1150"
+          strix-halo:
+            image: "ghcr.io/amdresearch/auplc-llm:latest-gfx1151"
+          9070xt:
+            image: "ghcr.io/amdresearch/auplc-llm:latest-gfx120x"
+          r9700:
+            image: "ghcr.io/amdresearch/auplc-llm:latest-gfx120x"
+          9600gre:
+            image: "ghcr.io/amdresearch/auplc-llm:latest-gfx120x"
       Course-PhySim:
         group: "TEACHING LABS"
         description: "Genesis Physical Simulation Course"
@@ -331,6 +401,19 @@ custom:
         acceleratorKeys:
           - strix-halo
         resourceType: "notebook"
+        acceleratorOverrides:
+          phx:
+            image: "ghcr.io/amdresearch/auplc-physim:latest-gfx110x"
+          strix:
+            image: "ghcr.io/amdresearch/auplc-physim:latest-gfx1150"
+          strix-halo:
+            image: "ghcr.io/amdresearch/auplc-physim:latest-gfx1151"
+          9070xt:
+            image: "ghcr.io/amdresearch/auplc-physim:latest-gfx120x"
+          r9700:
+            image: "ghcr.io/amdresearch/auplc-physim:latest-gfx120x"
+          9600gre:
+            image: "ghcr.io/amdresearch/auplc-physim:latest-gfx120x"
 
   # --------------------------------------------------------------------------
   # Team Permission Configuration
