@@ -344,3 +344,108 @@ def test_resolve_resources_for_user_uses_all_resources_for_auto_login():
     resources = resolve_resources_for_user(user, {"official": ["cpu"]}, "auto-login", ["cpu", "gpu", "code-cpu"])
 
     assert resources == ["cpu", "gpu", "code-cpu"]
+
+
+def _install_group_config(monkeypatch, *, app_id="app-1"):
+    """Register fake core.z2jh and core.config so the helper can read settings."""
+    z2jh_module = types.ModuleType("core.z2jh")
+    config_values = {
+        "hub.config.GitHubOAuthenticator.app_id": app_id,
+        "hub.config.GitHubOAuthenticator.installation_id": "inst-1",
+        "hub.config.GitHubOAuthenticator.private_key": "pk",
+        "hub.config.GitHubOAuthenticator.private_key_file": "",
+        "hub.config.GitHubOAuthenticator.team_sync_ttl_seconds": 3600,
+    }
+    z2jh_module.get_config = lambda key, default=None: config_values.get(key, default)
+    monkeypatch.setitem(sys.modules, "core.z2jh", z2jh_module)
+
+    config_module = types.ModuleType("core.config")
+
+    class _Teams:
+        mapping = {"aup": ["course-a"]}
+
+    class _HubConfig:
+        github_org_name = "test-org"
+        teams = _Teams()
+
+        @classmethod
+        def get(cls):
+            return cls()
+
+    config_module.HubConfig = _HubConfig
+    monkeypatch.setitem(sys.modules, "core.config", config_module)
+
+
+def test_ensure_group_membership_assigns_native_group_without_github_sync(monkeypatch):
+    assigned = []
+    synced = []
+    monkeypatch.setattr(groups, "assign_user_to_group", lambda user, name, db: assigned.append(name))
+
+    async def _fake_sync(*args, **kwargs):
+        synced.append(True)
+        return True
+
+    monkeypatch.setattr(groups, "sync_github_teams_for_user", _fake_sync)
+
+    user = DummyUser([], name="native-user")
+    asyncio.run(groups.ensure_user_group_membership(user, DummyDb()))
+
+    assert assigned == ["native-users"]
+    assert synced == []
+
+
+def test_ensure_group_membership_syncs_github_user_without_team_groups(monkeypatch):
+    _install_group_config(monkeypatch)
+    assigned = []
+    synced = []
+    monkeypatch.setattr(groups, "assign_user_to_group", lambda user, name, db: assigned.append(name))
+
+    async def _fake_sync(*args, **kwargs):
+        synced.append(True)
+        return True
+
+    monkeypatch.setattr(groups, "sync_github_teams_for_user", _fake_sync)
+
+    user = DummyUser([], name="github:octo")
+    asyncio.run(groups.ensure_user_group_membership(user, DummyDb()))
+
+    assert synced == [True]
+    assert assigned == ["github-users"]
+
+
+def test_ensure_group_membership_skips_sync_when_team_groups_exist_and_not_refreshing(monkeypatch):
+    _install_group_config(monkeypatch)
+    assigned = []
+    synced = []
+    monkeypatch.setattr(groups, "assign_user_to_group", lambda user, name, db: assigned.append(name))
+
+    async def _fake_sync(*args, **kwargs):
+        synced.append(True)
+        return True
+
+    monkeypatch.setattr(groups, "sync_github_teams_for_user", _fake_sync)
+
+    user = DummyUser([DummyGroup("aup")], name="github:octo")
+    asyncio.run(groups.ensure_user_group_membership(user, DummyDb()))
+
+    assert synced == []
+    assert assigned == ["github-users"]
+
+
+def test_ensure_group_membership_refresh_forces_sync_even_with_team_groups(monkeypatch):
+    _install_group_config(monkeypatch)
+    assigned = []
+    synced = []
+    monkeypatch.setattr(groups, "assign_user_to_group", lambda user, name, db: assigned.append(name))
+
+    async def _fake_sync(*args, **kwargs):
+        synced.append(True)
+        return True
+
+    monkeypatch.setattr(groups, "sync_github_teams_for_user", _fake_sync)
+
+    user = DummyUser([DummyGroup("aup")], name="github:octo")
+    asyncio.run(groups.ensure_user_group_membership(user, DummyDb(), refresh_github_teams=True))
+
+    assert synced == [True]
+    assert assigned == ["github-users"]

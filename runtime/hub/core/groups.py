@@ -670,6 +670,67 @@ def assign_user_to_group(
         log.info("Added user '%s' to group '%s'", user.name, group_name)
 
 
+def _user_has_github_team_groups(user: JupyterHubUser) -> bool:
+    """Return True if the user is already a member of any github-team group."""
+    assert user.orm_user is not None  # populated by JupyterHub on init
+    return any(g.properties.get("source") == GITHUB_TEAM_SOURCE for g in user.orm_user.groups)
+
+
+async def ensure_user_group_membership(
+    user: JupyterHubUser,
+    db: Session,
+    *,
+    refresh_github_teams: bool = False,
+) -> None:
+    """Ensure a user's default group and GitHub team groups are assigned.
+
+    Shared entry point for login (``Authenticator.add_user``) and spawn
+    (``Spawner.auth_state_hook``). When ``refresh_github_teams`` is False,
+    team sync is skipped for users who already have github-team groups to
+    avoid GitHub API calls on every hub restart.
+    """
+    if not user.name.startswith(GITHUB_USERNAME_PREFIX):
+        try:
+            assign_user_to_group(user, "native-users", db)
+        except Exception as e:
+            log.warning("Failed to assign native-users group for %s: %s", user.name, e)
+        return
+
+    from core import z2jh
+    from core.config import HubConfig
+
+    config = HubConfig.get()
+    app_id = z2jh.get_config("hub.config.GitHubOAuthenticator.app_id", "")
+    installation_id = z2jh.get_config("hub.config.GitHubOAuthenticator.installation_id", "")
+    private_key = z2jh.get_config("hub.config.GitHubOAuthenticator.private_key", "")
+    private_key_file = z2jh.get_config("hub.config.GitHubOAuthenticator.private_key_file", "")
+    ttl_seconds = z2jh.get_config("hub.config.GitHubOAuthenticator.team_sync_ttl_seconds", 3600)
+
+    should_sync = refresh_github_teams or not _user_has_github_team_groups(user)
+    if should_sync and app_id:
+        try:
+            synced = await sync_github_teams_for_user(
+                user,
+                app_id,
+                installation_id,
+                private_key,
+                private_key_file,
+                config.github_org_name,
+                set(config.teams.mapping.keys()),
+                db,
+                team_sync_ttl_seconds=ttl_seconds,
+            )
+            if not synced:
+                log.info("GitHub team sync unavailable for %s; keeping existing team groups", user.name)
+        except Exception as e:
+            log.warning("Failed to sync GitHub teams for %s: %s", user.name, e)
+
+    try:
+        assign_user_to_group(user, "github-users", db)
+    except Exception as e:
+        log.warning("Failed to assign github-users group for %s: %s", user.name, e)
+
+
 def get_resources_for_user(
     user: JupyterHubUser,
     team_resource_mapping: dict[str, list[str]],

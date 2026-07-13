@@ -92,6 +92,16 @@ class CustomGitHubOAuthenticator(GitHubOAuthenticator):
         help="TTL in seconds for GitHub team membership sync caches.",
     )
 
+    async def add_user(self, user):
+        """Assign group memberships at login so Home shows resources immediately."""
+        super().add_user(user)
+        try:
+            from core.groups import ensure_user_group_membership
+
+            await ensure_user_group_membership(user, user.db)
+        except Exception:
+            self.log.warning("Failed to ensure group membership for %s at login", user.name, exc_info=True)
+
     async def authenticate(self, handler, data=None):
         result = await super().authenticate(handler, data)
         if not result:

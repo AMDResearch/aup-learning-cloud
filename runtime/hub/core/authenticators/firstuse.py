@@ -55,6 +55,16 @@ class CustomFirstUseAuthenticator(FirstUseAuthenticator):
             return username
         return username.lower()
 
+    async def add_user(self, user):
+        """Assign the native default group at login so Home shows resources."""
+        super().add_user(user)
+        try:
+            from core.groups import ensure_user_group_membership
+
+            await ensure_user_group_membership(user, user.db)
+        except Exception:
+            self.log.warning("Failed to ensure group membership for %s at login", user.name, exc_info=True)
+
     def _user_exists(self, username):
         """Check if user exists in JupyterHub database."""
         if self.db is None:

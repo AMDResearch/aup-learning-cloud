@@ -75,6 +75,16 @@ class CustomMultiAuthenticator(MultiAuthenticator):
             return True
         return await authenticator.refresh_user(user, handler)
 
+    async def add_user(self, user):
+        """Delegate group assignment to the sub-authenticator that owns the user."""
+        super().add_user(user)
+        authenticator = self._find_authenticator_for_user(user)
+        if authenticator is None:
+            return
+        from jupyterhub.utils import maybe_future
+
+        await maybe_future(authenticator.add_user(user))
+
     def get_custom_html(self, base_url):
         html = []
 
