@@ -167,17 +167,6 @@ class JupyterHubUserManager:
         except requests.exceptions.RequestException as e:
             return False, {"error": str(e)}
 
-    def get_quota(self, username: str) -> int | None:
-        """Get a user's quota balance via the admin API."""
-        username = self.normalize_username(username)
-        try:
-            response = requests.get(f"{self.hub_url}/hub/admin/api/quota/{username}", headers=self.headers)
-            if response.status_code == 200:
-                return response.json().get("balance")
-            return None
-        except requests.exceptions.RequestException:
-            return None
-
     def set_quota(self, username: str, amount: int) -> tuple[bool, str]:
         """Set a user's quota balance via the admin API."""
         return self._modify_quota(username, {"action": "set", "amount": amount})
@@ -221,7 +210,7 @@ class JupyterHubUserManager:
                 print(f"❌ Connection failed with status {response.status_code}")
                 print(f"Response: {response.text}")
                 return False
-        except Exception as e:
+        except requests.exceptions.RequestException as e:
             print(f"❌ Connection error: {e}")
             return False
 
@@ -382,7 +371,7 @@ class JupyterHubUserManager:
             if response.status_code == 200:
                 return response.json()
             return None
-        except Exception:
+        except requests.exceptions.RequestException:
             return None
 
     def set_admin(self, username: str, admin: bool = True) -> bool:
@@ -714,6 +703,14 @@ def cmd_set_quota(args, manager: JupyterHubUserManager):
     else:
         users = [{"username": u} for u in args.users]
 
+    if not users:
+        print("❌ No users specified")
+        return
+
+    if not args.file and args.amount is None:
+        print("❌ --amount is required when specifying usernames (or use --file with a quota column)")
+        return
+
     results = {"success": 0, "failed": 0}
     output_data = []
 
@@ -727,7 +724,14 @@ def cmd_set_quota(args, manager: JupyterHubUserManager):
             print(f"  ⚠️  Skipping {username}: no quota amount specified")
             continue
 
-        success, message = manager.set_quota(username, int(amount))
+        try:
+            amount = int(amount)
+        except (TypeError, ValueError):
+            print(f"  ⚠️  Skipping {username}: invalid quota amount '{amount}'")
+            results["failed"] += 1
+            continue
+
+        success, message = manager.set_quota(username, amount)
 
         if success:
             print(f"  ✅ Set {amount} quota for: {username}")
@@ -753,6 +757,10 @@ def cmd_add_quota(args, manager: JupyterHubUserManager):
         usernames = [u["username"] for u in users if u.get("username")]
     else:
         usernames = args.users
+
+    if not usernames:
+        print("❌ No users specified")
+        return
 
     print(f"\n🔄 Adding {amount} quota to {len(usernames)} users...")
 
