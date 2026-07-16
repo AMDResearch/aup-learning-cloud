@@ -21,6 +21,7 @@ import { useState, useEffect } from 'react';
 import { Modal, Button, Form, Alert, Spinner, InputGroup } from 'react-bootstrap';
 import type { User } from '@auplc/shared';
 import * as api from '@auplc/shared';
+import { generateStrongPassword, getPasswordError, isStrongPassword, PASSWORD_RULES } from '@auplc/shared';
 
 interface Props {
   show: boolean;
@@ -44,40 +45,15 @@ export function SetPasswordModal({ show, user, onHide }: Props) {
     }
   }, [show]);
 
-  const PASSWORD_RULES = [
-    { test: (pw: string) => pw.length >= 8, label: 'At least 8 characters' },
-    { test: (pw: string) => /[A-Z]/.test(pw), label: 'One uppercase letter' },
-    { test: (pw: string) => /[a-z]/.test(pw), label: 'One lowercase letter' },
-    { test: (pw: string) => /\d/.test(pw), label: 'One digit' },
-    { test: (pw: string) => /[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?`~]/.test(pw), label: 'One special character' },
-  ];
-
-  const allRulesPassed = password.length > 0 && PASSWORD_RULES.every(r => r.test(password));
-
-  const generateRandomPassword = () => {
-    const upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
-    const lower = 'abcdefghijkmnpqrstuvwxyz';
-    const digits = '23456789';
-    const special = '!@#$%^&*_+-=';
-    const all = upper + lower + digits + special;
-    let result = '';
-    result += upper[Math.floor(Math.random() * upper.length)];
-    result += lower[Math.floor(Math.random() * lower.length)];
-    result += digits[Math.floor(Math.random() * digits.length)];
-    result += special[Math.floor(Math.random() * special.length)];
-    for (let i = 4; i < 16; i++) {
-      result += all[Math.floor(Math.random() * all.length)];
-    }
-    return result.split('').sort(() => Math.random() - 0.5).join('');
-  };
+  const allRulesPassed = isStrongPassword(password);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
 
-    const failedRule = PASSWORD_RULES.find(r => !r.test(password));
-    if (failedRule) {
-      setError(`Password requirement not met: ${failedRule.label}`);
+    const passwordError = getPasswordError(password);
+    if (passwordError) {
+      setError(passwordError);
       return;
     }
 
@@ -152,7 +128,7 @@ export function SetPasswordModal({ show, user, onHide }: Props) {
                 />
                 <Button
                   variant="outline-secondary"
-                  onClick={() => setPassword(generateRandomPassword())}
+                  onClick={() => setPassword(generateStrongPassword())}
                 >
                   Generate
                 </Button>
