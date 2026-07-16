@@ -26,6 +26,7 @@ Uses SQLAlchemy to store passwords in the shared JupyterHub database.
 
 from __future__ import annotations
 
+import secrets
 from concurrent.futures import ThreadPoolExecutor
 
 import bcrypt
@@ -80,6 +81,10 @@ class CustomFirstUseAuthenticator(FirstUseAuthenticator):
             session.close()
 
     MIN_PASSWORD_LENGTH = 8
+    UPPERCASE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ"
+    LOWERCASE_CHARS = "abcdefghijkmnpqrstuvwxyz"
+    DIGIT_CHARS = "23456789"
+    SPECIAL_CHARS = "!@#$%^&*_+-="
 
     @staticmethod
     def _check_password_strength(password: str) -> str | None:
@@ -98,6 +103,21 @@ class CustomFirstUseAuthenticator(FirstUseAuthenticator):
         if not re.search(r"[!@#$%^&*()_+\-=\[\]{};':\"\\|,.<>/?`~]", password):
             return "Password must contain at least one special character"
         return None
+
+    @classmethod
+    def generate_password(cls, length: int = 16) -> str:
+        """Generate a password that satisfies the native password policy."""
+        password_length = max(length, cls.MIN_PASSWORD_LENGTH)
+        all_chars = cls.UPPERCASE_CHARS + cls.LOWERCASE_CHARS + cls.DIGIT_CHARS + cls.SPECIAL_CHARS
+        chars = [
+            secrets.choice(cls.UPPERCASE_CHARS),
+            secrets.choice(cls.LOWERCASE_CHARS),
+            secrets.choice(cls.DIGIT_CHARS),
+            secrets.choice(cls.SPECIAL_CHARS),
+        ]
+        chars.extend(secrets.choice(all_chars) for _ in range(password_length - len(chars)))
+        secrets.SystemRandom().shuffle(chars)
+        return "".join(chars)
 
     def _validate_password(self, password):
         """Validate password meets strength requirements."""
