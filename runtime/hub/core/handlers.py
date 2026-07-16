@@ -407,7 +407,7 @@ class AdminUIHandler(BaseHandler):
     """Serve the custom admin UI (React app)."""
 
     @web.authenticated
-    async def get(self):
+    async def get(self, *args):
         """Serve admin UI page."""
         assert self.current_user is not None
         if not self.current_user.admin:
@@ -1640,6 +1640,7 @@ def get_handlers() -> list[tuple[str, type]]:
         # Admin UI
         (r"/admin/users", AdminUIHandler),
         (r"/admin/groups", AdminUIHandler),
+        (r"/admin/groups/(.*)", AdminUIHandler),
         (r"/admin/api/set-password", AdminAPISetPasswordHandler),
         (r"/admin/api/batch-set-password", AdminAPIBatchSetPasswordHandler),
         (r"/admin/api/generate-password", AdminAPIGeneratePasswordHandler),
