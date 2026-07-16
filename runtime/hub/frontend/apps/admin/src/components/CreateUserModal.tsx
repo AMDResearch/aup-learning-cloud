@@ -38,6 +38,12 @@ interface CreatedUser {
   error?: string;
 }
 
+const parseBoundedInteger = (value: string, fallback: number, min: number, max: number) => {
+  const parsed = Number.parseInt(value, 10);
+  if (Number.isNaN(parsed)) return fallback;
+  return Math.min(Math.max(parsed, min), max);
+};
+
 export function CreateUserModal({ show, onHide, onSuccess, quotaEnabled = false, defaultQuota = 0 }: Props) {
   const [usernames, setUsernames] = useState('');
   const [password, setPassword] = useState('');
@@ -281,10 +287,7 @@ export function CreateUserModal({ show, onHide, onSuccess, quotaEnabled = false,
                       min={0}
                       max={9999}
                       value={startNum}
-                      onChange={(e) => {
-                        const value = parseInt(e.target.value);
-                        setStartNum(Number.isNaN(value) ? 1 : value);
-                      }}
+                      onChange={(e) => setStartNum(parseBoundedInteger(e.target.value, 1, 0, 9999))}
                       style={{ width: 70 }}
                     />
                   </InputGroup>
@@ -295,11 +298,9 @@ export function CreateUserModal({ show, onHide, onSuccess, quotaEnabled = false,
                     <Form.Control
                       type="number"
                       min={0}
+                      max={6}
                       value={suffixWidth}
-                      onChange={(e) => {
-                        const value = parseInt(e.target.value);
-                        setSuffixWidth(Number.isNaN(value) ? 0 : value);
-                      }}
+                      onChange={(e) => setSuffixWidth(parseBoundedInteger(e.target.value, 0, 0, 6))}
                       style={{ width: 60 }}
                     />
                   </InputGroup>
@@ -312,7 +313,7 @@ export function CreateUserModal({ show, onHide, onSuccess, quotaEnabled = false,
                       min={1}
                       max={1000}
                       value={count}
-                      onChange={(e) => setCount(parseInt(e.target.value) || 1)}
+                      onChange={(e) => setCount(parseBoundedInteger(e.target.value, 1, 1, 1000))}
                       style={{ width: 70 }}
                     />
                   </InputGroup>
