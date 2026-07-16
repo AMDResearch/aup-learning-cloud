@@ -19,3 +19,4 @@
 
 export * from "./xsrf.js";
 export * from "./user.js";
+export * from "./password.js";
