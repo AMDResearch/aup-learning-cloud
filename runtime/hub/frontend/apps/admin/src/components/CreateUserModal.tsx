@@ -38,6 +38,12 @@ interface CreatedUser {
   error?: string;
 }
 
+const parseBoundedInteger = (value: string, fallback: number, min: number, max: number) => {
+  const parsed = Number.parseInt(value, 10);
+  if (Number.isNaN(parsed)) return fallback;
+  return Math.min(Math.max(parsed, min), max);
+};
+
 export function CreateUserModal({ show, onHide, onSuccess, quotaEnabled = false, defaultQuota = 0 }: Props) {
   const [usernames, setUsernames] = useState('');
   const [password, setPassword] = useState('');
@@ -51,13 +57,17 @@ export function CreateUserModal({ show, onHide, onSuccess, quotaEnabled = false,
   const [prefix, setPrefix] = useState('');
   const [count, setCount] = useState(10);
   const [startNum, setStartNum] = useState(1);
+  const [suffixWidth, setSuffixWidth] = useState(2);
   const [quotaValue, setQuotaValue] = useState(String(defaultQuota || 0));
 
   const handleGenerateNames = useCallback(() => {
     if (!prefix.trim()) return;
-    const names = Array.from({ length: count }, (_, i) => `${prefix.trim()}${startNum + i}`);
+    const names = Array.from({ length: count }, (_, i) => {
+      const suffix = String(startNum + i);
+      return `${prefix.trim()}${suffixWidth > 0 ? suffix.padStart(suffixWidth, '0') : suffix}`;
+    });
     setUsernames(names.join('\n'));
-  }, [prefix, count, startNum]);
+  }, [prefix, count, startNum, suffixWidth]);
 
   const generateRandomPassword = () => {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
@@ -214,6 +224,7 @@ export function CreateUserModal({ show, onHide, onSuccess, quotaEnabled = false,
     setPrefix('');
     setCount(10);
     setStartNum(1);
+    setSuffixWidth(2);
     setQuotaValue(String(defaultQuota || 0));
     onHide();
   };
@@ -276,8 +287,21 @@ export function CreateUserModal({ show, onHide, onSuccess, quotaEnabled = false,
                       min={0}
                       max={9999}
                       value={startNum}
-                      onChange={(e) => setStartNum(parseInt(e.target.value) || 1)}
+                      onChange={(e) => setStartNum(parseBoundedInteger(e.target.value, 1, 0, 9999))}
                       style={{ width: 70 }}
+                    />
+                  </InputGroup>
+                </Col>
+                <Col xs="auto">
+                  <InputGroup size="sm">
+                    <InputGroup.Text>digits (0 = none)</InputGroup.Text>
+                    <Form.Control
+                      type="number"
+                      min={0}
+                      max={6}
+                      value={suffixWidth}
+                      onChange={(e) => setSuffixWidth(parseBoundedInteger(e.target.value, 0, 0, 6))}
+                      style={{ width: 60 }}
                     />
                   </InputGroup>
                 </Col>
@@ -289,7 +313,7 @@ export function CreateUserModal({ show, onHide, onSuccess, quotaEnabled = false,
                       min={1}
                       max={1000}
                       value={count}
-                      onChange={(e) => setCount(parseInt(e.target.value) || 1)}
+                      onChange={(e) => setCount(parseBoundedInteger(e.target.value, 1, 1, 1000))}
                       style={{ width: 70 }}
                     />
                   </InputGroup>
