@@ -21,6 +21,8 @@ import type {
   User,
   UsersResponse,
   Group,
+  ProvisionUsersRequest,
+  ProvisionUsersResponse,
   SetPasswordRequest,
 } from "../types/user.js";
 import type { HubInfo } from "../types/hub.js";
@@ -99,6 +101,15 @@ export async function createUsers(
   return apiRequest<User[]>("/users", {
     method: "POST",
     body: JSON.stringify({ usernames, admin }),
+  });
+}
+
+export async function provisionUsers(
+  data: ProvisionUsersRequest
+): Promise<ProvisionUsersResponse> {
+  return adminApiRequest<ProvisionUsersResponse>("/provision-users", {
+    method: "POST",
+    body: JSON.stringify(data),
   });
 }
 

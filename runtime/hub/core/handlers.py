@@ -37,6 +37,7 @@ from urllib.parse import urlencode, urlparse, urlunparse
 
 from jupyterhub.apihandlers import APIHandler
 from jupyterhub.handlers import BaseHandler
+from jupyterhub.scopes import needs_scope
 from multiauthenticator import MultiAuthenticator
 from pydantic import ValidationError
 from tornado import web
@@ -77,6 +78,9 @@ _handler_config: dict[str, Any] = {
 }
 
 
+MAX_NATIVE_PASSWORD_BYTES = 72
+
+
 def _serialize_dismissed_at(value: datetime | None) -> str | None:
     """Serialize onboarding dismissal timestamps for API responses."""
     if value is None:
@@ -111,6 +115,17 @@ def _dismiss_onboarding(username: str) -> str:
         state.dismissed_at = dismissed_at
 
     return _serialize_dismissed_at(dismissed_at) or ""
+
+
+def _find_firstuse_authenticator(authenticator: Any) -> CustomFirstUseAuthenticator | None:
+    """Find the native password authenticator inside the active auth stack."""
+    if isinstance(authenticator, CustomFirstUseAuthenticator):
+        return authenticator
+    if isinstance(authenticator, MultiAuthenticator):
+        for candidate in authenticator._authenticators:
+            if isinstance(candidate, CustomFirstUseAuthenticator):
+                return candidate
+    return None
 
 
 def configure_handlers(
@@ -491,12 +506,7 @@ class AdminAPIGeneratePasswordHandler(APIHandler):
             self.set_header("Content-Type", "application/json")
             return self.finish(json.dumps({"error": "Admin access required"}))
 
-        import secrets
-        import string
-
-        chars = string.ascii_letters + string.digits
-        chars = chars.replace("l", "").replace("I", "").replace("O", "").replace("0", "")
-        password = "".join(secrets.choice(chars) for _ in range(16))
+        password = CustomFirstUseAuthenticator.generate_password()
 
         self.set_header("Content-Type", "application/json")
         self.finish(json.dumps({"password": password}))
@@ -568,6 +578,235 @@ class AdminAPIBatchSetPasswordHandler(APIHandler):
             self.finish(json.dumps({"error": "Invalid JSON"}))
         except Exception as e:
             self.log.error(f"Failed to batch set passwords: {e}")
+            self.set_status(500)
+            self.set_header("Content-Type", "application/json")
+            self.finish(json.dumps({"error": "Internal server error"}))
+
+
+class AdminAPIProvisionUsersHandler(APIHandler):
+    """Best-effort native user provisioning for the admin UI."""
+
+    @web.authenticated
+    @needs_scope("admin:users")
+    async def post(self):
+        """Create users, set initial passwords, and optionally set quota.
+
+        This endpoint deliberately provides per-user best-effort consistency, not
+        crash-safe transactional atomicity. JupyterHub users, native password
+        rows, and quota rows are owned by different modules and are not updated
+        under one database transaction in this deployment. A rare orphan or
+        partially provisioned user is acceptable operationally and can be fixed
+        by an administrator; the goal here is to keep orchestration and failure
+        semantics out of the frontend while preventing predictable password
+        policy failures before creating users.
+        """
+        assert self.current_user is not None
+        if not self.current_user.admin:
+            self.set_status(403)
+            self.set_header("Content-Type", "application/json")
+            return self.finish(json.dumps({"error": "Admin access required"}))
+
+        try:
+            data = json.loads(self.request.body.decode("utf-8"))
+            if not isinstance(data, dict):
+                self.set_status(400)
+                self.set_header("Content-Type", "application/json")
+                return self.finish(json.dumps({"error": "Request body must be a JSON object"}))
+
+            users = data.get("users", [])
+            admin = data.get("admin", False)
+            force_change = data.get("force_change", True)
+            quota = data.get("quota")
+
+            if not users or not isinstance(users, list):
+                self.set_status(400)
+                self.set_header("Content-Type", "application/json")
+                return self.finish(json.dumps({"error": "users array is required"}))
+            if len(users) > 1000:
+                self.set_status(400)
+                self.set_header("Content-Type", "application/json")
+                return self.finish(json.dumps({"error": "Maximum 1000 users per batch"}))
+            if quota is not None and not isinstance(quota, dict):
+                self.set_status(400)
+                self.set_header("Content-Type", "application/json")
+                return self.finish(json.dumps({"error": "quota must be an object"}))
+            if not isinstance(admin, bool) or not isinstance(force_change, bool):
+                self.set_status(400)
+                self.set_header("Content-Type", "application/json")
+                return self.finish(json.dumps({"error": "admin and force_change must be booleans"}))
+
+            firstuse_auth = _find_firstuse_authenticator(self.authenticator)
+            if not firstuse_auth:
+                self.set_status(500)
+                self.set_header("Content-Type", "application/json")
+                return self.finish(json.dumps({"error": "Password management not available"}))
+
+            results = {"success": 0, "failed": 0, "skipped": 0, "results": []}
+            quota_manager = get_quota_manager() if quota else None
+            quota_amount = 0
+            quota_unlimited = False
+            if quota:
+                raw_unlimited = quota.get("unlimited", False)
+                raw_amount = quota.get("amount", 0)
+                if not isinstance(raw_unlimited, bool):
+                    self.set_status(400)
+                    self.set_header("Content-Type", "application/json")
+                    return self.finish(json.dumps({"error": "quota.unlimited must be a boolean"}))
+                if isinstance(raw_amount, bool) or not isinstance(raw_amount, int) or raw_amount < 0:
+                    self.set_status(400)
+                    self.set_header("Content-Type", "application/json")
+                    return self.finish(json.dumps({"error": "quota.amount must be a non-negative integer"}))
+                quota_unlimited = raw_unlimited
+                quota_amount = raw_amount
+
+            from jupyterhub.roles import assign_default_roles
+            from jupyterhub.utils import maybe_future
+
+            for entry in users:
+                if not isinstance(entry, dict) or "username" not in entry or "password" not in entry:
+                    results["failed"] += 1
+                    results["results"].append(
+                        {
+                            "username": "",
+                            "requested_username": "",
+                            "status": "failed",
+                            "created": False,
+                            "password_set": False,
+                            "quota_set": False,
+                            "error": "Each entry must have username and password",
+                        }
+                    )
+                    continue
+
+                raw_username = entry.get("username")
+                password = entry.get("password")
+                requested_username = raw_username.strip() if isinstance(raw_username, str) else ""
+                username = firstuse_auth.normalize_username(requested_username)
+
+                result = {
+                    "username": username,
+                    "requested_username": requested_username,
+                    "status": "failed",
+                    "created": False,
+                    "password_set": False,
+                    "quota_set": False,
+                }
+
+                if not username:
+                    result["error"] = "Username is required"
+                    results["failed"] += 1
+                    results["results"].append(result)
+                    continue
+                if self.find_user(username) is not None:
+                    result["status"] = "existed"
+                    results["skipped"] += 1
+                    results["results"].append(result)
+                    continue
+                if not isinstance(password, str):
+                    result["error"] = "Password must be a string"
+                    results["failed"] += 1
+                    results["results"].append(result)
+                    continue
+                if len(password.encode("utf-8")) > MAX_NATIVE_PASSWORD_BYTES:
+                    result["error"] = f"Password must be at most {MAX_NATIVE_PASSWORD_BYTES} bytes"
+                    results["failed"] += 1
+                    results["results"].append(result)
+                    continue
+                if username.startswith(GITHUB_USERNAME_PREFIX):
+                    result["error"] = "Cannot provision native password for GitHub users"
+                    results["failed"] += 1
+                    results["results"].append(result)
+                    continue
+                if not self.authenticator.validate_username(username):
+                    result["error"] = f"Invalid username: {username}"
+                    results["failed"] += 1
+                    results["results"].append(result)
+                    continue
+
+                strength_error = firstuse_auth._check_password_strength(password)
+                if strength_error:
+                    result["error"] = strength_error
+                    results["failed"] += 1
+                    results["results"].append(result)
+                    continue
+
+                try:
+                    loop = asyncio.get_event_loop()
+                    password_result = await loop.run_in_executor(
+                        None,
+                        lambda username=username, password=password: firstuse_auth.set_password(
+                            username, password, force_change=force_change
+                        ),
+                    )
+                    if not password_result.startswith("Password set for"):
+                        result["error"] = password_result
+                        results["failed"] += 1
+                        results["results"].append(result)
+                        continue
+                    result["password_set"] = True
+                except Exception as e:
+                    self.log.error(
+                        "Failed to set password during provisioning for %s: %s",
+                        username,
+                        e.__class__.__name__,
+                    )
+                    result["error"] = "Failed to set password"
+                    results["failed"] += 1
+                    results["results"].append(result)
+                    continue
+
+                user = None
+                try:
+                    user = self.user_from_username(username)
+                    if admin:
+                        user.admin = True
+                    assign_default_roles(self.db, entity=user)
+                    self.db.commit()
+                    await maybe_future(self.authenticator.add_user(user))
+                    result["created"] = True
+                except Exception as e:
+                    self.log.error("Failed to create user during provisioning: %s", username, exc_info=True)
+                    if user is not None:
+                        try:
+                            self.users.delete(user)
+                        except Exception:
+                            self.log.warning("Failed to remove partially registered user: %s", username, exc_info=True)
+                    result["error"] = f"Password stored, but failed to create user: {e}"
+                    results["failed"] += 1
+                    results["results"].append(result)
+                    continue
+
+                if quota_manager and (quota_unlimited or quota_amount > 0):
+                    try:
+                        if quota_unlimited:
+                            quota_manager.set_unlimited(username, True, self.current_user.name)
+                        else:
+                            quota_manager.set_balance(username, quota_amount, self.current_user.name)
+                        result["quota_set"] = True
+                    except Exception:
+                        self.log.error("Failed to set quota during provisioning: %s", username, exc_info=True)
+                        result["error"] = "User and password created, but quota setup failed"
+                        results["failed"] += 1
+                        results["results"].append(result)
+                        continue
+
+                result["status"] = "success"
+                results["success"] += 1
+                results["results"].append(result)
+
+            self.set_header("Content-Type", "application/json")
+            self.finish(json.dumps(results))
+
+        except json.JSONDecodeError:
+            self.set_status(400)
+            self.set_header("Content-Type", "application/json")
+            self.finish(json.dumps({"error": "Invalid JSON"}))
+        except (TypeError, ValueError):
+            self.set_status(400)
+            self.set_header("Content-Type", "application/json")
+            self.finish(json.dumps({"error": "Invalid quota value"}))
+        except Exception:
+            self.log.error("Failed to provision users", exc_info=True)
             self.set_status(500)
             self.set_header("Content-Type", "application/json")
             self.finish(json.dumps({"error": "Internal server error"}))
@@ -1643,6 +1882,7 @@ def get_handlers() -> list[tuple[str, type]]:
         (r"/admin/api/set-password", AdminAPISetPasswordHandler),
         (r"/admin/api/batch-set-password", AdminAPIBatchSetPasswordHandler),
         (r"/admin/api/generate-password", AdminAPIGeneratePasswordHandler),
+        (r"/admin/api/provision-users", AdminAPIProvisionUsersHandler),
         # Group management API
         (r"/admin/api/groups/?", GroupsAPIHandler),
         (r"/admin/api/groups/sync/?", GroupSyncAPIHandler),
@@ -1694,6 +1934,7 @@ __all__ = [
     "AdminUIHandler",
     "AdminAPISetPasswordHandler",
     "AdminAPIGeneratePasswordHandler",
+    "AdminAPIProvisionUsersHandler",
     # Quota handlers
     "QuotaAPIHandler",
     "QuotaBatchAPIHandler",
