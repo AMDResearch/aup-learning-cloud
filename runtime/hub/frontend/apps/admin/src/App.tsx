@@ -20,6 +20,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { UserList } from './pages/UserList';
 import { GroupList } from './pages/GroupList';
+import { GroupDetail } from './pages/GroupDetail';
 import { Dashboard } from './pages/Dashboard';
 import { NavBar } from './components/NavBar';
 import { useState, useEffect } from 'react';
@@ -43,6 +44,7 @@ function App() {
         <Routes>
           <Route path="/users" element={<UserList />} />
           <Route path="/groups" element={<GroupList />} />
+          <Route path="/groups/:groupName" element={<GroupDetail />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/" element={<Navigate to="/users" replace />} />
         </Routes>
