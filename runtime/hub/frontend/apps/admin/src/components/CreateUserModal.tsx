@@ -51,13 +51,17 @@ export function CreateUserModal({ show, onHide, onSuccess, quotaEnabled = false,
   const [prefix, setPrefix] = useState('');
   const [count, setCount] = useState(10);
   const [startNum, setStartNum] = useState(1);
+  const [suffixWidth, setSuffixWidth] = useState(2);
   const [quotaValue, setQuotaValue] = useState(String(defaultQuota || 0));
 
   const handleGenerateNames = useCallback(() => {
     if (!prefix.trim()) return;
-    const names = Array.from({ length: count }, (_, i) => `${prefix.trim()}${startNum + i}`);
+    const names = Array.from({ length: count }, (_, i) => {
+      const suffix = String(startNum + i);
+      return `${prefix.trim()}${suffixWidth > 0 ? suffix.padStart(suffixWidth, '0') : suffix}`;
+    });
     setUsernames(names.join('\n'));
-  }, [prefix, count, startNum]);
+  }, [prefix, count, startNum, suffixWidth]);
 
   const generateRandomPassword = () => {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
@@ -214,6 +218,7 @@ export function CreateUserModal({ show, onHide, onSuccess, quotaEnabled = false,
     setPrefix('');
     setCount(10);
     setStartNum(1);
+    setSuffixWidth(2);
     setQuotaValue(String(defaultQuota || 0));
     onHide();
   };
@@ -276,8 +281,26 @@ export function CreateUserModal({ show, onHide, onSuccess, quotaEnabled = false,
                       min={0}
                       max={9999}
                       value={startNum}
-                      onChange={(e) => setStartNum(parseInt(e.target.value) || 1)}
+                      onChange={(e) => {
+                        const value = parseInt(e.target.value);
+                        setStartNum(Number.isNaN(value) ? 1 : value);
+                      }}
                       style={{ width: 70 }}
+                    />
+                  </InputGroup>
+                </Col>
+                <Col xs="auto">
+                  <InputGroup size="sm">
+                    <InputGroup.Text>digits (0 = none)</InputGroup.Text>
+                    <Form.Control
+                      type="number"
+                      min={0}
+                      value={suffixWidth}
+                      onChange={(e) => {
+                        const value = parseInt(e.target.value);
+                        setSuffixWidth(Number.isNaN(value) ? 0 : value);
+                      }}
+                      style={{ width: 60 }}
                     />
                   </InputGroup>
                 </Col>
