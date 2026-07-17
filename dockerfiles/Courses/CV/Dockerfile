@@ -21,6 +21,16 @@
 ARG BASE_IMAGE=ghcr.io/amdresearch/auplc-base:latest
 FROM ${BASE_IMAGE}
 
+# Pre-install CV course dependencies so students don't have to `pip install`
+# them at runtime. ultralytics pulls in the GUI build of opencv-python, which
+# requires libGL.so.1 -- absent in this headless image, so `import cv2` (and
+# therefore `from ultralytics import YOLO`) fails with
+# "ImportError: libGL.so.1: cannot open shared object file".
+# Swap it for opencv-python-headless, which needs no system OpenGL libraries.
+RUN pip install --no-cache-dir ultralytics && \
+    pip uninstall -y opencv-python opencv-contrib-python && \
+    pip install --no-cache-dir opencv-python-headless
+
 # Copy related rocm notebooks into the docker
 RUN mkdir -p /opt/workspace/CV
 COPY ./course_data /opt/workspace/CV
