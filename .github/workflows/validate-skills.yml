@@ -1,0 +1,106 @@
+name: validate-skills
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "skills/**"
+      - "templates/**"
+      - ".claude-plugin/**"
+      - ".cursor-plugin/**"
+      - ".github/scripts/**"
+      - ".github/workflows/validate-skills.yml"
+  pull_request:
+    paths:
+      - "skills/**"
+      - "templates/**"
+      - ".claude-plugin/**"
+      - ".cursor-plugin/**"
+      - ".github/scripts/**"
+      - ".github/workflows/validate-skills.yml"
+  workflow_dispatch:
+
+# Least privilege: these jobs only read the repo to validate skills/manifests.
+permissions:
+  contents: read
+
+jobs:
+  # Enumerate the skills so the validation job can fan out over them with a
+  # matrix. Running each skill in its own job (with fail-fast disabled) means
+  # one broken skill shows up as a single red check instead of failing the
+  # whole suite and hiding the status of every other skill.
+  discover-skills:
+    name: Discover skills
+    runs-on: ubuntu-latest
+    outputs:
+      skills: ${{ steps.discover.outputs.skills }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: List skills
+        id: discover
+        run: echo "skills=$(uv run .github/scripts/validate_skills.py --list)" >> "$GITHUB_OUTPUT"
+
+  validate-skill:
+    name: Validate skill
+    needs: discover-skills
+    runs-on: ubuntu-latest
+    strategy:
+      # Don't cancel the other skills when one fails; we want to see every
+      # skill's status in a single run.
+      fail-fast: false
+      matrix:
+        skill: ${{ fromJson(needs.discover-skills.outputs.skills) }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Validate skill
+        run: uv run .github/scripts/validate_skills.py --skill "${{ matrix.skill }}"
+
+  # Repo-wide checks that aren't tied to a single skill: the generated plugin
+  # manifests.
+  validate-manifests:
+    name: Validate plugin manifests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Validate marketplace manifest
+        run: uv run .github/scripts/validate_skills.py --marketplace-only
+
+      - name: Validate generated Cursor manifest
+        run: uv run .github/scripts/generate_cursor_marketplace.py --check
+
+  # Single gate that aggregates the per-skill matrix and the repo-wide manifest
+  # checks. Branch protection can require just this one check: it only passes
+  # when every skill validated and the manifest job succeeded. Because matrix
+  # jobs always succeed individually under `fail-fast: false`, we inspect the
+  # job results explicitly rather than relying on `needs` short-circuiting.
+  validate:
+    name: Validate skills and plugin manifests
+    needs: [validate-skill, validate-manifests]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify all validation jobs passed
+        run: |
+          echo "validate-skill result: ${{ needs.validate-skill.result }}"
+          echo "validate-manifests result: ${{ needs.validate-manifests.result }}"
+          if [ "${{ needs.validate-skill.result }}" != "success" ] || \
+             [ "${{ needs.validate-manifests.result }}" != "success" ]; then
+            echo "One or more validation jobs failed." >&2
+            exit 1
+          fi
+          echo "All skill and manifest validations passed."

@@ -151,6 +151,7 @@ Current environments are set up as `RESOURCE_IMAGES` in `runtime/chart/files/hub
 - [User Quota System](docs/jupyterhub/quota-system.md) - Resource usage tracking and quota management
 - [GitHub OAuth Setup](docs/jupyterhub/How_to_Setup_GitHub_OAuth.md) - OAuth configuration
 - [Maintenance Manual](docs/user-manual/aup-remote-lab-user-manual-admin-new.md) - Operations guide
+- [AUP Learning Cloud Skills](README-SKILL.md) - Agent Skills for deploying and maintaining AUP Learning Cloud
 
 ## Contributing
 

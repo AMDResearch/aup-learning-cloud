@@ -1,0 +1,18 @@
+{
+  "name": "auplc-skills",
+  "owner": {
+    "name": "AMD Research"
+  },
+  "description": "Agent Skills for deploying and maintaining AUP Learning Cloud.",
+  "metadata": {
+    "description": "Agent Skills for deploying and maintaining AUP Learning Cloud.",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "auplc",
+      "source": "./",
+      "description": "Skills for deploying and maintaining AUP Learning Cloud: install, deploy, configure courses, build images, upgrade, troubleshoot, configure auth, manage users and quota, monitor, expose with TLS/storage, configure repo cloning, and author courses for the multi-node JupyterHub-on-k3s platform for AMD GPUs."
+    }
+  ]
+}
