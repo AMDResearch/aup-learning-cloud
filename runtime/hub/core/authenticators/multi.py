@@ -26,16 +26,54 @@ Provides support for multiple authentication methods on a single login page.
 from __future__ import annotations
 
 from multiauthenticator import MultiAuthenticator
+from multiauthenticator.multiauthenticator import PREFIX_SEPARATOR
 
 LOCAL_ACCOUNT_PREFIX = "LocalAccount"
 
 
 class CustomMultiAuthenticator(MultiAuthenticator):
     """
-    MultiAuthenticator with custom login page HTML.
+    MultiAuthenticator with custom login page HTML and refresh_user support.
 
     Provides a unified login page supporting multiple authentication methods.
+    Delegates ``refresh_user`` to the sub-authenticator that owns the user.
     """
+
+    def validate_username(self, username):
+        """Reject usernames that could spoof a prefixed authenticator."""
+        if not super().validate_username(username):
+            return False
+        # Only local (unprefixed) accounts need checking.
+        # Prefixed names like "github:user" are created by the OAuth flow
+        # itself and are legitimate; block them only when they don't come
+        # from a registered prefix.
+        if PREFIX_SEPARATOR in username:
+            known_prefixes = [a.username_prefix for a in self._authenticators if a.username_prefix]
+            if not any(username.startswith(p) for p in known_prefixes):
+                return False
+        return True
+
+    def _find_authenticator_for_user(self, user):
+        """Return the sub-authenticator whose prefix matches *user.name*.
+
+        Authenticators with a non-empty prefix are checked first so that
+        a catch-all empty prefix (local accounts) never shadows others.
+        """
+        fallback = None
+        for authenticator in self._authenticators:
+            prefix = authenticator.username_prefix
+            if not prefix:
+                fallback = authenticator
+                continue
+            if user.name.startswith(prefix):
+                return authenticator
+        return fallback
+
+    async def refresh_user(self, user, handler=None):
+        authenticator = self._find_authenticator_for_user(user)
+        if authenticator is None:
+            return True
+        return await authenticator.refresh_user(user, handler)
 
     def get_custom_html(self, base_url):
         html = []

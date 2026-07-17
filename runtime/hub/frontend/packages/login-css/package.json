@@ -1,0 +1,15 @@
+{
+  "name": "@auplc/login-css",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Same-origin Tailwind CSS bundle for the JupyterHub login Jinja template",
+  "scripts": {
+    "build": "tailwindcss --input src/login.css --output dist/login.min.css --minify",
+    "dev": "tailwindcss --input src/login.css --output dist/login.css --watch"
+  },
+  "devDependencies": {
+    "tailwindcss": "catalog:",
+    "@tailwindcss/cli": "catalog:"
+  }
+}

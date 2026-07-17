@@ -72,6 +72,7 @@ class UsageSession(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     username: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     resource_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    accelerator_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
     start_time: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     end_time: Mapped[datetime | None] = mapped_column(DateTime)
     duration_minutes: Mapped[int | None] = mapped_column(Integer)

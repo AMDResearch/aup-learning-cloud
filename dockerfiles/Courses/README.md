@@ -27,3 +27,34 @@ CV and DL are recommended to run on dGPUs, and LLM is suggested to run on 395.
 
 Upon buiding, the scripts inside each folder will copy related notebooks from `projects`, download neccessary files,
 and build then push the image.
+
+Course images remain notebook and course focused. Browser coding environments are built from the separate generic code image line in `dockerfiles/Code/` as `auplc-code-cpu` and `auplc-code-gpu`; do not create per-course VS Code image variants such as course-specific code-server images.
+
+Use the existing course target for course notebook images:
+
+```bash
+make -C dockerfiles courses GPU_TARGET=gfx1151
+```
+
+Course resources should land on their course content. Set each official course
+resource's `custom.resources.metadata.<resource>.defaultPath` to the same path as
+the image `WORKDIR`, such as `/opt/workspace/CV`. The official image contract
+verifier checks that metadata and image contract:
+
+```bash
+make -C dockerfiles verify-resource-contracts
+```
+
+The verifier is for official images. At runtime, the Hub doesn't check whether a
+configured path exists in arbitrary or custom images. Custom course images must
+create their configured landing path themselves. For non-official images that
+already declare the desired Docker `WORKDIR`, omit `defaultPath` to preserve the
+image's initial folder.
+
+Use the code targets only for generic code-server environments:
+
+```bash
+make -C dockerfiles code-cpu
+make -C dockerfiles code-gpu GPU_TARGET=gfx1151
+make -C dockerfiles code
+```

@@ -1,0 +1,7 @@
+#!/bin/bash
+IFACE=$(ip route show default 2>/dev/null | awk '/default/ {print $5}' | head -1)
+if [ -z "$IFACE" ]; then
+  IFACE=$(ls /sys/class/net/ | grep -v lo | head -1)
+fi
+MAC=$(cat /sys/class/net/$IFACE/address | tr ':' '-')
+hostnamectl set-hostname "agent-${MAC}"

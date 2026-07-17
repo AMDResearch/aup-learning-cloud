@@ -1,0 +1,104 @@
+# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+---
+- name: Setup PXE Controller for diskless k3s agent boot
+  hosts: pxe_controller
+  become: true
+  gather_facts: true
+  vars:
+    # ── config.env equivalent ──────────────────────────────
+    pxe_rootfs_force_rebuild: false
+    # Network -- REQUIRED: fill in for your environment. Left empty on purpose;
+    # the role asserts each of these is set and fails fast if any is empty.
+    # pxe_network_interface: service-machine NIC that serves PXE (e.g. "enp1s0")
+    # pxe_subnet:            node subnet in CIDR form (e.g. "192.168.1.0/24")
+    # pxe_gateway:           default gateway for the node subnet (informational)
+    # pxe_dns_servers:       comma-separated DNS servers for the rootfs
+    pxe_network_interface: ""
+    pxe_subnet: ""
+    pxe_gateway: ""
+    pxe_dns_servers: ""
+
+    # PXE Controller -- REQUIRED: set to your service host IP. Left empty;
+    # the role fails fast if it is not set.
+    pxe_controller_ip: ""
+
+    # k3s Server Nodes -- REQUIRED: set to your k3s server node IP(s). Left
+    # empty; the role fails fast if the list is empty. If you have multiple k3s
+    # server nodes, add each one to the list, e.g.
+    #   pxe_k3s_server_ips:
+    #     - "<K3S_SERVER_IP_1>"
+    #     - "<K3S_SERVER_IP_2>"
+    pxe_k3s_server_ips: []
+
+    # k3s version baked into the agent rootfs. Keep this in sync with the k3s
+    # server (k3s_version in deploy/ansible/inventory.yml). Agents must be the
+    # same version as, or older than, the server.
+    pxe_k3s_version: "v1.32.3+k3s1"
+
+    # Root password for PXE-booted machines (leave empty to disable password login)
+    # Use ansible-vault: ansible-vault encrypt_string 'MyPass' --name 'pxe_rootfs_password'
+    pxe_rootfs_password: ""
+
+    # SSH keys for rootfs login (at least one required -- fill in before running).
+    # The playbook fails fast if this list is empty.
+    pxe_rootfs_authorized_keys: []
+    #   - "ssh-ed25519 AAAA... you@workstation"
+    #   - "ssh-rsa AAAA... ci@runner"
+
+    # Apache HTTP port for serving the k3s token / kubeconfig to PXE agents.
+    # Defaults to 8080 (not 80) so the PXE controller can live on a k3s node
+    # without clashing with k3s Traefik / ServiceLB, which owns host port 80/443.
+    pxe_web_port: 8080
+
+    # APT Mirror
+    pxe_apt_mirror: "http://tw.archive.ubuntu.com/ubuntu"
+
+    pxe_rootfs_packages:
+      - linux-image-oem-6.14
+      - linux-headers-oem-6.14
+      - initramfs-tools
+      - linux-firmware
+      - nfs-common
+      - overlayroot
+      - openssh-server
+      - curl
+      - net-tools
+      - iproute2
+      - systemd-sysv
+      - sudo
+      - kmod
+      - pciutils
+      - e2fsprogs
+      - dkms
+      - build-essential
+      - libatomic1
+      - libquadmath0
+
+    pxe_initramfs_modules:
+      - nfs
+      - nfsv3
+      - overlay
+      - amdgpu
+
+    pxe_k3s_data_dir: "/var/lib/rancher/k3s"
+
+  roles:
+    - role: pxe_controller

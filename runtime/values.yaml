@@ -1,5 +1,4 @@
 # Modifications Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
-# Portions of this file consist of AI-generated content.
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
@@ -39,62 +38,243 @@
 #   - Adjust CPU/memory/GPU settings in requirements
 #
 # Add a new accelerator:
-#   - Add new GPU/NPU node type in custom.accelerators
+#   - Add a new accelerator entry in custom.accelerators
 # ============================================================================
 
 custom:
   # Authentication mode
   # - auto-login: No credentials required, auto-login as 'student' (for single-node dev)
   # - dummy: Accept any username/password (for testing)
-  # - github: GitHub OAuth authentication
-  # - multi: GitHub OAuth + Local accounts
+  # - github: GitHub App authentication
+  # - multi: GitHub App + Local accounts
   authMode: "auto-login"
+
+  # GitHub organization name for team-based resource access
+  # Required for github and multi auth modes.
+  # githubOrgName: "<YOUR-ORG-NAME>"
+
+  # Cluster display name (optional). Appended to "AUP Learning Cloud" in the UI.
+  # Example: "City/University" → "AUP Learning Cloud City/University"
+  clusterName: ""
 
   # Auto-create admin user on first install
   adminUser:
     enabled: false
 
   # ============================================================================
+  # Notifications
+  # ============================================================================
+  # Helm value changes require `helm upgrade` and a Hub restart or rollout before
+  # users see updated notices.
+  # Notice id and version identify configured notices only; they do not control
+  # backend dismissal state. Collapsed or expanded topbar state is client-only
+  # and is not persisted.
+  # Markdown and HTML are sanitized by the Hub backend before rendering. Only a
+  # small backend allowlist of tags, attributes, and URL schemes is rendered.
+  notifications:
+    enabled: true
+    topbar:
+      # Disabled by default so the standard install renders no urgent topbar notice.
+      # Set enabled=true and fill id/title/message to show a stateless, collapsible banner.
+      enabled: false
+      id: ""
+      version: "1"
+      severity: warning
+      dismissible: true
+      title: ""
+      message: ""
+      format: markdown
+      link:
+        label: ""
+        url: ""
+      # Optional ISO-8601 strings; invalid time windows are handled by backend validation.
+      startsAt: ""
+      endsAt: ""
+    homepage:
+      enabled: true
+      # When no structured homepage items are active, fall back to the legacy
+      # hub.extraFiles.announcement.txt content mounted as static/announcement.txt.
+      legacyAnnouncementFallback: true
+      items:
+        - id: platform-welcome
+          version: "1"
+          severity: info
+          eyebrow: "Platform"
+          title: "Welcome to AUP Learning Cloud"
+          message: "Get started with GPU-accelerated Jupyter notebooks powered by AMD ROCm technology."
+          format: markdown
+          startsAt: ""
+          endsAt: ""
+          link:
+            label: ""
+            url: ""
+  # ============================================================================
+  # Allowed Origins
+  # ============================================================================
+  # hub.allowedOrigins      — sets Access-Control-Allow-Origin on Hub HTTP responses
+  # notebook.allowedOrigins — injected into each notebook server's startup args
+  #                           (--ServerApp.allow_origin_pat); handles kernel WebSocket
+  #
+  # Use ["*"] to allow all, or list specific domains.
+  # Example: ["https://mylab.example.com", "https://alt.example.org"]
+  hub:
+    allowedOrigins: ["*"]
+  notebook:
+    allowedOrigins: ["*"]
+
+  # ============================================================================
+  # Code Server
+  # ============================================================================
+  # code-server automatically trusts the current public Hub host for outgoing
+  # Back-to-Hub links. Add extra domains only when a deployment intentionally
+  # opens trusted links to additional sites. Use host/domain entries, not URLs.
+  codeServer:
+    extraTrustedDomains: []
+
+  # ============================================================================
+  # Public Scheme (TLS termination outside the chart)
+  # ============================================================================
+  # When TLS is terminated by an external component (Cloudflare tunnel,
+  # external ingress / HTTPS load balancer) instead of the chart's autohttps
+  # (proxy.https.enabled=true), set publicScheme="https" so the Hub marks the
+  # _xsrf cookie Secure. Leave unset (or "http") for the default single-node
+  # HTTP install — browsers reject Secure cookies received over HTTP and
+  # POST /hub/spawn would 403 (see AUPPM-64).
+  # security:
+  #   publicScheme: "https"
+
+  # ============================================================================
+  # Git Repository Cloning
+  # ============================================================================
+  # Users can provide an optional Git URL on the spawn form. The repo is cloned
+  # into ~/home at container start via an init container.
+  #
+  # Private repo access, two independent mechanisms that can be used together:
+  #
+  #   1. GitHub App (githubAppName)
+  #      For GitHub App users. Users authorize per-repo read-only access via
+  #      the GitHub App UI. Token is obtained automatically from OAuth session.
+  #      Requires migrating from OAuth App to GitHub App. See below.
+  #
+  #   2. Default Access Token (defaultAccessToken)
+  #      A bot/service-account PAT configured by the admin. Applied transparently
+  #      to all users (including auto-login). Useful for single-node / classroom
+  #      setups where everyone needs access to the same private repos without
+  #      any GitHub login.
+  #
+  # Token priority: OAuth token (GitHub App) > defaultAccessToken > none (public only)
+  #
+  # Migrating from OAuth App to GitHub App:
+  #   1. Create a GitHub App (org settings → Developer settings → GitHub Apps)
+  #      - Callback URL: same as current oauth_callback_url
+  #      - Permissions: Contents (read-only), Metadata (read-only), Members (read-only)
+  #      - Webhook: off
+  #   2. Update hub.config.GitHubOAuthenticator:
+  #        app_id: "<GitHub App App ID>"
+  #        installation_id: "<GitHub App Installation ID>"  # Optional; leave blank to auto-discover from the org installation
+  #        private_key_file: "<Mounted GitHub App private key path>"
+  #        client_id: "<GitHub App Client ID>"
+  #        client_secret: "<GitHub App Client Secret>"
+  #        scope: []  # GitHub App does not use OAuth scopes
+  #   3. Set githubAppName below to the App slug
+  #   4. helm upgrade. Existing user sessions continue, new logins use GitHub App.
+  #
+  gitClone:
+    # -- Private Repo Access --
+    # GitHub App slug (e.g. "aup-learning-cloud")
+    # Enables repo picker UI and automatic OAuth token usage for private repos.
+    # Only effective for GitHub App users; auto-login/native users are unaffected.
+    githubAppName: ""
+    # Default access token for private repos (e.g. a bot/service account PAT).
+    # Works for ALL auth modes including auto-login — users don't need to know
+    # the token exists. Helm auto-creates a K8s Secret from this value.
+    # Scope the PAT to read-only on specific repos to limit blast radius.
+    defaultAccessToken: ""
+    # -- Clone Behavior --
+    # Allowed Git hosting providers (subdomains are also accepted)
+    allowedProviders:
+      - github.com
+      - gitlab.com
+      - bitbucket.org
+    # Maximum time (seconds) allowed for a clone or fetch operation
+    maxCloneTimeout: 300
+    # Container image used for git operations (must include git and sh)
+    initContainerImage: "alpine/git:2.47.2"
+    # -- Persistence Behavior --
+    # Cloned repositories are kept by default after the user's server stops.
+    # Set to false to restore ephemeral cleanup as the admin-enforced default.
+    #
+    # Behavior table:
+    #   defaultPersistence | allowPersistenceChoice | Result
+    #   true               | false                  | Repos are kept after stop.
+    #   false              | false                  | Repos are cleaned when the server stops.
+    #   true or false      | true                   | Users choose on the spawn form. The default checkbox state follows defaultPersistence.
+    #   any                | any                    | Existing unmanaged same-name directories are preserved and not overwritten.
+    #
+    # Persistent mode reuses an existing compatible clone. It does not auto-pull,
+    # reset, or sync repository contents after the first successful clone.
+    defaultPersistence: true
+    # Allow users to choose whether cloned repositories persist in the spawn form.
+    # When false, the admin default is enforced without exposing a user toggle.
+    allowPersistenceChoice: false
+
+  # ============================================================================
   # Accelerator Configuration
   # ============================================================================
-  # Define available GPU/NPU node types for course selection interface
+  # Define available accelerator entries for the course selection interface.
+  # Each accelerator uses Kubernetes node selectors such as
+  # amd.com/gpu.product-name to target compatible nodes.
   accelerators:
     phx:
       displayName: "AMD Radeon™ 780M (Phoenix Point iGPU)"
       description: "RDNA 3.0 (gfx1103) | Compute Units 12 | 4GB LPDDR5X"
       nodeSelector:
-        node-type: phx
+        amd.com/gpu.product-name: "AMD_Radeon_780M_Graphics"
       env:
+        # Phoenix hw (gfx1100/1101/1102/1103) shares a single gfx110x ROCm
+        # build — we do not ship dedicated images for gfx1102/gfx1103 — so
+        # force every Phoenix GPU to report as gfx1100 at runtime so it
+        # accepts the shared kernels.
         HSA_OVERRIDE_GFX_VERSION: "11.0.0"
       quotaRate: 2
     strix:
       displayName: "AMD Radeon™ 890M (Strix Point iGPU)"
       description: "RDNA 3.5 (gfx1150) | Compute Units 16 | 4GB LPDDR5X"
       nodeSelector:
-        node-type: strix
+        amd.com/gpu.product-name: "AMD_Radeon_890M_Graphics"
       env: {}
       quotaRate: 2
     strix-halo:
       displayName: "AMD Radeon™ 8060S (Strix Halo iGPU)"
       description: "RDNA 3.5 (gfx1151) | Compute Units 40 | 64GB LPDDR5X"
       nodeSelector:
-        node-type: strix-halo
+        amd.com/gpu.product-name: "AMD_Radeon_8060S_Graphics"
       env: {}
       quotaRate: 3
-    dgpu:
-      displayName: "AMD Radeon™ 9070XT (Desktop GPU)"
+    9070xt:
+      displayName: "AMD Radeon™ RX 9070 XT (Desktop GPU)"
       description: "RDNA 4.0 (gfx1201) | Compute Units 64 | 16GB GDDR6"
+      # ROCm labeller publishes the marketing name with spaces → '_', so the
+      # expected value on a real node is AMD_Radeon_RX_9070_XT. If your fleet
+      # uses the older AMD_Radeon_9070XT normalisation, change it here.
       nodeSelector:
-        node-type: dgpu
+        amd.com/gpu.product-name: "AMD_Radeon_RX_9070_XT"
       env: {}
       quotaRate: 4
-    strix-npu:
-      displayName: "AMD XDNA2 (Strix Point NPU)"
-      description: "AMD XDNA2 NPU with AI acceleration"
+    r9700:
+      displayName: "AMD Radeon™ AI Pro R9700 (Workstation GPU)"
+      description: "RDNA 4.0 (gfx1201) | Compute Units 64 | 32GB GDDR6"
       nodeSelector:
-        type: strix
+        amd.com/gpu.product-name: "AMD_Radeon_AI_PRO_R9700"
       env: {}
-      quotaRate: 1
+      quotaRate: 4
+    9600gre:
+      displayName: "AMD Radeon™ RX 9600 GRE (Desktop GPU)"
+      description: "RDNA 4.0 (gfx120x) | Compute Units 32 | 12GB GDDR6"
+      nodeSelector:
+        amd.com/gpu.product-name: "AMD_Radeon_RX_9600_GRE"
+      env: {}
+      quotaRate: 4
 
   # ============================================================================
   # Course Resources Configuration
@@ -104,42 +284,229 @@ custom:
     # Add new course images here
     images:
       cpu: "ghcr.io/amdresearch/auplc-default:latest"
+      gpu: "ghcr.io/amdresearch/auplc-base:latest"
+      code-cpu: "ghcr.io/amdresearch/auplc-code-cpu:latest"
+      code-gpu: "ghcr.io/amdresearch/auplc-code-gpu:latest"
       Course-CV: "ghcr.io/amdresearch/auplc-cv:latest"
       Course-DL: "ghcr.io/amdresearch/auplc-dl:latest"
       Course-LLM: "ghcr.io/amdresearch/auplc-llm:latest"
       Course-PhySim: "ghcr.io/amdresearch/auplc-physim:latest"
+      # Custom-URL: "ghcr.io/amdresearch/auplc-cv:latest"
+
+    # Optional spawn/Home group display order. Groups not listed here are shown
+    # after these entries using the default alphabetical order.
+    # Example: move DEVELOPMENT before COURSE by listing DEVELOPMENT first.
+    groupOrder:
+      - TEACHING LABS
+      - DEVELOPMENT ENVIRONMENTS
+      - TUTORIALS
+      - CUSTOM REPOS
 
     # Course Resource Requirements
     # Define resource quotas for each course
     requirements:
       cpu:
-        cpu: "2"
-        memory: "4Gi"
-        memory_limit: "6Gi"
+        cpu: "0"
+        memory: "0Gi"
+      code-cpu:
+        cpu: "0"
+        memory: "0Gi"
+      gpu:
+        cpu: "0"
+        memory: "0Gi"
+        amd.com/gpu: "1"
+      code-gpu:
+        cpu: "0"
+        memory: "0Gi"
+        amd.com/gpu: "1"
       Course-CV:
-        cpu: "4"
-        memory: "16Gi"
-        memory_limit: "24Gi"
+        cpu: "0"
+        memory: "0Gi"
         amd.com/gpu: "1"
       Course-DL:
-        cpu: "4"
-        memory: "16Gi"
-        memory_limit: "24Gi"
+        cpu: "0"
+        memory: "0Gi"
         amd.com/gpu: "1"
       Course-LLM:
-        cpu: "4"
-        memory: "16Gi"
-        memory_limit: "24Gi"
+        cpu: "0"
+        memory: "0Gi"
         amd.com/gpu: "1"
       Course-PhySim:
-        cpu: "4"
-        memory: "16Gi"
-        memory_limit: "24Gi"
+        cpu: "0"
+        memory: "0Gi"
         amd.com/gpu: "1"
       none:
-        cpu: "2"
-        memory: "4Gi"
-        memory_limit: "6Gi"
+        cpu: "0"
+        memory: "0Gi"
+
+    # Course Metadata (for spawn UI)
+    # Defines display information for each course
+    # defaultPath is an optional Hub launch-directory override, not the image
+    # WORKDIR. Custom Repo launches always open the cloned repository first. If
+    # defaultPath is omitted or null, Hub does not force a landing path and the
+    # image/application default normally follows the image WORKDIR.
+    metadata:
+      cpu:
+        group: "CUSTOM REPOS"
+        description: "Basic Python Environment"
+        subDescription: "CPU Only Environment"
+        accelerator: ""
+        acceleratorKeys: []
+        allowGitClone: true
+        defaultPath: "/home/jovyan"
+        resourceType: "notebook"
+      code-cpu:
+        group: "DEVELOPMENT ENVIRONMENTS"
+        description: "VSCode Server CPU"
+        subDescription: "CPU-only development workspace"
+        accelerator: ""
+        acceleratorKeys: []
+        allowGitClone: true
+        launchMode: "code-server"
+        defaultPath: "/home/jovyan"
+        resourceType: "browser-ide"
+      gpu:
+        group: "CUSTOM REPOS"
+        description: "Basic GPU Environment"
+        subDescription: "GPU Accelerated Environment"
+        accelerator: "GPU"
+        # Add only accelerators that this deployment should expose to users.
+        # Image overrides for the curated accelerators are preconfigured below,
+        # so enabling another GPU family normally only requires adding its key
+        # here from custom.accelerators.
+        # If you override GPU resource images with custom tags or registries,
+        # also override the matching acceleratorOverrides entries so accelerator
+        # selection does not fall back to the default latest-* images.
+        acceleratorKeys:
+          - strix-halo
+        acceleratorOverrides:
+          phx:
+            image: "ghcr.io/amdresearch/auplc-base:latest-gfx110x"
+          strix:
+            image: "ghcr.io/amdresearch/auplc-base:latest-gfx1150"
+          strix-halo:
+            image: "ghcr.io/amdresearch/auplc-base:latest-gfx1151"
+          9070xt:
+            image: "ghcr.io/amdresearch/auplc-base:latest-gfx120x"
+          r9700:
+            image: "ghcr.io/amdresearch/auplc-base:latest-gfx120x"
+          9600gre:
+            image: "ghcr.io/amdresearch/auplc-base:latest-gfx120x"
+        allowGitClone: true
+        defaultPath: "/home/jovyan"
+        resourceType: "notebook"
+      code-gpu:
+        group: "DEVELOPMENT ENVIRONMENTS"
+        description: "VSCode Server GPU"
+        subDescription: "GPU-accelerated development workspace"
+        accelerator: "GPU"
+        acceleratorKeys:
+          - strix-halo
+        acceleratorOverrides:
+          phx:
+            image: "ghcr.io/amdresearch/auplc-code-gpu:latest-gfx110x"
+          strix:
+            image: "ghcr.io/amdresearch/auplc-code-gpu:latest-gfx1150"
+          strix-halo:
+            image: "ghcr.io/amdresearch/auplc-code-gpu:latest-gfx1151"
+          9070xt:
+            image: "ghcr.io/amdresearch/auplc-code-gpu:latest-gfx120x"
+          r9700:
+            image: "ghcr.io/amdresearch/auplc-code-gpu:latest-gfx120x"
+          9600gre:
+            image: "ghcr.io/amdresearch/auplc-code-gpu:latest-gfx120x"
+        allowGitClone: true
+        launchMode: "code-server"
+        defaultPath: "/home/jovyan"
+        resourceType: "browser-ide"
+      Course-CV:
+        group: "TEACHING LABS"
+        description: "Computer Vision Course"
+        subDescription: "Suitable for CV experiments with GPU"
+        accelerator: "GPU"
+        acceleratorKeys:
+          - strix-halo
+        acceleratorOverrides:
+          phx:
+            image: "ghcr.io/amdresearch/auplc-cv:latest-gfx110x"
+          strix:
+            image: "ghcr.io/amdresearch/auplc-cv:latest-gfx1150"
+          strix-halo:
+            image: "ghcr.io/amdresearch/auplc-cv:latest-gfx1151"
+          9070xt:
+            image: "ghcr.io/amdresearch/auplc-cv:latest-gfx120x"
+          r9700:
+            image: "ghcr.io/amdresearch/auplc-cv:latest-gfx120x"
+          9600gre:
+            image: "ghcr.io/amdresearch/auplc-cv:latest-gfx120x"
+        defaultPath: "/opt/workspace/CV"
+        resourceType: "notebook"
+      Course-DL:
+        group: "TEACHING LABS"
+        description: "Deep Learning Course"
+        subDescription: "Suitable for DL experiments with GPU"
+        accelerator: "GPU"
+        acceleratorKeys:
+          - strix-halo
+        acceleratorOverrides:
+          phx:
+            image: "ghcr.io/amdresearch/auplc-dl:latest-gfx110x"
+          strix:
+            image: "ghcr.io/amdresearch/auplc-dl:latest-gfx1150"
+          strix-halo:
+            image: "ghcr.io/amdresearch/auplc-dl:latest-gfx1151"
+          9070xt:
+            image: "ghcr.io/amdresearch/auplc-dl:latest-gfx120x"
+          r9700:
+            image: "ghcr.io/amdresearch/auplc-dl:latest-gfx120x"
+          9600gre:
+            image: "ghcr.io/amdresearch/auplc-dl:latest-gfx120x"
+        defaultPath: "/opt/workspace/DL"
+        resourceType: "notebook"
+      Course-LLM:
+        group: "TEACHING LABS"
+        description: "Large Language Models Course"
+        subDescription: "Suitable for LLM experiments with GPU"
+        accelerator: "GPU"
+        acceleratorKeys:
+          - strix-halo
+        acceleratorOverrides:
+          phx:
+            image: "ghcr.io/amdresearch/auplc-llm:latest-gfx110x"
+          strix:
+            image: "ghcr.io/amdresearch/auplc-llm:latest-gfx1150"
+          strix-halo:
+            image: "ghcr.io/amdresearch/auplc-llm:latest-gfx1151"
+          9070xt:
+            image: "ghcr.io/amdresearch/auplc-llm:latest-gfx120x"
+          r9700:
+            image: "ghcr.io/amdresearch/auplc-llm:latest-gfx120x"
+          9600gre:
+            image: "ghcr.io/amdresearch/auplc-llm:latest-gfx120x"
+        defaultPath: "/opt/workspace/LLM"
+        resourceType: "notebook"
+      Course-PhySim:
+        group: "TEACHING LABS"
+        description: "Genesis Physical Simulation Course"
+        subDescription: "Suitable for physical simulation experiments with GPU"
+        accelerator: "GPU"
+        acceleratorKeys:
+          - strix-halo
+        acceleratorOverrides:
+          phx:
+            image: "ghcr.io/amdresearch/auplc-physim:latest-gfx110x"
+          strix:
+            image: "ghcr.io/amdresearch/auplc-physim:latest-gfx1150"
+          strix-halo:
+            image: "ghcr.io/amdresearch/auplc-physim:latest-gfx1151"
+          9070xt:
+            image: "ghcr.io/amdresearch/auplc-physim:latest-gfx120x"
+          r9700:
+            image: "ghcr.io/amdresearch/auplc-physim:latest-gfx120x"
+          9600gre:
+            image: "ghcr.io/amdresearch/auplc-physim:latest-gfx120x"
+        defaultPath: "/opt/workspace/PhySim"
+        resourceType: "notebook"
 
   # ============================================================================
   # Team Permission Configuration
@@ -149,13 +516,18 @@ custom:
     mapping:
       cpu:
         - cpu
+        - code-cpu
       gpu:
+        - code-gpu
         - Course-CV
         - Course-DL
         - Course-LLM
         - Course-PhySim
       official:
         - cpu
+        - gpu
+        - code-cpu
+        - code-gpu
         - Course-CV
         - Course-DL
         - Course-LLM
@@ -166,9 +538,23 @@ custom:
         - Course-LLM
         - Course-PhySim
       native-users:
+        - code-cpu
+        - code-gpu
         - Course-CV
         - Course-DL
         - Course-LLM
+        - Course-PhySim
+        - cpu
+        - gpu
+      github-users:
+        - cpu
+        - gpu
+        - code-cpu
+        - code-gpu
+        - Course-CV
+        - Course-DL
+        - Course-LLM
+        - Course-PhySim
 
   # ============================================================================
   # Quota Management
@@ -195,6 +581,11 @@ hub:
     tag: latest
     pullPolicy: IfNotPresent
 
+  # Optional Jinja template variables for Hub-rendered pages.
+  # Example:
+  #   login_github_helper_text: "Optional helper text shown under the GitHub sign-in button."
+  templateVars: {}
+
   # Additional Python config snippets (executed after core/setup.py)
   # Example:
   #   myconfig: |
@@ -203,46 +594,89 @@ hub:
 
   extraFiles:
     announcement.txt:
-    # If you want to edit the notice on login.html, change here.
+      # Replace stringData with login announcement content to show a notice on login.html.
+      # The default HTML comment is intentionally hidden by the login template.
       mountPath: /usr/local/share/jupyterhub/static/announcement.txt
       stringData: |
-          <div class="announcement-box" style="padding: 1em; border: 1px solid #ccc; border-radius: 6px; background-color: #f8f8f8;">
-          <h3>Welcome to AUP Learning Cloud!</h3>
-          <p>This is a <strong>dynamic announcement</strong>.</p>
-          <p>My location is on <code>runtime/values.yaml</code></p>
-          <p>You can edit this via <strong>ConfigMap</strong> without rebuilding the image.</p>
-          </div>
+        <!-- Add login announcement content here. -->
 
   config:
     # ---- Hub Core ----
-    # JupyterHub:
-      # Enable JupyterHub REST API
-      # API Documentation: https://jupyterhub.readthedocs.io/en/stable/reference/rest-api.html
-      # api_tokens:
-      #   Configure API tokens for external services
-      #   Format: token: username
-      #   It's recommended to use environment variables or secrets to manage tokens
-      #   Example: "your-secure-api-token-here": "admin-service"
+    JupyterHub:
+      # Always show Home page first, even when a server is already running.
+      # Users can access their running server via the "My Server" button on Home.
+      redirect_to_server: false
 
     Authenticator:
       allow_all: true
 
-    # ---- GitHub OAuth ----
+    # ---- GitHub App ----
     GitHubOAuthenticator:
       oauth_callback_url: "https://<Your.domain>/hub/github/oauth_callback"
+      app_id: ""
+      # Optional; leave blank when the GitHub App is installed on the org and the Hub can auto-discover it.
+      installation_id: ""
+      private_key_file: ""
+      private_key: ""
+      team_sync_ttl_seconds: 3600
       client_id: "TODO"
       client_secret: "TODO"
       allowed_organizations:
         - <YOUR-ORG-NAME>
-      scope:
-        - read:user
-        - read:org
+      # Use [] for GitHub App credentials. For legacy OAuth Apps, use
+      # read:user and read:org instead.
+      scope: []
 
     # ---- KubeSpawner Prepuller Setup ----
     KubeSpawner:
       image_pull_policy: IfNotPresent
 
+monitoring:
+  enabled: false
+  namespace: monitoring
+  releaseLabel: monitoring
+
+  hubMetrics:
+    enabled: false
+    # Keep JupyterHub's read:metrics scope requirement enabled by default.
+    # Set this to true only for isolated development environments where
+    # /hub/metrics is guaranteed not to be reachable through a public proxy,
+    # NodePort, LoadBalancer, or Ingress.
+    allowUnauthenticatedScrape: false
+    serviceAnnotations:
+      # Annotation-based Prometheus scraping cannot attach the JupyterHub token.
+      # Prefer the ServiceMonitor below for authenticated in-cluster scraping.
+      enabled: false
+
+  serviceMonitor:
+    enabled: false
+    interval: 15s
+    authorization:
+      enabled: true
+      type: Bearer
+      hubServiceName: prometheus-metrics
+      secret:
+        create: true
+        name: ""
+        key: token
+
+  grafana:
+    dashboard:
+      enabled: false
+
+  prometheusRule:
+    enabled: false
+
 singleuser:
+  # Security context for user pods to access GPU devices
+  # supplementalGroups grants container access to host's render group (GID 993)
+  # This allows non-root users to access /dev/kfd and /dev/dri devices
+  extraPodConfig:
+    securityContext:
+      fsGroup: 100
+      supplementalGroups:
+        - 993 # render group for ROCm GPU access
+
   storage:
     dynamic:
       storageClass: local-path

@@ -1,0 +1,33 @@
+{
+  "title": "AUP Learning Cloud Runtime Status",
+  "description": "Settings for the runtime countdown shown in the JupyterLab status bar.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "template": {
+      "title": "Status Text Template",
+      "description": "Text template rendered with runtime status tokens.",
+      "type": "string",
+      "default": "Runtime: {remaining}"
+    },
+    "hideWhenUnavailable": {
+      "title": "Hide When Unavailable",
+      "description": "Hide the status item when runtime metadata is missing or invalid.",
+      "type": "boolean",
+      "default": true
+    },
+    "hideWhenUnlimited": {
+      "title": "Hide When Unlimited",
+      "description": "Hide the status item when the session has no runtime limit.",
+      "type": "boolean",
+      "default": true
+    },
+    "updateIntervalMs": {
+      "title": "Update Interval",
+      "description": "How often the status item refreshes, in milliseconds.",
+      "type": "number",
+      "default": 1000,
+      "minimum": 250
+    }
+  }
+}

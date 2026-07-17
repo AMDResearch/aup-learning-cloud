@@ -1,0 +1,22 @@
+# Generated extension dependencies and build output
+auplc-hub-link/node_modules
+auplc-hub-link/out
+*.vsix
+
+# Package manager and build logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.log
+
+# Local editor and OS metadata
+.DS_Store
+Thumbs.db
+.vscode
+.idea
+
+# Temporary files
+*.tmp
+*.swp
+*.swo

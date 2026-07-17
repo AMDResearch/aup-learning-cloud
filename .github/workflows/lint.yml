@@ -22,12 +22,29 @@ jobs:
       - name: Run Ruff formatter check
         run: ruff format --check .
 
+  installer-tests:
+    name: Installer Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install test deps
+        run: pip install pytest pyyaml
+
+      - name: Run installer unit tests
+        run: python -m pytest tests/installer -v
+
   frontend-lint:
-    name: Frontend (ESLint + Prettier)
+    name: Frontend (ESLint + TypeScript)
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: runtime/hub/frontend/admin-ui
+        working-directory: runtime
     steps:
       - uses: actions/checkout@v4
 
@@ -40,7 +57,7 @@ jobs:
         with:
           node-version: '20'
           cache: 'pnpm'
-          cache-dependency-path: runtime/hub/frontend/admin-ui/pnpm-lock.yaml
+          cache-dependency-path: runtime/pnpm-lock.yaml
 
       - name: Install dependencies
         run: pnpm install
@@ -48,7 +65,7 @@ jobs:
       - name: Run ESLint
         run: pnpm run lint
 
-      - name: Run TypeScript check
+      - name: Build (TypeScript check)
         run: pnpm run build
 
   shell-lint:

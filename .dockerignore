@@ -1,0 +1,20 @@
+# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+
+.git
+.worktrees
+.sisyphus
+
+**/node_modules
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+**/.mypy_cache
+
+**/dist
+**/lib
+**/out
+**/*.tsbuildinfo
+**/*.vsix
+runtime/notebook/*/*/labextension

@@ -18,10 +18,16 @@
 # SOFTWARE.
 
 # Use a verified ROCm PyTorch image as base
-FROM ghcr.io/amdresearch/base-gfx1151:v0.1-full
+ARG BASE_IMAGE=ghcr.io/amdresearch/auplc-base:latest
+FROM ${BASE_IMAGE}
 
-# Install JupyterHub and related packages system-wide
-RUN pip3 install --no-cache-dir --break-system-packages \
+# IMPORTANT: base image ends with USER jovyan. pip install as jovyan silently
+# falls back to ~/.local/, which gets masked by the PVC mount at runtime.
+# Always switch to root before pip install to ensure system-wide installation.
+USER root
+
+# Install course-specific packages system-wide
+RUN pip3 install --no-cache-dir \
     transformers \    
     datasets>=2.14.0 \
     tokenizers>=0.15.0 \
@@ -49,26 +55,10 @@ RUN pip3 install --no-cache-dir --break-system-packages \
 USER root
 
 # Copy related rocm notebooks into the docker
-COPY LLM/ /opt/workspace/LLM
+COPY ./course_data /opt/workspace/LLM
 
-#FasionMNIST
-RUN mkdir -p /opt/workspace/LLM/data/FashionMNIST/raw && cd /opt/workspace/LLM/data/FashionMNIST/raw && \
-    wget http://fashion-mnist.s3-website.eu-central-1.amazonaws.com/train-images-idx3-ubyte.gz && \
-    wget http://fashion-mnist.s3-website.eu-central-1.amazonaws.com/train-labels-idx1-ubyte.gz && \
-    wget http://fashion-mnist.s3-website.eu-central-1.amazonaws.com/t10k-images-idx3-ubyte.gz && \
-    wget http://fashion-mnist.s3-website.eu-central-1.amazonaws.com/t10k-labels-idx1-ubyte.gz
-
-# Download DialoGPT-small
-RUN mkdir -p /opt/workspace/LLM/models/microsoft/DialoGPT-small && cd /opt/workspace/LLM/models/microsoft/DialoGPT-small && \
-    wget https://huggingface.co/microsoft/DialoGPT-small/resolve/main/config.json && \
-    wget https://huggingface.co/microsoft/DialoGPT-small/resolve/main/pytorch_model.bin && \
-    wget https://huggingface.co/microsoft/DialoGPT-small/resolve/main/vocab.json && \
-    wget https://huggingface.co/microsoft/DialoGPT-small/resolve/main/merges.txt && \
-    wget https://huggingface.co/microsoft/DialoGPT-small/resolve/main/tokenizer_config.json
-
-# Download Yahama 
-RUN mkdir -p /opt/workspace/LLM/data/yahma/alpaca-cleaned && cd /opt/workspace/LLM/data/yahma/alpaca-cleaned && \
-    wget https://huggingface.co/datasets/yahma/alpaca-cleaned/resolve/main/alpaca_data_cleaned.json
+# Datasets and pretrained weights are loaded at runtime via Hugging Face Hub
+# (e.g. load_dataset, from_pretrained) into the default HF cache — not baked into the image.
 
 RUN chown -R jovyan:1000 /opt/workspace
 USER jovyan

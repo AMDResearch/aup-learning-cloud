@@ -1,0 +1,9 @@
+ca-certificates
+curl
+git
+nginx-light
+build-essential
+python3-dev
+cmake
+pkg-config
+ninja-build

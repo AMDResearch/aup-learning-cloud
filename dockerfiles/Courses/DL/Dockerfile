@@ -19,8 +19,8 @@
 
 
 # Use a verified ROCm PyTorch image as base
-#FROM harbor-aup-int.openhw.cloud:7443/rocm/therock_pytorch_dev_ubuntu_24_04_gfx1151:main
-FROM ghcr.io/amdresearch/base-gfx1151:v0.1-full
+ARG BASE_IMAGE=ghcr.io/amdresearch/auplc-base:latest
+FROM ${BASE_IMAGE}
 
 # Copy related rocm notebooks into the docker
 COPY ./course_data /opt/workspace/DL
@@ -33,3 +33,4 @@ RUN cd /opt/workspace/DL/data/FashionMNIST && bash ./download_data.sh
 
 RUN chown -R jovyan:1000 /opt/workspace
 USER jovyan
+WORKDIR /opt/workspace/DL

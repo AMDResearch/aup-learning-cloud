@@ -1,0 +1,9 @@
+{
+  "extends": "../../hub/frontend/tsconfig.base.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.tsbuildinfo",
+    "rootDir": "./src",
+    "outDir": "./dist/typecheck"
+  },
+  "include": ["src"]
+}

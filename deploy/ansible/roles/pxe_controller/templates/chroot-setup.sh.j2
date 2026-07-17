@@ -1,0 +1,86 @@
+#!/bin/bash
+set -euo pipefail
+
+# -- Remove debootstrap legacy sources.list to avoid duplicates --
+rm -f /etc/apt/sources.list
+
+# -- APT sources (DEB822 format) --
+cat > /etc/apt/sources.list.d/ubuntu.sources << 'APT_EOF'
+Types: deb
+URIs: {{ pxe_apt_mirror }}
+Suites: {{ pxe_ubuntu_codename }} {{ pxe_ubuntu_codename }}-updates {{ pxe_ubuntu_codename }}-security
+Components: main restricted universe multiverse
+Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+APT_EOF
+
+# -- DNS (needed for apt and runtime) --
+cat > /etc/resolv.conf << 'DNS_EOF'
+{% for ns in pxe_dns_servers.split(',') %}
+nameserver {{ ns | trim }}
+{% endfor %}
+DNS_EOF
+
+# -- Install packages --
+export DEBIAN_FRONTEND=noninteractive
+apt-get update
+apt-get install -y --no-install-recommends \
+{% for pkg in pxe_rootfs_packages %}
+  {{ pkg }}{{ '' if loop.last else ' \\' }}
+{% endfor %}
+
+{% if pxe_rootfs_upgrade | default(false) | bool %}
+apt-get dist-upgrade -y
+{% endif %}
+
+apt-get clean
+rm -rf /var/lib/apt/lists/*
+
+# -- Root credentials --
+{% if pxe_rootfs_password | default('') | length > 0 %}
+echo "root:{{ pxe_rootfs_password }}" | chpasswd
+{% else %}
+passwd -l root
+{% endif %}
+
+# -- Allow root SSH login --
+mkdir -p /etc/ssh/sshd_config.d
+{% if pxe_rootfs_password | default('') | length > 0 %}
+echo "PermitRootLogin yes" > /etc/ssh/sshd_config.d/allow-root.conf
+{% else %}
+echo "PermitRootLogin prohibit-password" > /etc/ssh/sshd_config.d/allow-root.conf
+{% endif %}
+
+# -- GPU udev rules (let containers access AMD GPUs) --
+tee /etc/udev/rules.d/70-amdgpu.rules << RULES
+KERNEL=="kfd", MODE="0666"
+KERNEL=="renderD[0-9]*", MODE="0666"
+RULES
+
+# -- Disable systemd-networkd (kernel ip=dhcp handles NFS root networking) --
+rm -f /etc/netplan/*.yaml
+systemctl disable systemd-networkd        2>/dev/null || true
+systemctl disable systemd-networkd-wait-online 2>/dev/null || true
+cat > /etc/resolv.conf << 'DNS_EOF'
+{% for ns in pxe_dns_servers.split(',') %}
+nameserver {{ ns | trim }}
+{% endfor %}
+DNS_EOF
+
+# -- overlayroot: make rootfs read-only with tmpfs writable layer --
+echo 'overlayroot="tmpfs:swap=1"' > /etc/overlayroot.conf
+
+# -- Clear hostname inherited from PXE controller build host --
+echo "localhost" > /etc/hostname
+
+# -- Install k3s agent binary (skip start, skip enable) --
+# Pin the agent version to pxe_k3s_version so it matches the k3s server. k3s
+# requires the agent to be the same version as, or older than, the server.
+curl -sfL https://get.k3s.io | {% if pxe_k3s_version | default('') | length > 0 %}INSTALL_K3S_VERSION="{{ pxe_k3s_version }}" {% endif %}INSTALL_K3S_SKIP_START=true INSTALL_K3S_SKIP_ENABLE=true sh -s - agent
+
+# -- Enable boot-time services --
+systemctl enable set-hostname.service
+systemctl enable k3s-auto-join.service
+systemctl enable mount-local-disk.service
+
+# -- Rebuild initramfs with NFS/overlay/driver modules --
+update-initramfs -u

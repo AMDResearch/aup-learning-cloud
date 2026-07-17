@@ -1,6 +1,4 @@
-<!-- Modifications Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
- Portions of this file consist of AI-generated content. -->
-<!--
+<!-- Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
 in the Software without restriction, including without limitation the rights
@@ -20,18 +18,34 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 -->
 
-
-
-<!-- /home/shifzhan/github/aup-learning-cloud-public/dockerfiles/Hub/templates/spawn.html -->
 {% extends "page.html" %}
+{% block title %}Spawn Server{% endblock %}
 
+{% block stylesheet %}
+{{ super() }}
+<link rel="stylesheet" href="{{ static_url('spawn-ui/assets/index.css') }}" />
+<style>
+    /* Dark mode support for page body */
+    [data-bs-theme="dark"] body {
+        background: var(--jp-layout-color0, #212529) !important;
+        color: var(--jp-ui-font-color0, #e9ecef) !important;
+    }
+</style>
+{% endblock %}
 
 {% block main %}
 <div class="container">
   <form enctype="multipart/form-data" id="spawn_form" action="{{url}}" method="post" role="form">
-    {{spawner_options_form | safe}}
-    <br>
+    <div id="spawn-root"></div>
+    {{ spawner_options_form | safe }}
+    <script>
+      window.jhdata = {
+        base_url: '{{ base_url }}',
+        xsrf_token: '{{ xsrf_token }}',
+        user: '{{ user.name }}'
+      };
+    </script>
+    <script type="module" src="{{ static_url('spawn-ui/assets/index.js') }}"></script>
   </form>
 </div>
-
 {% endblock %}

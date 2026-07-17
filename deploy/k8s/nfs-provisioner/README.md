@@ -22,61 +22,20 @@ SOFTWARE.
 
 # NFS Provisioner
 
-## Install NFS Server
-In kube-contorller node
-```bash
-sudo apt install nfs-kernel-server
-```
+Helm values for [nfs-subdir-external-provisioner](https://github.com/kubernetes-sigs/nfs-subdir-external-provisioner).
 
-## Create NFS Share
-```bash
-sudo mkdir -p /nfs
-sudo chown -R nobody:nogroup /nfs
-sudo chmod 777 /nfs
-```
+For full NFS setup instructions, see [Multi-Node Cluster Deployment](https://amdresearch.github.io/aup-learning-cloud/installation/multi-node.html#configure-nfs-storage).
 
-## Configure NFS Server
-```bash
-sudo nano /etc/exports
-```
-
-Add the following line:
-```bash
-/nfs <Your-Subnet-Addresses/24>(rw,sync,no_subtree_check,no_root_squash,insecure)
-```
-
-## Restart NFS Server
-```bash
-sudo systemctl restart nfs-kernel-server
-```
-
-## Install NFS Client
-In all nodes (using ansible base role)
-```bash
-sudo apt install nfs-common
-``` 
-
-## Install NFS Provisioner
-
-![NFS Provisioner](../../docs/images/nfs.jpg)
+## Quick Reference
 
 ```bash
-## Add repository
+# Install
 helm repo add nfs-subdir-external-provisioner https://kubernetes-sigs.github.io/nfs-subdir-external-provisioner/
 helm repo update
-
 helm install nfs-subdir-external-provisioner nfs-subdir-external-provisioner/nfs-subdir-external-provisioner \
-    --namespace nfs-provisioner \
-    --create-namespace \
-    -f deploy/k8s/nfs-provisioner/values.yaml
-```
+    --namespace nfs-provisioner --create-namespace \
+    -f values.yaml
 
-## Set Default StorageClass
-
-```bash
-# Set nfs-client as the default StorageClass
+# Set as default StorageClass
 kubectl patch storageclass nfs-client -p '{"metadata": {"annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}'
-
-# Verify the default StorageClass
-kubectl get storageclass
 ```

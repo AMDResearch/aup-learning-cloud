@@ -1,0 +1,6 @@
+# Managed by Ansible (pxe_controller role) -- do not edit by hand.
+#
+# The PXE controller only needs plain HTTP to hand the k3s token / kubeconfig to
+# netbooting agents. It listens on {{ pxe_web_port }} (not 80) so it can coexist
+# with k3s Traefik / ServiceLB, which binds host port 80/443 for cluster ingress.
+Listen {{ pxe_web_port }}

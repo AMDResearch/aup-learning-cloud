@@ -1,0 +1,52 @@
+{
+  "name": "auplc-hub-link",
+  "displayName": "AUPLC Back to Hub",
+  "description": "Adds a status bar shortcut back to JupyterHub.",
+  "version": "0.0.1",
+  "publisher": "amdresearch",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AMDResearch/aup-learning-cloud"
+  },
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished",
+    "onCommand:auplc.backToHub"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "auplc.backToHub",
+        "title": "AUPLC: Back to Hub"
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc --noEmit -p . && esbuild src/extension.ts --bundle --platform=node --format=cjs --target=node18 --external:vscode --sourcemap --outfile=out/extension.js",
+    "package": "pnpm run compile && vsce package --no-dependencies",
+    "build": "pnpm run package"
+  },
+  "dependencies": {
+    "@auplc/runtime-status": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.80.0",
+    "@types/node": "^22.15.30",
+    "@vscode/vsce": "^3.7.0",
+    "esbuild": "^0.27.3",
+    "typescript": "^5.4.5"
+  },
+  "files": [
+    "out",
+    "README.md",
+    "LICENSE",
+    "package.json"
+  ]
+}

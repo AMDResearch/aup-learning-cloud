@@ -1,0 +1,4 @@
+<Directory {{ pxe_web_root }}/k3s>
+    Require ip {{ pxe_subnet }}
+    Require ip 127.0.0.1
+</Directory>

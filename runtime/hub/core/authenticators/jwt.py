@@ -75,7 +75,7 @@ class RemoteLabAuthenticator(Authenticator):
         return payload["data"]
 
     custom_html = """
-    <form action="/hub/login"
+    <form action="{{ base_url }}login?next={{ next | urlencode }}"
                 method="post"
                 role="form">
             <div class="auth-form-header">

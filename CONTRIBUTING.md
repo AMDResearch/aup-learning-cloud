@@ -1,3 +1,24 @@
+<!-- Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved. -->
+<!--
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+-->
+
 # Contributing to AUP Learning Cloud
 
 Thank you for your interest in contributing to AUP Learning Cloud! This document provides guidelines and setup instructions for developers.
@@ -15,8 +36,8 @@ Thank you for your interest in contributing to AUP Learning Cloud! This document
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/AMDResearch/aup-learning-cloud-dev.git
-   cd aup-learning-cloud-dev
+   git clone https://github.com/AMDResearch/aup-learning-cloud.git
+   cd aup-learning-cloud
    ```
 
 2. **Install Python dependencies**
@@ -26,7 +47,7 @@ Thank you for your interest in contributing to AUP Learning Cloud! This document
 
 3. **Install frontend dependencies**
    ```bash
-   cd runtime/admin/frontend/admin-frontend
+   cd runtime/hub/frontend
    pnpm install
    cd -
    ```
@@ -63,11 +84,11 @@ ruff format .
 - **ESLint**: JavaScript/TypeScript/Vue linter
 - **Prettier**: Code formatter
 - **TypeScript**: Type checking
-- **Config**: `runtime/admin/frontend/admin-frontend/eslint.config.js`, `.prettierrc`
+- **Config**: `runtime/hub/frontend/eslint.config.js`, `.prettierrc`
 
 Run checks:
 ```bash
-cd runtime/admin/frontend/admin-frontend
+cd runtime/hub/frontend
 
 # Lint
 pnpm run lint
@@ -140,7 +161,7 @@ find . -name "*.sh" -o -name "*.bash" | \
    # YAML
    yamllint .
 
-   # Frontend (from runtime/admin/frontend/admin-frontend)
+   # Frontend (from runtime/hub/frontend)
    pnpm run lint
    pnpm run format:check
    pnpm run type-check
@@ -193,9 +214,28 @@ Standard production code rules apply to:
 | **style/** | Code formatting, linting (no logic change) | `style/fix-lint-errors` |
 | **ci/** | CI/CD configuration and scripts | `ci/github-actions-setup` |
 
+## Platform Attribution
+
+AUP Learning Cloud uses a **multi-layer attribution system** to ensure the platform identity
+remains visible to end users regardless of how the codebase is modified.
+
+When contributing, please preserve all four layers:
+
+| Layer | File | What |
+|-------|------|------|
+| HTTP header | `runtime/hub/core/jupyterhub_config.py` | `X-Powered-By: AUP Learning Cloud` |
+| API endpoint | `runtime/hub/core/handlers.py` | `PlatformInfoHandler` at `/api/platform` |
+| HTML footer | `runtime/hub/frontend/templates/page.html` | `#auplc-powered-by-footer` |
+| Frontend constants | `runtime/hub/frontend/packages/shared/src/branding.ts` | `PLATFORM_NAME` etc. |
+
+When adding new UI pages or React apps, import `PLATFORM_NAME` from `@auplc/shared`
+rather than hardcoding the string `"AUP Learning Cloud"`.
+
+For AI agent guidance, see [`AGENTS.md`](./AGENTS.md).
+
 ## Questions?
 
 - Open an issue for bugs or feature requests
-- Check existing documentation in `docs/`
+- Check existing documentation at https://amdresearch.github.io/aup-learning-cloud/
 
 Thank you for contributing!

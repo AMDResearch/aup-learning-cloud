@@ -1,0 +1,6 @@
+include package.json
+include pyproject.toml
+include setup.py
+recursive-include auplc_jupyterlab_runtime_status/labextension *
+recursive-include jupyter-config *
+recursive-include schema *.json

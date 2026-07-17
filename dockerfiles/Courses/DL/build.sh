@@ -18,51 +18,9 @@
 # SOFTWARE.
 
 
-# #!/usr/bin/env bash
-# set -euo pipefail
-
-# # ===== FashionMNIST data check =====
-# DATA_DIR="./data/FashionMNIST/raw"
-
-# REQUIRED_FILES=(
-#   "train-images-idx3-ubyte"
-#   "train-labels-idx1-ubyte"
-#   "t10k-images-idx3-ubyte"
-#   "t10k-labels-idx1-ubyte"
-# )
-
-# echo "[INFO] Checking FashionMNIST dataset..."
-
-# if [[ ! -d "${DATA_DIR}" ]]; then
-#   echo "[WARRNING] ${DATA_DIR} does not exist."
-#   echo "Run:"
-#   cd data/FashionMNIST && bash ./download_data.sh
-#   cd ../../
-# fi
-
-# MISSING=false
-# for file in "${REQUIRED_FILES[@]}"; do
-#   if [[ ! -f "${DATA_DIR}/${file}" ]]; then
-#     echo "[MISSING] ${DATA_DIR}/${file}"
-#     MISSING=true
-#   fi
-# done
-
-# if [[ "${MISSING}" == true ]]; then
-#   echo
-#   echo "[ERROR] FashionMNIST dataset is incomplete."
-#   echo "Please download it first:"
-#   echo "  cd data/FashionMNIST && ./download_data.sh"
-#   exit 1
-# fi
-
-# ls -al
-
-# echo "[OK] FashionMNIST dataset found."
-
 cp -r ../../../projects/DL ./course_data
 
-docker build -t ghcr.io/amdresearch/auplc-dl:latest .
+docker build ${BASE_IMAGE:+--build-arg BASE_IMAGE="$BASE_IMAGE"} \
+  -t ghcr.io/amdresearch/auplc-dl:latest .
 
 rm -rf ./course_data
-

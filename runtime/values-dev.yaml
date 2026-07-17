@@ -1,0 +1,73 @@
+# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+# AUP Learning Cloud - Development Overlay
+#
+# Dev-friendly settings for local development and UI iteration.
+# Layered on top of values.yaml:
+#
+#   helm install ... -f values.yaml -f values-dev.yaml -f values.local.yaml
+#
+# Or use the installer shorthand:
+#   ./auplc-installer dev deploy    # full deploy with dev settings
+#   ./auplc-installer dev           # rebuild hub image + restart pod
+#   ./auplc-installer dev upgrade   # upgrade with dev settings (values changes only)
+
+# Enable quota system in dev so the quota UI can be tested.
+# Default quota is high (999999) so dev user effectively has no limit,
+# but the UI (badge, warnings, admin panel) is still exercisable.
+custom:
+  quota:
+    enabled: true
+    defaultQuota: 999999
+
+# Grant admin privileges to the auto-login user so the Admin UI
+# is accessible at /hub/admin/users without switching auth modes.
+hub:
+  config:
+    Authenticator:
+      admin_users:
+        - student
+
+  # On startup, ensure the dev user "student" has unlimited quota.
+  # defaultQuota only applies to NEW users; this handles existing ones.
+  extraConfig:
+    dev-quota: |
+      import asyncio
+      def _ensure_dev_quota():
+          try:
+              from core.quota.manager import get_quota_manager
+              qm = get_quota_manager()
+              qm.ensure_user_quota("student", 999999)
+              qm.set_unlimited("student", True)
+              print("[DEV] Set student quota to unlimited")
+          except Exception as e:
+              print(f"[DEV] Could not set student quota: {e}")
+      _ensure_dev_quota()
+
+  # Use local Docker images directly — never pull from registry.
+  image:
+    pullPolicy: Never
+
+# Disable prePuller in dev (faster deploys, images are local).
+prePuller:
+  hook:
+    enabled: false
+  continuous:
+    enabled: false

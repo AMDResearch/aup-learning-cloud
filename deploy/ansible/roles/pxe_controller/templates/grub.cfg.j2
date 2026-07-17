@@ -1,0 +1,11 @@
+set default=0
+set timeout=5
+
+menuentry "AUP Learning Cloud K3s Agent (Network Boot)" {
+    linux vmlinuz root=/dev/nfs nfsroot={{ pxe_controller_ip }}:{{ pxe_nfs_root }},ro,vers=3 ip=dhcp rootdelay=10 rw udev.event_timeout=10
+    initrd initrd.img
+}
+
+menuentry "Boot from local disk" {
+    exit
+}

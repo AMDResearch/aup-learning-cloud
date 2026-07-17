@@ -18,12 +18,14 @@
 # SOFTWARE.
 
 # Use a verified ROCm PyTorch image as base
-FROM ghcr.io/amdresearch/base-gfx1151:v0.1-full
+ARG BASE_IMAGE=ghcr.io/amdresearch/auplc-base:latest
+FROM ${BASE_IMAGE}
 
 # Copy related rocm notebooks into the docker
+USER root
 RUN mkdir -p /opt/workspace/CV
 COPY ./course_data /opt/workspace/CV
 
-USER root
 RUN chown -R jovyan:1000 /opt/workspace
 USER jovyan
+WORKDIR /opt/workspace/CV

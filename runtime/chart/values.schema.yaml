@@ -1,3 +1,22 @@
+# Modifications Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
 # This schema (a jsonschema in YAML format) is used to generate
 # values.schema.json which is packaged with the Helm chart for client side
 # validation by helm of values before template rendering.
@@ -1275,9 +1294,6 @@ properties:
         patternProperties: *labels-and-annotations-patternProperties
         description: |
           K8s annotations for the hub pod.
-      authenticatePrometheus:
-        type: [boolean, "null"]
-        description: *jupyterhub-native-config-description
       concurrentSpawnLimit:
         type: [integer, "null"]
         description: *jupyterhub-native-config-description
@@ -2092,6 +2108,93 @@ properties:
           containerSecurityContext: *containerSecurityContext-spec
           image: *image-spec
           resources: *resources-spec
+
+  monitoring:
+    type: object
+    additionalProperties: false
+    properties:
+      enabled:
+        type: boolean
+        default: false
+      namespace:
+        type: string
+        default: monitoring
+      releaseLabel:
+        type: string
+        default: monitoring
+      hubMetrics:
+        type: object
+        additionalProperties: false
+        properties:
+          enabled:
+            type: boolean
+            default: false
+          allowUnauthenticatedScrape:
+            type: boolean
+            default: false
+          serviceAnnotations:
+            type: object
+            additionalProperties: false
+            properties:
+              enabled:
+                type: boolean
+                default: false
+      serviceMonitor:
+        type: object
+        additionalProperties: false
+        properties:
+          enabled:
+            type: boolean
+            default: false
+          interval:
+            type: string
+            default: 15s
+          authorization:
+            type: object
+            additionalProperties: false
+            properties:
+              enabled:
+                type: boolean
+                default: true
+              type:
+                type: string
+                default: Bearer
+              hubServiceName:
+                type: string
+                minLength: 1
+                default: prometheus-metrics
+              secret:
+                type: object
+                additionalProperties: false
+                properties:
+                  create:
+                    type: boolean
+                    default: true
+                  name:
+                    type: string
+                    default: ""
+                  key:
+                    type: string
+                    minLength: 1
+                    default: token
+      grafana:
+        type: object
+        additionalProperties: false
+        properties:
+          dashboard:
+            type: object
+            additionalProperties: false
+            properties:
+              enabled:
+                type: boolean
+                default: false
+      prometheusRule:
+        type: object
+        additionalProperties: false
+        properties:
+          enabled:
+            type: boolean
+            default: false
 
   singleuser:
     type: object
@@ -3076,8 +3179,8 @@ properties:
 
           - `auto-login`: No credentials required, auto-login as 'student' (for demos/single-node)
           - `dummy`: Accept any username/password (for testing)
-          - `github`: GitHub OAuth authentication only
-          - `multi`: GitHub OAuth + Local native accounts (recommended for production)
+          - `github`: GitHub App authentication only
+          - `multi`: GitHub App + Local native accounts (recommended for production)
 
       adminUser:
         type: object
@@ -3091,6 +3194,115 @@ properties:
             description: |
               Enable auto-admin creation on first install.
               Credentials will be stored in `jupyterhub-admin-credentials` secret.
+
+      notifications:
+        type: object
+        additionalProperties: false
+        description: |
+          Structured notification configuration for the authenticated Hub top
+          bar and the Home page announcement area. Helm value changes require a
+          Helm upgrade and Hub pod restart before users see updated notices.
+        properties:
+          enabled:
+            type: boolean
+            description: Enable the notification subsystem.
+          topbar: &notification-item-spec
+            type: object
+            additionalProperties: false
+            if:
+              required: [enabled]
+              properties:
+                enabled:
+                  const: true
+            then:
+              required: [id]
+              properties:
+                id:
+                  minLength: 1
+              anyOf:
+                - required: [title]
+                  properties:
+                    title:
+                      minLength: 1
+                - required: [message]
+                  properties:
+                    message:
+                      minLength: 1
+            description: |
+              Single urgent notice for authenticated Hub pages. Disabled by
+              default so no top-bar notice renders unless explicitly enabled.
+              Use stable `id` and optional `version` as operator-facing notice
+              identifiers for future compatibility only.
+            properties:
+              enabled:
+                type: boolean
+                description: Enable this notification item.
+              id:
+                type: string
+                description: Stable notification identifier for operator reference and future compatibility.
+              version:
+                type: string
+                description: Optional version suffix for operator reference and future compatibility without changing the notice id.
+              severity:
+                type: string
+                enum: [info, success, warning, danger]
+                description: Visual severity for the notification.
+              dismissible:
+                type: boolean
+                description: Legacy/future-compatible metadata for the current stateless topbar UI.
+              eyebrow:
+                type: string
+                description: Optional plain-text meta label shown above Home page notification titles.
+              title:
+                type: string
+                description: Short notification title.
+              message:
+                type: string
+                description: Notification body content.
+              format:
+                type: string
+                enum: [text, markdown, html]
+                description: Content format for `title` and `message`; rich text is sanitized by the Hub backend.
+              link:
+                type: object
+                additionalProperties: false
+                description: Optional call-to-action link.
+                properties:
+                  label:
+                    type: string
+                    description: Link text.
+                  url:
+                    type: string
+                    description: Link URL.
+              startsAt:
+                type: string
+                description: Optional ISO-8601 start time string; backend validation handles time semantics.
+              endsAt:
+                type: string
+                description: Optional ISO-8601 end time string; backend validation handles time semantics.
+          homepage:
+            type: object
+            additionalProperties: false
+            description: |
+              Home page announcement configuration. Structured `items` replace
+              the legacy static announcement when active. Homepage items are
+              normalized as active by default when `enabled` is omitted; set
+              `enabled: false` to keep a configured item hidden.
+            properties:
+              enabled:
+                type: boolean
+                description: Enable structured Home page announcements.
+              legacyAnnouncementFallback:
+                type: boolean
+                description: |
+                  Fall back to `hub.extraFiles.announcement.txt` when no
+                  structured Home page notification items are active.
+              items:
+                type: array
+                description: Home page notification items using the topbar item
+                  shape. Homepage items default to active unless explicitly
+                  disabled.
+                items: *notification-item-spec
 
       accelerators:
         type: object
@@ -3130,9 +3342,8 @@ properties:
               displayName: "AMD Radeon™ 890M (Strix Point iGPU)"
               description: "RDNA 3.5 | 16 CUs | 4GB LPDDR5X"
               nodeSelector:
-                node-type: strix
-              env:
-                HSA_OVERRIDE_GFX_VERSION: "11.5.0"
+                amd.com/gpu.product-name: "AMD_Radeon_890M_Graphics"
+              env: {}
               quotaRate: 2
           ```
 
@@ -3156,6 +3367,22 @@ properties:
               images:
                 cpu: "ghcr.io/amdresearch/auplc-default:latest"
                 Course-DL: "ghcr.io/amdresearch/auplc-dl:latest"
+              ```
+          groupOrder:
+            type: array
+            items:
+              type: string
+            description: |
+              Optional display order for resource groups in the Home and Spawn UI.
+              Groups listed here are shown first in the given order. Groups not
+              listed here keep the default ordering.
+
+              Example:
+              ```yaml
+              groupOrder:
+                - DEVELOPMENT
+                - COURSE
+                - CUSTOM REPO
               ```
           requirements:
             type: object
@@ -3186,6 +3413,119 @@ properties:
                   memory: "16Gi"
                   memory_limit: "24Gi"
                   amd.com/gpu: "1"
+              ```
+          metadata:
+            type: object
+            additionalProperties:
+              type: object
+              additionalProperties: false
+              properties:
+                group:
+                  type: string
+                  description: Category group name for UI display (e.g., "COURSE", "OTHERS")
+                description:
+                  type: string
+                  description: Main title displayed on the resource card
+                subDescription:
+                  type: string
+                  description: Secondary description text shown below the title
+                accelerator:
+                  type: string
+                  description: Accelerator type label (e.g., "GPU", "NPU")
+                acceleratorKeys:
+                  type: array
+                  items:
+                    type: string
+                  description: List of accelerator keys from custom.accelerators
+                allowGitClone:
+                  type: boolean
+                  description: |
+                    Allow users to clone a Git repository into their home
+                    directory at spawn time. Should be false for course
+                    resources that already include their own content.
+                defaultPath:
+                  type:
+                    - string
+                    - 'null'
+                  description: |
+                    Initial landing path inside the container for this resource.
+                    The effective target path is Custom Repo clone path, then
+                    `defaultPath`, then the image or single-user application
+                    default, normally the image `WORKDIR`. Omit the field or set
+                    it to null to avoid a Hub landing override; an empty string
+                    is invalid; `/` lands at the container root. The Hub
+                    validates the path syntax and normalizes it before launch,
+                    but it does not check whether the path exists in the image.
+                    This value is not a security boundary or an access boundary.
+                    Use an absolute POSIX container path such as
+                    `/opt/workspace/CV`.
+                launchMode:
+                  type: string
+                  enum:
+                    - jupyterlab
+                    - code-server
+                  description: |
+                    Single-user application mode for this resource. Omit or set
+                    to `jupyterlab` for the standard notebook server. Set to
+                    `code-server` to launch the browser-based coding workspace.
+                resourceType:
+                  type: string
+                  enum:
+                    - notebook
+                    - browser-ide
+                  description: |
+                    Resource type badge label for the Home and Spawn UI. Set to
+                    `notebook` to display `Notebook`, or `browser-ide` to display
+                    `Browser IDE`.
+                env:
+                  type: object
+                  additionalProperties:
+                    type: string
+                  description: |
+                    Per-resource environment variable overrides. Applied after
+                    accelerator-level env vars. Set a value to empty string ""
+                    to unset an accelerator-inherited variable.
+                acceleratorOverrides:
+                  type: object
+                  additionalProperties:
+                    type: object
+                    properties:
+                      image:
+                        type: string
+                        description: Override image for this accelerator.
+                      env:
+                        type: object
+                        additionalProperties:
+                          type: string
+                        description: |
+                          Environment variable overrides for this accelerator.
+                          Set a value to empty string "" to unset a variable.
+                  description: |
+                    Per-accelerator overrides for image and/or env, keyed by
+                    accelerator name. Highest priority for env — applied after
+                    both accelerator-level and resource-level env.
+            description: |
+              Resource metadata for spawn UI display.
+              Defines how each resource appears in the selection interface.
+
+              Environment priority (highest wins):
+              1. `acceleratorOverrides.<accel>.env` (per-accelerator per-resource)
+              2. `env` (per-resource, all accelerators)
+              3. `accelerators.<name>.env` (per-accelerator, all resources)
+
+              Example:
+              ```yaml
+              metadata:
+                Course-CV:
+                  group: "COURSE"
+                  description: "Computer Vision Course"
+                  accelerator: "GPU"
+                  acceleratorKeys:
+                    - strix-halo
+                    - phx
+                  acceleratorOverrides:
+                    phx:
+                      image: "ghcr.io/your-org/auplc-cv:<tag-for-phx>"
               ```
 
       teams:
@@ -3319,6 +3659,109 @@ properties:
                   targets:
                     balanceBelow: 400
               ```
+
+      gitClone:
+        type: object
+        additionalProperties: false
+        description: |
+          Git repository cloning configuration.
+          Users can optionally provide a Git URL on the spawn form. The repo is
+          cloned into their home directory via an init container at startup.
+          By default, cloned repositories are kept after the user's server stops.
+          Existing unmanaged same-name directories are preserved and not overwritten.
+        properties:
+          initContainerImage:
+            type: string
+            description: |
+              Container image used for git operations.
+              Must include `git` and `sh`. Defaults to `alpine/git:2.47.2`.
+          allowedProviders:
+            type: array
+            items:
+              type: string
+            description: |
+              Allowed Git hosting providers. Subdomains are also accepted.
+              Defaults to github.com, gitlab.com, and bitbucket.org.
+          maxCloneTimeout:
+            type: integer
+            minimum: 10
+            description: |
+              Maximum time in seconds allowed for a clone or fetch operation.
+              Defaults to 300 (5 minutes).
+          githubAppName:
+            type: string
+            description: |
+              GitHub App slug name. When configured, enables GitHub App integration
+              for private repo access and repo picker UI.
+              Leave empty to disable GitHub App features.
+          defaultAccessToken:
+            type: string
+            description: |
+              Default access token for private repos (e.g. a bot/service account PAT).
+              Used as fallback when user provides no PAT and no OAuth token is available.
+              Priority: user PAT > OAuth token > defaultAccessToken.
+              Helm auto-creates a K8s Secret (jupyterhub-git-default-token) from this value.
+          defaultPersistence:
+            type: boolean
+            description: |
+              Whether cloned repositories are kept by default after the user's server stops.
+              Defaults to true, so cloned repos persist unless an admin sets this
+              to false or allows users to choose ephemeral cleanup. Persistent mode
+              does not auto-pull, reset, or sync repository contents after clone.
+          allowPersistenceChoice:
+            type: boolean
+            description: |
+              Allow users to choose whether cloned repositories persist in the spawn form.
+              When false, the admin default is enforced and no user toggle is shown.
+              When true, the spawn form choice defaults to `defaultPersistence`.
+
+      hub:
+        type: object
+        additionalProperties: false
+        description: |
+          Hub-level network settings.
+        properties:
+          allowedOrigins:
+            type: array
+            items:
+              type: string
+            description: |
+              Sets Access-Control-Allow-Origin on Hub HTTP responses.
+              Use when the Hub API is accessed cross-origin.
+              Use ["*"] to allow all, or list specific domains.
+
+      notebook:
+        type: object
+        additionalProperties: false
+        description: |
+          Notebook server network settings.
+        properties:
+          allowedOrigins:
+            type: array
+            items:
+              type: string
+            description: |
+              Injected into each notebook server's startup args via
+              --ServerApp.allow_origin_pat. Needed when kernel WebSocket
+              connections go through a reverse proxy or non-standard domain.
+              Use ["*"] to allow all, or list specific domains.
+
+      codeServer:
+        type: object
+        additionalProperties: false
+        description: |
+          code-server settings for browser IDE resources.
+        properties:
+          extraTrustedDomains:
+            type: array
+            items:
+              type: string
+            description: |
+              Additional host/domain entries trusted by code-server's outgoing
+              link protection. The Hub automatically adds the current public Hub
+              host for Back-to-Hub links; use this list only for extra trusted
+              sites such as internal documentation or Git services. Provide
+              host/domain entries, not full URLs.
 
       apiService:
         type: object

@@ -20,8 +20,8 @@ SOFTWARE.
 -->
 
 
-Here are some scripts help you setup your cluster for install.
+Here are some scripts to help you setup your cluster for install.
 
 1. `edit_sshd.sh` Help you edit sshd_config to enable root login.
 2. `setup_ssh_root_access.sh` Help you setup ssh access to all nodes with root permission.
-3. `spread-kubeconfig.sh` Help you spread kubeconfig to all nodes.
+3. `deploy-kubeconfig.sh` Help you deploy kubeconfig to all nodes.

@@ -26,6 +26,9 @@ Uses SQLAlchemy to store passwords in the shared JupyterHub database.
 
 from __future__ import annotations
 
+import secrets
+from concurrent.futures import ThreadPoolExecutor
+
 import bcrypt
 from firstuseauthenticator import FirstUseAuthenticator
 
@@ -77,15 +80,54 @@ class CustomFirstUseAuthenticator(FirstUseAuthenticator):
         finally:
             session.close()
 
+    MIN_PASSWORD_LENGTH = 8
+    UPPERCASE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ"
+    LOWERCASE_CHARS = "abcdefghijkmnpqrstuvwxyz"
+    DIGIT_CHARS = "23456789"
+    SPECIAL_CHARS = "!@#$%^&*_+-="
+
+    @staticmethod
+    def _check_password_strength(password: str) -> str | None:
+        """Return an error message if the password is too weak, or None if OK."""
+        import re
+
+        min_len = CustomFirstUseAuthenticator.MIN_PASSWORD_LENGTH
+        if not password or len(password) < min_len:
+            return f"Password must be at least {min_len} characters"
+        if not re.search(r"[A-Z]", password):
+            return "Password must contain at least one uppercase letter"
+        if not re.search(r"[a-z]", password):
+            return "Password must contain at least one lowercase letter"
+        if not re.search(r"\d", password):
+            return "Password must contain at least one digit"
+        if not re.search(r"[!@#$%^&*()_+\-=\[\]{};':\"\\|,.<>/?`~]", password):
+            return "Password must contain at least one special character"
+        return None
+
+    @classmethod
+    def generate_password(cls, length: int = 16) -> str:
+        """Generate a password that satisfies the native password policy."""
+        password_length = max(length, cls.MIN_PASSWORD_LENGTH)
+        all_chars = cls.UPPERCASE_CHARS + cls.LOWERCASE_CHARS + cls.DIGIT_CHARS + cls.SPECIAL_CHARS
+        chars = [
+            secrets.choice(cls.UPPERCASE_CHARS),
+            secrets.choice(cls.LOWERCASE_CHARS),
+            secrets.choice(cls.DIGIT_CHARS),
+            secrets.choice(cls.SPECIAL_CHARS),
+        ]
+        chars.extend(secrets.choice(all_chars) for _ in range(password_length - len(chars)))
+        secrets.SystemRandom().shuffle(chars)
+        return "".join(chars)
+
     def _validate_password(self, password):
-        """Validate password meets minimum requirements."""
-        return password and len(password) >= getattr(self, "min_password_length", 1)
+        """Validate password meets strength requirements."""
+        return self._check_password_strength(password) is None
 
     def set_password(self, username: str, password: str, force_change: bool = True) -> str:
         """Set password for a user."""
-        if not self._validate_password(password):
-            min_len = getattr(self, "min_password_length", 1)
-            return f"Password too short! Minimum {min_len} characters required."
+        strength_error = self._check_password_strength(password)
+        if strength_error:
+            return strength_error
 
         password_hash = bcrypt.hashpw(password.encode("utf8"), bcrypt.gensalt())
 
@@ -104,6 +146,77 @@ class CustomFirstUseAuthenticator(FirstUseAuthenticator):
 
         suffix = " (force change on next login)" if force_change else ""
         return f"Password set for {username}{suffix}"
+
+    def batch_set_passwords(
+        self,
+        users: list[dict],
+        force_change: bool = True,
+    ) -> dict:
+        """Set passwords for multiple users in a single transaction.
+
+        Args:
+            users: List of dicts with 'username' and 'password' keys.
+            force_change: Whether to force password change on first login.
+
+        Returns:
+            Dict with 'success', 'failed' counts and 'results' list.
+        """
+        results = {"success": 0, "failed": 0, "results": []}
+
+        valid_entries = []
+        for entry in users:
+            username = entry["username"]
+            password = entry["password"]
+            strength_error = self._check_password_strength(password)
+            if strength_error:
+                results["failed"] += 1
+                results["results"].append(
+                    {
+                        "username": username,
+                        "status": "failed",
+                        "error": strength_error,
+                    }
+                )
+                continue
+            valid_entries.append((username, password))
+
+        # Parallel bcrypt hashing (bcrypt releases GIL, threads give real speedup)
+        def _hash(pw: str) -> bytes:
+            return bcrypt.hashpw(pw.encode("utf8"), bcrypt.gensalt())
+
+        with ThreadPoolExecutor() as pool:
+            hash_results = list(pool.map(_hash, [pw for _, pw in valid_entries]))
+        hashed = [(username, h) for (username, _), h in zip(valid_entries, hash_results)]
+
+        # Single DB transaction with per-user savepoints
+        with session_scope() as session:
+            for username, password_hash in hashed:
+                try:
+                    with session.begin_nested():
+                        user_pw = session.query(UserPassword).filter_by(username=username).first()
+                        if user_pw:
+                            user_pw.password_hash = password_hash
+                            user_pw.force_change = force_change
+                        else:
+                            user_pw = UserPassword(
+                                username=username,
+                                password_hash=password_hash,
+                                force_change=force_change,
+                            )
+                            session.add(user_pw)
+                    results["success"] += 1
+                    results["results"].append({"username": username, "status": "success"})
+                except Exception as e:
+                    results["failed"] += 1
+                    results["results"].append(
+                        {
+                            "username": username,
+                            "status": "failed",
+                            "error": str(e),
+                        }
+                    )
+
+        return results
 
     def mark_force_password_change(self, username: str, force: bool = True) -> None:
         """Mark or unmark a user for forced password change."""
@@ -140,6 +253,10 @@ class CustomFirstUseAuthenticator(FirstUseAuthenticator):
         if not username or not password:
             return None
 
+        if ":" in username:
+            self.log.warning("Rejected username containing ':': %s", username)
+            return None
+
         # Check if user exists in JupyterHub
         if not self._user_exists(username):
             self.log.warning(f"User {username} not found in JupyterHub database")
@@ -155,7 +272,7 @@ class CustomFirstUseAuthenticator(FirstUseAuthenticator):
         else:
             # First use: set the password
             if not self._validate_password(password):
-                self.log.warning(f"Password too short for new user {username}")
+                self.log.warning(f"Password too weak for new user {username}")
                 return None
             self.set_password(username, password, force_change=False)
             self.log.info(f"Password set for new user {username}")

@@ -1,0 +1,25 @@
+port=0
+
+interface={{ pxe_network_interface }}
+bind-interfaces
+
+dhcp-range={{ pxe_subnet | regex_replace('/.*', '') }},proxy
+
+# UEFI client detection (client-arch: 6=IA32, 7=BC/EFI, 9=x86-64)
+dhcp-match=set:efi-x86_64,option:client-arch,6
+dhcp-match=set:efi-x86_64,option:client-arch,7
+dhcp-match=set:efi-x86_64,option:client-arch,9
+
+dhcp-boot=tag:efi-x86_64,grubnetx64.efi,,{{ pxe_controller_ip }}
+dhcp-boot=tag:!efi-x86_64,pxelinux.0,,{{ pxe_controller_ip }}
+
+pxe-service=x86PC,"AUP Learning Cloud K3s Agent (Network Boot)",pxelinux
+pxe-service=IA32_EFI,"AUP Learning Cloud K3s Agent (Network Boot)",grubnetx64.efi
+pxe-service=BC_EFI,"AUP Learning Cloud K3s Agent (Network Boot)",grubnetx64.efi
+pxe-service=x86-64_EFI,"AUP Learning Cloud K3s Agent (Network Boot)",grubnetx64.efi
+
+enable-tftp
+tftp-root={{ pxe_tftp_root }}
+
+log-dhcp
+log-queries

@@ -40,10 +40,10 @@ Usage:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 # =============================================================================
 # YAML Configuration Models
@@ -85,11 +85,75 @@ class QuotaSettings(BaseModel):
     model_config = {"extra": "allow"}
 
 
+class AcceleratorOverride(BaseModel):
+    """Per-accelerator overrides for a resource (image and/or env)."""
+
+    image: str | None = None
+    env: dict[str, str] = Field(default_factory=dict)
+
+    model_config = {"extra": "allow"}
+
+
+def _normalize_container_path(value: str | None) -> str | None:
+    """Normalize an absolute container path without touching the host filesystem."""
+
+    if value is None:
+        return None
+
+    if not isinstance(value, str):
+        raise ValueError("defaultPath must be a string or null")
+
+    stripped_value = value.strip()
+    if not stripped_value:
+        raise ValueError("defaultPath cannot be empty")
+    if "\x00" in stripped_value:
+        raise ValueError("defaultPath cannot contain NUL bytes")
+    if not stripped_value.startswith("/"):
+        raise ValueError("defaultPath must be an absolute container path")
+
+    normalized_segments: list[str] = []
+    for segment in stripped_value.split("/"):
+        if segment in {"", "."}:
+            continue
+        if segment == "..":
+            raise ValueError("defaultPath cannot contain '..' segments")
+        normalized_segments.append(segment)
+
+    return "/" if not normalized_segments else "/" + "/".join(normalized_segments)
+
+
+class ResourceMetadata(BaseModel):
+    """Metadata for a resource (course/tutorial)."""
+
+    group: str = "OTHERS"
+    description: str = ""
+    subDescription: str = ""
+    accelerator: str = ""
+    acceleratorKeys: list[str] = Field(default_factory=list)
+    allowGitClone: bool = False
+    defaultPath: str | None = None
+    resourceType: Literal["notebook", "browser-ide"] | None = None
+    launchMode: str | None = None
+    env: dict[str, str] = Field(default_factory=dict)
+    acceleratorOverrides: dict[str, AcceleratorOverride] | None = None
+
+    @field_validator("defaultPath", mode="before")
+    @classmethod
+    def validate_default_path(cls, value: str | None) -> str | None:
+        """Validate and normalize a resource's default container path."""
+
+        return _normalize_container_path(value)
+
+    model_config = {"extra": "allow"}
+
+
 class ResourcesConfig(BaseModel):
-    """Resources configuration (images and requirements)."""
+    """Resources configuration (images, requirements, and metadata)."""
 
     images: dict[str, str] = Field(default_factory=dict)
     requirements: dict[str, ResourceRequirements] = Field(default_factory=dict)
+    metadata: dict[str, ResourceMetadata] = Field(default_factory=dict)
+    groupOrder: list[str] = Field(default_factory=list)
 
     model_config = {"extra": "allow"}
 
@@ -102,6 +166,44 @@ class TeamsConfig(BaseModel):
     model_config = {"extra": "allow"}
 
 
+class GitCloneSettings(BaseModel):
+    """Git repository cloning configuration."""
+
+    initContainerImage: str = "alpine/git:2.47.2"
+    allowedProviders: list[str] = Field(default_factory=lambda: ["github.com", "gitlab.com", "bitbucket.org"])
+    maxCloneTimeout: int = 300
+    githubAppName: str = ""
+    defaultAccessToken: str = ""
+    allowPersistenceChoice: bool = False
+    defaultPersistence: bool = True
+
+    model_config = {"extra": "allow"}
+
+
+class HubNetworkSettings(BaseModel):
+    """Network settings applied to the Hub process."""
+
+    allowedOrigins: list[str] = Field(default_factory=list)
+
+    model_config = {"extra": "allow"}
+
+
+class NotebookNetworkSettings(BaseModel):
+    """Network settings applied to each notebook server (singleuser pod)."""
+
+    allowedOrigins: list[str] = Field(default_factory=list)
+
+    model_config = {"extra": "allow"}
+
+
+class CodeServerSettings(BaseModel):
+    """Settings applied to code-server resources."""
+
+    extraTrustedDomains: list[str] = Field(default_factory=list)
+
+    model_config = {"extra": "allow"}
+
+
 class ParsedConfig(BaseModel):
     """Parsed configuration from values.yaml custom section."""
 
@@ -109,6 +211,11 @@ class ParsedConfig(BaseModel):
     accelerators: dict[str, AcceleratorConfig] = Field(default_factory=dict)
     teams: TeamsConfig = Field(default_factory=TeamsConfig)
     quota: QuotaSettings = Field(default_factory=QuotaSettings)
+    gitClone: GitCloneSettings = Field(default_factory=GitCloneSettings)
+    hub: HubNetworkSettings = Field(default_factory=HubNetworkSettings)
+    notebook: NotebookNetworkSettings = Field(default_factory=NotebookNetworkSettings)
+    codeServer: CodeServerSettings = Field(default_factory=CodeServerSettings)
+    notifications: dict[str, Any] = Field(default_factory=dict)
 
     model_config = {"extra": "allow"}
 
@@ -119,6 +226,11 @@ class ParsedConfig(BaseModel):
         accelerators: dict | None = None,
         teams: dict | None = None,
         quota: dict | None = None,
+        git_clone: dict | None = None,
+        hub: dict | None = None,
+        notebook: dict | None = None,
+        code_server: dict | None = None,
+        notifications: dict | None = None,
     ) -> ParsedConfig:
         """Create configuration from individual dicts."""
         raw_config: dict[str, Any] = {}
@@ -131,6 +243,16 @@ class ParsedConfig(BaseModel):
             raw_config["teams"] = teams
         if quota:
             raw_config["quota"] = quota
+        if git_clone:
+            raw_config["gitClone"] = git_clone
+        if hub:
+            raw_config["hub"] = hub
+        if notebook:
+            raw_config["notebook"] = notebook
+        if code_server:
+            raw_config["codeServer"] = code_server
+        if notifications is not None:
+            raw_config["notifications"] = notifications
 
         return cls.model_validate(raw_config)
 
@@ -159,6 +281,7 @@ class HubConfig:
         self.auth_mode: str = "auto-login"
         self.single_node_mode: bool = False
         self.github_org_name: str = ""
+        self.cluster_name: str = ""
         self.quota_enabled: bool = False
 
         # Parsed configuration
@@ -196,6 +319,7 @@ class HubConfig:
         # Extract runtime settings
         instance.auth_mode = raw_config.get("authMode", "auto-login")
         instance.github_org_name = raw_config.get("githubOrgName", "")
+        instance.cluster_name = raw_config.get("clusterName", "")
 
         # Single-node mode: from config or auto-enable for auto-login
         single_node_mode = raw_config.get("singleNodeMode")
@@ -210,6 +334,11 @@ class HubConfig:
             accelerators=raw_config.get("accelerators"),
             teams=raw_config.get("teams"),
             quota=raw_config.get("quota"),
+            git_clone=raw_config.get("gitClone"),
+            hub=raw_config.get("hub"),
+            notebook=raw_config.get("notebook"),
+            code_server=raw_config.get("codeServer"),
+            notifications=raw_config.get("notifications"),
         )
 
         # Quota enabled: from config or auto-detect based on auth_mode
@@ -256,6 +385,13 @@ class HubConfig:
     # =========================================================================
 
     @property
+    def platform_display_name(self) -> str:
+        base = "AUP Learning Cloud"
+        if self.cluster_name:
+            return f"{base} {self.cluster_name}"
+        return base
+
+    @property
     def resources(self) -> ResourcesConfig:
         """Get resources configuration."""
         return self._config.resources
@@ -275,6 +411,31 @@ class HubConfig:
         """Get quota configuration."""
         return self._config.quota
 
+    @property
+    def git_clone(self) -> GitCloneSettings:
+        """Get git clone configuration."""
+        return self._config.gitClone
+
+    @property
+    def hub_network(self) -> HubNetworkSettings:
+        """Get Hub-level network settings."""
+        return self._config.hub
+
+    @property
+    def notebook_network(self) -> NotebookNetworkSettings:
+        """Get notebook server network settings."""
+        return self._config.notebook
+
+    @property
+    def code_server(self) -> CodeServerSettings:
+        """Get code-server settings."""
+        return self._config.codeServer
+
+    @property
+    def notifications(self) -> dict[str, Any]:
+        """Get raw notification configuration for backend normalization."""
+        return dict(self._config.notifications)
+
     # =========================================================================
     # Helper Methods
     # =========================================================================
@@ -286,6 +447,10 @@ class HubConfig:
     def get_resource_requirements(self, resource_type: str) -> ResourceRequirements | None:
         """Get resource requirements for a resource type."""
         return self._config.resources.requirements.get(resource_type)
+
+    def get_resource_metadata(self, resource_type: str) -> ResourceMetadata | None:
+        """Get metadata for a resource type."""
+        return self._config.resources.metadata.get(resource_type)
 
     def get_accelerator_node_selector(self, accelerator_key: str) -> dict[str, str]:
         """Get node selector for an accelerator type."""

@@ -18,7 +18,6 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-
 # fullnameOverride and nameOverride distinguishes blank strings, null values,
 # and non-blank strings. For more details, see the configuration reference.
 fullnameOverride: ""
@@ -35,9 +34,13 @@ custom:
   # Authentication mode: "auto-login" | "dummy" | "github" | "multi"
   #   - auto-login: No credentials required, auto-login as 'student' (default, for single-node)
   #   - dummy: Accept any username/password (for testing)
-  #   - github: GitHub OAuth authentication
-  #   - multi: GitHub OAuth + Local accounts
+  #   - github: GitHub App authentication
+  #   - multi: GitHub App + Local accounts
   authMode: "auto-login"
+
+  # Cluster display name (optional). Appended to "AUP Learning Cloud" in the UI.
+  # Example: "City/University" → "AUP Learning Cloud City/University"
+  clusterName: ""
 
   # Auto-create admin user on first install (optional)
   adminUser:
@@ -47,16 +50,33 @@ custom:
   # Define these in runtime/values.yaml, not here
   accelerators: {}
 
-  # Resource images and requirements
+  # Resource images, requirements, and metadata
   # Define these in runtime/values.yaml, not here
   resources:
     images: {}
     requirements: {}
+    metadata: {}
 
   # Team to resource mapping
   # Define these in runtime/values.yaml, not here
   teams:
     mapping: {}
+
+  # Hub-level allowed origins: sets Access-Control-Allow-Origin on Hub HTTP
+  # responses. Useful when the Hub API is accessed cross-origin.
+  hub:
+    allowedOrigins: []
+
+  # Notebook server allowed origins: injected into each notebook server's
+  # startup args via --ServerApp.allow_origin_pat.
+  # Needed when kernel WebSocket connections go through a reverse proxy.
+  notebook:
+    allowedOrigins: []
+
+  # code-server automatically trusts the current public Hub host for Back-to-Hub
+  # links. Use this only to add host/domain entries for additional trusted sites.
+  codeServer:
+    extraTrustedDomains: []
 
   # User quota management system
   quota:
@@ -161,7 +181,7 @@ hub:
   extraVolumeMounts: []
   image:
     name: quay.io/jupyterhub/k8s-hub
-    tag: "4.1.0"
+    tag: "4.3.3"
     pullPolicy:
     pullSecrets: []
   resources: {}
@@ -177,11 +197,19 @@ hub:
     capabilities:
       drop: ["ALL"]
   lifecycle: {}
-  loadRoles: {}
+  loadRoles:
+    prometheus-metrics:
+      description: Allow Prometheus to scrape Hub metrics.
+      scopes:
+        - read:metrics
+      services:
+        - prometheus-metrics
   services:
     # Service account for quota refresh CronJob
     quota-refresh:
       admin: true
+    # Service account for authenticated /hub/metrics scraping.
+    prometheus-metrics: {}
   pdb:
     enabled: false
     maxUnavailable:
@@ -201,7 +229,6 @@ hub:
     allowedIngressPorts: []
   allowNamedServers: false
   namedServerLimitPerUser:
-  authenticatePrometheus:
   redirectToServer:
   shutdownOnLogout:
   templatePaths: []
@@ -230,6 +257,32 @@ hub:
     name:
     annotations: {}
   extraPodSpec: {}
+
+monitoring:
+  enabled: false
+  namespace: monitoring
+  releaseLabel: monitoring
+  hubMetrics:
+    enabled: false
+    allowUnauthenticatedScrape: false
+    serviceAnnotations:
+      enabled: false
+  serviceMonitor:
+    enabled: false
+    interval: 15s
+    authorization:
+      enabled: true
+      type: Bearer
+      hubServiceName: prometheus-metrics
+      secret:
+        create: true
+        name: ""
+        key: token
+  grafana:
+    dashboard:
+      enabled: false
+  prometheusRule:
+    enabled: false
 
 rbac:
   create: true
@@ -298,7 +351,7 @@ proxy:
       # tag is automatically bumped to new patch versions by the
       # watch-dependencies.yaml workflow.
       #
-      tag: "4.6.3" # https://github.com/jupyterhub/configurable-http-proxy/tags
+      tag: "5.2.0" # https://github.com/jupyterhub/configurable-http-proxy/tags
       pullPolicy:
       pullSecrets: []
     extraCommandLineFlags: []
@@ -356,7 +409,7 @@ proxy:
       # tag is automatically bumped to new patch versions by the
       # watch-dependencies.yaml workflow.
       #
-      tag: "v3.3.1" # ref: https://hub.docker.com/_/traefik?tab=tags
+      tag: "v3.6.12" # ref: https://hub.docker.com/_/traefik?tab=tags
       pullPolicy:
       pullSecrets: []
     hsts:
@@ -408,7 +461,7 @@ proxy:
         type: "RuntimeDefault"
     image:
       name: quay.io/jupyterhub/k8s-secret-sync
-      tag: "4.1.0"
+      tag: "4.3.3"
       pullPolicy:
       pullSecrets: []
     resources: {}
@@ -448,7 +501,7 @@ singleuser:
   networkTools:
     image:
       name: quay.io/jupyterhub/k8s-network-tools
-      tag: "4.1.0"
+      tag: "4.3.3"
       pullPolicy:
       pullSecrets: []
     resources: {}
@@ -501,7 +554,7 @@ singleuser:
       subPath:
   image:
     name: quay.io/jupyterhub/k8s-singleuser-sample
-    tag: "4.1.0"
+    tag: "4.3.3"
     pullPolicy:
     pullSecrets: []
   startTimeout: 300
@@ -633,7 +686,7 @@ scheduling:
       # here. We aim to stay around 1 minor version behind the latest k8s
       # version.
       #
-      tag: "v1.30.8" # ref: https://github.com/kubernetes/kubernetes/tree/master/CHANGELOG
+      tag: "v1.30.14" # ref: https://github.com/kubernetes/kubernetes/tree/master/CHANGELOG
       pullPolicy:
       pullSecrets: []
     nodeSelector: {}
@@ -665,7 +718,7 @@ scheduling:
       #
       # If you update this, also update prePuller.pause.image.tag
       #
-      tag: "3.10"
+      tag: "3.10.1"
       pullPolicy:
       pullSecrets: []
     revisionHistoryLimit:
@@ -731,7 +784,7 @@ prePuller:
     # image and the configuration below relates to the hook-image-awaiter Job
     image:
       name: quay.io/jupyterhub/k8s-image-awaiter
-      tag: "4.1.0"
+      tag: "4.3.3"
       pullPolicy:
       pullSecrets: []
     containerSecurityContext:
@@ -782,7 +835,7 @@ prePuller:
       #
       # If you update this, also update scheduling.userPlaceholder.image.tag
       #
-      tag: "3.10"
+      tag: "3.10.1"
       pullPolicy:
       pullSecrets: []
 

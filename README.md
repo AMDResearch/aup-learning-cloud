@@ -21,22 +21,29 @@ SOFTWARE.
 
 # AUP Learning Cloud
 
+> **✨ New UI is coming!** 🚀 Try it now on [https://tpe.aupcloud.io/](https://tpe.aupcloud.io/) 👀
+
+
 AUP Learning Cloud is a tailored JupyterHub deployment designed to provide an intuitive and hands-on AI learning experience. It features a comprehensive suite of AI toolkits running on AMD hardware acceleration, enabling users to learn and experiment with ease.
 
-![Software Architecture](docs/imgs/software-stack.png)
+![Software Architecture](deploy/docs/images/software-stack.png)
 
 ## Quick Start
 
 The simplest way to deploy AUP Learning Cloud on a single machine in a development or demo environment.
 
 ### Prerequisites
-- **Hardware**: AMD Ryzen™ AI Halo Device (e.g., AI Max+ 395, AI Max 390)
+- **Hardware**: Supported **Ryzen AI 300 series and above** APUs and **Radeon 9000 series** PCIe GPUs.
 - **Memory**: 32GB+ RAM (64GB recommended)
 - **Storage**: 500GB+ SSD
-- **OS**: Ubuntu 24.04.3 LTS
+- **OS**: Ubuntu 24.04.4 LTS
 - **Docker**: Install Docker and configure for non-root access
+- **TUI deps**: `python3-questionary` and `python3-prompt-toolkit` (apt) for the recommended interactive installer; conda/venv users use `pip install questionary prompt_toolkit`
 
 ```bash
+# Ryzen AI APU only: OEM kernel for ROCm on Ubuntu 24.04 (reboot required)
+sudo apt update && sudo apt install linux-oem-6.14
+
 # Install Docker
 curl -fsSL https://get.docker.com | sh
 
@@ -48,55 +55,78 @@ newgrp docker
 
 # Install Build Tools
 sudo apt install build-essential
+
+# TUI dependencies (required for the recommended interactive install)
+sudo apt install python3-questionary python3-prompt-toolkit
 ```
 
-> **Note**: See [Docker Post-installation Steps](https://docs.docker.com/engine/install/linux-postinstall/) and [Install Docker Engine on Ubuntu](https://docs.docker.com/engine/install/ubuntu/) for details.
+> **Kernel note** (Ryzen AI APU only): The OEM kernel package follows AMD ROCm's Ryzen APU installation guidance for Ubuntu 24.04. See the [ROCm 7.13.0 preview installation guide for Ryzen APUs](https://rocm.docs.amd.com/en/7.13.0-preview/install/rocm.html?fam=ryzen&w=compute&os=ubuntu&ubuntu-ver=24.04&i=pkgman&gpu=max-pro-395&gfx=gfx1151) for details. Radeon dGPU systems typically use the stock Ubuntu kernel—check ROCm docs for your GPU.
+>
+> **Docker note**: See [Docker Post-installation Steps](https://docs.docker.com/engine/install/linux-postinstall/) and [Install Docker Engine on Ubuntu](https://docs.docker.com/engine/install/ubuntu/) for details.
+>
+> **TUI note**: **System Python (apt):** install `python3-questionary` and `python3-prompt-toolkit` as shown above. **Conda or virtualenv users:** use `pip install questionary prompt_toolkit` inside your active environment instead of the apt packages. These are required for the interactive TUI; non-interactive `./auplc-installer install` does not need them.
 
 ### Installation
+
+**Interactive (recommended):**
+
 ```bash
 git clone https://github.com/AMDResearch/aup-learning-cloud.git
-cd aup-learning-cloud/deploy/
-sudo ./single-node.sh install
+cd aup-learning-cloud
+./auplc-installer                      # pick Install, accept defaults, set Image tag to develop
 ```
 
-After installation completes, open http://localhost:30890 in your browser. No login credentials are required - you will be automatically logged in.
+**Non-interactive:**
 
-### Script Commands
-
-| Command | Description |
-|---------|-------------|
-| `install` | Full installation (K3s, tools, GPU plugin, images, JupyterHub) |
-| `uninstall` | Complete removal of all components |
-| `upgrade-runtime` | Upgrade JupyterHub deployment |
-| `build-images` | Build and import container images |
-| `pull-images` | Pull external images for offline use |
-| `install-tools` | Install Helm and K9s only |
-| `install-runtime` | Deploy JupyterHub only |
-| `remove-runtime` | Remove JupyterHub only |
-
-Example:
 ```bash
-# Upgrade JupyterHub after configuration changes
-sudo ./single-node.sh upgrade-runtime
-
-# Rebuild images after modifying Dockerfiles
-sudo ./single-node.sh build-images
+git clone https://github.com/AMDResearch/aup-learning-cloud.git
+cd aup-learning-cloud
+./auplc-installer install
 ```
 
-> **💡 Tip**: If you need to use alternative container registries or package mirrors, see [Mirror Configuration](deploy/README.md#mirror-configuration).
-## Manual Installation
+A successful install looks like this:
 
-For users who prefer step-by-step manual installation or need more control over the deployment process:
+```text
+This operation needs root privileges. Requesting sudo password...
+  ✓ [1/8] Detecting GPU  (0.2s)
+  ✓ [2/8] Generating values overlay (initial)  (0.0s)
+  ✓ [3/8] Installing helm + k9s  (0.0s)
+  ✓ [4/8] Installing K3s (single-node)  (3.8s)
+  ✓ [5/8] Pulling custom + external images  (25.0s)
+  ✓ [6/8] Deploying ROCm GPU device plugin + node labeller  (0.2s)
+  ✓ [7/8] Refreshing values overlay from node labels  (0.2s)
+  ✓ [8/8] Deploying JupyterHub runtime (helm install + wait)  (9.2s)
 
-- [Single-Node Manual Deployment](deploy/README.md#single-node-deployment) - Detailed manual setup for development and demo environments
-- [Multi-Node Cluster Deployment](deploy/README.md#multi-node-cluster-deployment) - Production deployment with Ansible playbooks
+   _    _   _ ____    _                          _                  ____ _                 _
+  / \  | | | |  _ \  | |    ___  __ _ _ __ _ __ (_)_ __   __ _     / ___| | ___  _   _  __| |
+ / _ \ | | | | |_) | | |   / _ \/ _` | '__| '_ \| | '_ \ / _` |   | |   | |/ _ \| | | |/ _` |
+/ ___ \| |_| |  __/  | |__|  __/ (_| | |  | | | | | | | | (_| |   | |___| | (_) | |_| | (_| |
+/_/   \_\___/|_|     |_____\___|\__,_|_|  |_| |_|_|_| |_|\__, |    \____|_|\___/ \__,_|\__,_|
+                                                         |___/
+    You have successfully installed AUP Learning Cloud!
+
+    Open in your browser: http://localhost:30890
+    (auto-logged-in as 'student' — no login needed)
+
+    kubectl is configured at $HOME/.kube/config; try `kubectl get nodes`
+```
+
+See the full guide at [Quick Start](https://amdresearch.github.io/aup-learning-cloud/installation/quick-start.html) and [Single-Node Deployment](https://amdresearch.github.io/aup-learning-cloud/installation/single-node.html).
+
+### Uninstall
+
+```bash
+./auplc-installer uninstall
+```
+
+## Cluster Installation
+For multi-node cluster installation or need more control over the deployment process:
+
+- [Multi-Node Cluster Deployment](https://amdresearch.github.io/aup-learning-cloud/installation/multi-node.html) - Production deployment with Ansible playbooks
 
 ## Learning Solution
 
 AUP Learning Cloud offers the following Learning Toolkits:
-
-> [!IMPORTANT]
-> Only [**Deep Learning**](projects/DL) and [**Large Language Model from Scratch**](projects/LLM) are available in the v1.0 release.
 
 - [**Computer Vision**](projects/CV) \
 Includes 10 hands-on labs covering common computer vision concepts and techniques.
@@ -106,6 +136,9 @@ Includes 12 hands-on labs covering common deep learning concepts and techniques.
 
 - [**Large Language Model from Scratch**](projects/LLM) \
 Includes 9 hands-on labs designed to teach LLM development from scratch.
+
+- [**Physical Simulation**](projects/PhySim) \
+Hands-on labs for physics simulation and robotics using Genesis.
 
 ## Key Features
 
@@ -125,34 +158,66 @@ Kubernetes provides a robust infrastructure for deploying and managing JupyterHu
 
 Seamless integration with GitHub Single Sign-On (SSO) and Native Authenticator for secure and efficient user authentication.
 - **Auto-admin on install**: Initial admin created automatically with random password
-- **Dual login**: GitHub OAuth + Native accounts on single login page
+- **Dual login**: GitHub App + Native accounts on single login page
 - **Batch user management**: CSV/Excel-based bulk operations via scripts
 
 ### Storage Management and Security
 
 Dynamic NFS provisioning ensures scalable and persistent storage for user data, while end-to-end TLS encryption with automated certificate management guarantees secure and reliable communication.
 
-## Available Notebook Environments
+## Available Notebook and Coding Environments
 
-Current environments are set up as `RESOURCE_IMAGES` in `runtime/chart/files/hub`. These settings should be consistent with `Prepullers` in `runtime/values.yaml`.
+Current environments are configured via `custom.resources.images` in `runtime/values.yaml`. These settings should be consistent with `prePuller.extraImages`.
 
-| Environment | Image                                    | Version | Hardware                        |
-| ----------- | ---------------------------------------- | ------- | ------------------------------- |
-| Base CPU    | `ghcr.io/amdresearch/auplc-default` | v1.0    | CPU                             |
-| CV COURSE   | `ghcr.io/amdresearch/auplc-cv`    | v1.0  | GPU (Strix-Halo) |
-| DL COURSE   | `ghcr.io/amdresearch/auplc-dl`    | v1.0  | GPU (Strix-Halo) |
-| LLM COURSE  | `ghcr.io/amdresearch/auplc-llm`   | v1.0  | GPU (Strix-Halo)                |
+| Environment | Image                                    | Hardware                        |
+| ----------- | ---------------------------------------- | ------------------------------- |
+| Base CPU    | `ghcr.io/amdresearch/auplc-default` | CPU                             |
+| GPU Base    | `ghcr.io/amdresearch/auplc-base`   | GPU                             |
+| Code CPU    | `ghcr.io/amdresearch/auplc-code-cpu` | CPU                             |
+| Code GPU    | `ghcr.io/amdresearch/auplc-code-gpu` | GPU                             |
+| CV COURSE   | `ghcr.io/amdresearch/auplc-cv`    | GPU |
+| DL COURSE   | `ghcr.io/amdresearch/auplc-dl`    | GPU |
+| LLM COURSE  | `ghcr.io/amdresearch/auplc-llm`   | GPU                |
+| PhySim COURSE | `ghcr.io/amdresearch/auplc-physim` | GPU               |
+
+The `auplc-default`, `auplc-base`, and `Course-*` images remain notebook and course focused. Browser-based coding is provided by generic code-server images instead of per-course VS Code image variants. Resources launch code-server when their `custom.resources.metadata.<resource>.launchMode` is set to `code-server`; the default configuration uses `code-cpu` for CPU-only coding workspaces and `code-gpu` for GPU-accelerated coding workspaces.
+
+Build the images:
+
+```bash
+./auplc-installer img build base-rocm --gpu=strix
+```
+
+The code-server container starts on port `8888` with `code-server --auth none`. This is safe only when the user pod is reachable exclusively through JupyterHub and the JupyterHub proxy authentication boundary. Do not expose the code-server pod port directly through a NodePort, LoadBalancer, ingress, or other unauthenticated route.
+
+The code images install the built-in extension list from `dockerfiles/Code/extensions.txt` plus local `.vsix` packages such as the AUPLC Back-to-Hub extension. Before adding or distributing additional VS Code, OpenVSX, or Marketplace extensions, confirm their licenses and marketplace terms are compatible with your deployment and redistribution model.
 
 ## Documentation
 
-- [JupyterHub Configuration](docs/jupyterhub/README.md) - Detailed JupyterHub settings
-- [Authentication Guide](docs/jupyterhub/authentication-guide.md) - GitHub OAuth and native authentication
-- [User Management Guide](docs/jupyterhub/user-management.md) - Batch user operations with scripts
-- [User Quota System](docs/jupyterhub/quota-system.md) - Resource usage tracking and quota management
-- [GitHub OAuth Setup](docs/jupyterhub/How_to_Setup_GitHub_OAuth.md) - OAuth configuration
-- [Maintenance Manual](docs/user-manual/aup-remote-lab-user-manual-admin-new.md) - Operations guide
+Full documentation is available at: **https://amdresearch.github.io/aup-learning-cloud/**
+
+- [Deployment Guide](deploy/README.md) - Single-node and multi-node deployment
+- [Configuration Reference](https://amdresearch.github.io/aup-learning-cloud/jupyterhub/configuration-reference.html) - `runtime/values.yaml` field reference
+- [Authentication Guide](https://amdresearch.github.io/aup-learning-cloud/jupyterhub/authentication-guide.html) - GitHub App and native authentication
+- [User Management Guide](https://amdresearch.github.io/aup-learning-cloud/jupyterhub/user-management.html) - Batch user operations with scripts
+- [User Quota System](https://amdresearch.github.io/aup-learning-cloud/jupyterhub/quota-system.html) - Resource usage tracking and quota management
 - [AUP Learning Cloud Skills](README-SKILL.md) - Agent Skills for deploying and maintaining AUP Learning Cloud
 
 ## Contributing
 
-Please refer to [CONTRIBUTING.md](docs/contribute.md) for details on how to contribute to the project.
+Please refer to [CONTRIBUTING.md](CONTRIBUTING.md) for details on how to contribute to the project.
+
+## Acknowledgment
+
+AUP would like to thank the following universities and professors. This learning solution was made possible through the joint efforts of these partners.
+
+| University | Professors and Labs | Toolkits |
+|---|---|---|
+| National Taiwan University | [Prof. Chun-Yi Lee](https://www.csie.ntu.edu.tw/en/member/Faculty/Chun-Yi-Lee-67240464), [ELSA Lab](https://elsalab.ai/) | DL, CV |
+| Nanjing University | [Prof. Jingwei Xu](https://njudeepengine.github.io/jingweixu/), [NJUDeepEngine](https://github.com/NJUDeepEngine) | LLM |
+
+The following repositories and icons are used in AUP Learning Cloud, either in close to original form or as an inspiration:
+
+* [Genesis](https://github.com/Genesis-Embodied-AI/Genesis)
+
+* [Flaticon](https://www.flaticon.com): deployment (Prashanth Rapolu 15, Freepik), team & user (Freepik), machine learning (Becris).

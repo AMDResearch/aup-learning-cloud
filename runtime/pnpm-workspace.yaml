@@ -1,0 +1,46 @@
+# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+
+packages:
+  - "shared/*"
+  - "notebook/*"
+  - "!notebook/*/auplc_jupyterlab_runtime_status/labextension"
+  - "code-server/extensions/*"
+  - "hub/frontend/packages/*"
+  - "hub/frontend/apps/*"
+
+catalog:
+  # Linting
+  eslint: ^9.28.0
+  "@eslint/js": ^9.28.0
+  typescript-eslint: ^8.33.1
+  globals: ^16.2.0
+  eslint-plugin-react-hooks: ^5.2.0
+  eslint-plugin-react-refresh: ^0.4.20
+
+  # TypeScript
+  typescript: ^5.9.3
+  "@types/node": ^25.2.3
+  "@types/react": ^19.2.13
+  "@types/react-dom": ^19.2.3
+
+  # React
+  react: ^19.2.4
+  react-dom: ^19.2.4
+
+  # Testing
+  vitest: ^3.2.4
+  jsdom: ^26.1.0
+  "@testing-library/react": ^16.3.0
+  "@testing-library/jest-dom": ^6.8.0
+  "@testing-library/user-event": ^14.6.1
+
+  # Build tools
+  vite: ^7.3.1
+  "@vitejs/plugin-react": ^5.1.4
+
+  # Charts & Dashboard
+  recharts: ^2.15.0
+  tailwindcss: ^4.1.0
+  "@tailwindcss/vite": ^4.1.0
+  "@tailwindcss/cli": ^4.1.0

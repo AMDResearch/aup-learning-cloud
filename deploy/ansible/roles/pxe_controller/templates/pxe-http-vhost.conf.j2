@@ -1,0 +1,13 @@
+{# Managed by Ansible (pxe_controller role) -- do not edit by hand. #}
+<VirtualHost *:{{ pxe_web_port }}>
+    DocumentRoot {{ pxe_web_root }}
+
+    <Directory {{ pxe_web_root }}>
+        Options -Indexes +FollowSymLinks
+        AllowOverride None
+        Require all granted
+    </Directory>
+
+    ErrorLog ${APACHE_LOG_DIR}/pxe-http-error.log
+    CustomLog ${APACHE_LOG_DIR}/pxe-http-access.log combined
+</VirtualHost>

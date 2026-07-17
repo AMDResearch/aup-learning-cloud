@@ -18,7 +18,8 @@
 # SOFTWARE.
 
 # Use a verified ROCm PyTorch image as base
-FROM ghcr.io/amdresearch/base-gfx1151:v0.1-full
+ARG BASE_IMAGE=ghcr.io/amdresearch/auplc-base:latest
+FROM ${BASE_IMAGE}
 
 USER root
 # Vulkan backend and GUI
@@ -29,14 +30,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libvulkan1 mesa-vulkan-drivers vulkan-tools \
  && rm -rf /var/lib/apt/lists/*
 
-USER jovyan
+RUN ln -sf /opt/rocm/lib/llvm/bin/ld.lld /usr/local/bin/ld.lld
+
+# IMPORTANT: must remain under USER root here. pip install as jovyan silently
+# falls back to ~/.local/, which gets masked by the PVC mount at runtime.
+
+# Pinning to <2.4 restores the expected behaviour.
+RUN pip3 install --no-cache-dir \
+    "numpy>=1.26.4,<2.4" \
+    "numba>=0.61"
 
 # Install Genesis related packages
-RUN pip3 install --no-cache-dir --break-system-packages \
+RUN pip3 install --no-cache-dir \
     loguru \
     omegaconf \
     gstaichi \
-    genesis-world
+    "genesis-world==0.4.6"
 
 # Copy related rocm notebooks into the docker
 RUN mkdir -p /opt/workspace/PhySim
@@ -45,3 +54,4 @@ COPY ./course_data /opt/workspace/PhySim
 USER root
 RUN chown -R jovyan:1000 /opt/workspace
 USER jovyan
+WORKDIR /opt/workspace/PhySim

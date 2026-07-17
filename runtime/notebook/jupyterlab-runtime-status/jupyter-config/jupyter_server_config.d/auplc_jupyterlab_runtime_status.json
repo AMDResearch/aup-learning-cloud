@@ -1,0 +1,7 @@
+{
+  "ServerApp": {
+    "jpserver_extensions": {
+      "auplc_jupyterlab_runtime_status": true
+    }
+  }
+}

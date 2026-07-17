@@ -1,0 +1,15 @@
+DEFAULT menu.c32
+PROMPT 0
+TIMEOUT 50
+MENU TITLE K3s Cluster - Diskless PXE Boot
+
+LABEL diskless
+  MENU LABEL AUP Learning Cloud K3s Agent (Network Boot)
+  MENU DEFAULT
+  KERNEL vmlinuz
+  INITRD initrd.img
+  APPEND root=/dev/nfs nfsroot={{ pxe_controller_ip }}:{{ pxe_nfs_root }},ro,vers=3 ip=dhcp rootdelay=10 rw udev.event_timeout=10
+
+LABEL local
+  MENU LABEL Boot from local disk
+  LOCALBOOT 0

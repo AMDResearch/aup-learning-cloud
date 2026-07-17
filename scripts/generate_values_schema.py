@@ -55,7 +55,7 @@ def main():
     parser.add_argument(
         "--input",
         type=Path,
-        default=Path(__file__).parent.parent / "runtime" / "jupyterhub" / "values.schema.yaml",
+        default=Path(__file__).parent.parent / "runtime" / "chart" / "values.schema.yaml",
         help="Path to values.schema.yaml (default: runtime/chart/values.schema.yaml)",
     )
     parser.add_argument(

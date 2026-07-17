@@ -18,20 +18,81 @@
 # SOFTWARE.
 
 
+ARG NODE_IMAGE=docker.io/library/node:22-bookworm-slim
+ARG BASE_IMAGE=quay.io/jupyter/base-notebook:python-3.12
+
+FROM ${NODE_IMAGE} AS runtime-status-builder
+
+ARG JUPYTERLAB_VERSION="4.5.6"
+ARG NPM_REGISTRY=
+ARG PNPM_VERSION="10.27.0"
+
+WORKDIR /build/runtime
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    python3-pip \
+    python3-venv \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python3 -m venv /opt/jupyter-build && \
+    /opt/jupyter-build/bin/python -m pip install --no-cache-dir --upgrade pip && \
+    /opt/jupyter-build/bin/python -m pip install --no-cache-dir jupyterlab=="${JUPYTERLAB_VERSION}"
+
+ENV PATH="/opt/jupyter-build/bin:${PATH}"
+
+RUN corepack enable && corepack prepare pnpm@"${PNPM_VERSION}" --activate
+
+COPY runtime/package.json runtime/pnpm-workspace.yaml runtime/pnpm-lock.yaml runtime/.npmrc ./
+COPY runtime/hub/frontend/tsconfig.base.json ./hub/frontend/tsconfig.base.json
+COPY runtime/shared/runtime-status /build/runtime/shared/runtime-status
+COPY runtime/notebook/jupyterlab-runtime-status /build/runtime/notebook/jupyterlab-runtime-status
+
+RUN rm -rf \
+    /build/runtime/shared/runtime-status/node_modules \
+    /build/runtime/shared/runtime-status/dist \
+    /build/runtime/notebook/jupyterlab-runtime-status/node_modules \
+    /build/runtime/notebook/jupyterlab-runtime-status/lib \
+    /build/runtime/notebook/jupyterlab-runtime-status/auplc_jupyterlab_runtime_status/labextension
+
+RUN if [ -n "${NPM_REGISTRY}" ]; then pnpm config set registry "${NPM_REGISTRY}"; fi && \
+    pnpm install --frozen-lockfile --prod=false --filter @auplc/jupyterlab-runtime-status...
+
+RUN pnpm --filter @auplc/runtime-status run build && \
+    pnpm --filter @auplc/jupyterlab-runtime-status run build && \
+    test -f /build/runtime/notebook/jupyterlab-runtime-status/auplc_jupyterlab_runtime_status/labextension/package.json && \
+    test -n "$(find /build/runtime/notebook/jupyterlab-runtime-status/auplc_jupyterlab_runtime_status/labextension/static -name 'remoteEntry*.js' -print -quit)"
+
 # Build as jupyterhub/singleuser
 # Run with the DockerSpawner in JupyterHub
 
-ARG BASE_IMAGE=quay.io/jupyter/base-notebook
-FROM $BASE_IMAGE
+# Pin to the python-3.12 stream of jupyter/docker-stacks so pre-pulled images
+# (auplc_installer/images.py BUILD_ONLY_IMAGES) match this build's FROM.
+FROM ${BASE_IMAGE}
 LABEL maintainer="Jupyter Project <jupyter@googlegroups.com>"
 
-ARG JUPYTERHUB_VERSION=""
+# Align jupyterhub package with the Hub image version (runtime/chart/Chart.yaml
+# appVersion) so the singleuser <-> hub protocol stays in sync.
+ARG JUPYTERHUB_VERSION="5.4.4"
+ARG JUPYTERLAB_VERSION="4.5.6"
+ARG NOTEBOOK_VERSION="7.5.5"
+ARG IPYWIDGETS_VERSION="8.1.8"
+ARG IPYKERNEL_VERSION="6.31.0"
 ARG PIP_INDEX_URL=
 
 # Set pip index URL if specified
 RUN if [ -n "${PIP_INDEX_URL}" ]; then pip config set global.index-url "${PIP_INDEX_URL}"; fi
 
-RUN if [ -n "$JUPYTERHUB_VERSION" ]; then python3 -mpip install --no-cache --upgrade --upgrade-strategy only-if-needed jupyterhub=="$JUPYTERHUB_VERSION"; fi
+RUN if [ -n "$JUPYTERHUB_VERSION" ]; then python3 -mpip install --no-cache --upgrade --upgrade-strategy only-if-needed \
+    jupyterhub=="$JUPYTERHUB_VERSION" \
+    jupyterlab=="$JUPYTERLAB_VERSION" \
+    notebook=="$NOTEBOOK_VERSION" \
+    ipywidgets=="$IPYWIDGETS_VERSION" \
+    ipykernel=="$IPYKERNEL_VERSION"; fi
 
-# Install server timer extension (displays remaining time in JupyterLab status bar)
-RUN pip install --no-cache-dir jupyterlab-server-timer
+COPY --from=runtime-status-builder --chown=1000:100 /build/runtime/notebook/jupyterlab-runtime-status /tmp/auplc-jupyterlab-runtime-status
+
+RUN python3 -mpip install --no-cache-dir /tmp/auplc-jupyterlab-runtime-status && \
+    rm -rf /tmp/auplc-jupyterlab-runtime-status
+
+WORKDIR /home/jovyan

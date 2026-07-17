@@ -1,0 +1,13 @@
+[Unit]
+Description=Auto-join k3s cluster
+After=network-online.target set-hostname.service mount-local-disk.service
+Wants=network-online.target
+Requires=set-hostname.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/k3s-auto-join.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

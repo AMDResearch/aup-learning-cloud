@@ -45,7 +45,7 @@ class AutoLoginAuthenticator(Authenticator):
         """Override to bypass login page and auto-authenticate."""
 
         class AutoLoginHandler(BaseHandler):
-            """Handler that automatically authenticates and redirects to spawn."""
+            """Handler that automatically authenticates and redirects to home."""
 
             async def get(self):
                 """Auto-authenticate user on GET request."""
@@ -57,9 +57,14 @@ class AutoLoginAuthenticator(Authenticator):
 
                 self.set_login_cookie(user)
 
-                next_url = self.get_argument("next", "")
-                if not next_url:
-                    next_url = getattr(user, "url", None) or url_path_join(self.hub.base_url, "spawn")
+                # Resolve the post-login destination via BaseHandler.get_next_url
+                # so the value goes through JupyterHub's _validate_next_url,
+                # which rejects cross-origin targets and normalises path-
+                # confusion payloads (CVE-2026-33709 class). Reading
+                # ``?next=`` directly and calling ``self.redirect`` would be
+                # an open redirect — see the JupyterHub upstream LoginHandler
+                # for the reference flow.
+                next_url = self.get_next_url(user, default=url_path_join(self.hub.base_url, "home"))
 
                 self.log.info(f"Auto-login: user '{username}' authenticated, redirecting to {next_url}")
                 self.redirect(next_url)

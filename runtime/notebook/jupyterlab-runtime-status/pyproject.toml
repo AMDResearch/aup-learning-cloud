@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "auplc-jupyterlab-runtime-status"
+version = "0.0.0"
+description = "JupyterLab runtime status extension for AUP Learning Cloud notebooks"
+requires-python = ">=3.10"
+dependencies = [
+    "jupyter_server>=2,<3",
+]
+
+[project.entry-points."jupyter_server.extension"]
+auplc_jupyterlab_runtime_status = "auplc_jupyterlab_runtime_status"

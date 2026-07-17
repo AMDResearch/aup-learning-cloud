@@ -1,0 +1,227 @@
+# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+name: Pack Offline Bundle
+
+on:
+  # Automatic: fires after all images are built on a release tag push.
+  # The job condition below filters to v* tags on the main repo only.
+  workflow_run:
+    workflows: ["Build Docker Images"]
+    types: [completed]
+
+  # Manual: for testing or on-demand bundle creation.
+  workflow_dispatch:
+    inputs:
+      gpu_type:
+        description: 'GPU type (determines target architecture and HSA config)'
+        required: true
+        default: 'strix-halo'
+        type: choice
+        options:
+          - strix-halo   # gfx1151 — Ryzen AI Max+ 395 / Max 390
+          - phx          # gfx110x — Ryzen AI 300 (Phoenix)
+          - strix        # gfx1150 — Ryzen AI 300 (Strix Point)
+          - rdna4        # gfx120x — Radeon RX 9000 series
+      image_tag:
+        description: 'Image tag prefix (default: current branch/tag name)'
+        required: false
+        default: ''
+        type: string
+      image_registry:
+        description: 'Registry prefix for custom images (override for forks or private registries)'
+        required: false
+        default: 'ghcr.io/amdresearch'
+        type: string
+permissions:
+  contents: write
+  packages: read
+
+jobs:
+  # ── Automatic release: one job per GPU target, triggered by workflow_run ──
+  pack-release:
+    name: "Pack Bundle (${{ matrix.gpu_type }}) — Release"
+    if: |
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      startsWith(github.event.workflow_run.head_branch, 'v')
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        gpu_type: [strix-halo, phx, strix, rdna4]
+
+    steps:
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: false
+
+      - name: Check available disk space
+        run: df -h /
+
+      - name: Checkout code at the release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve image tag and registry
+        id: tag
+        run: |
+          RAW="${{ github.event.workflow_run.head_branch }}"
+          SANITIZED="${RAW//\//-}"
+          echo "value=${SANITIZED}" >> "$GITHUB_OUTPUT"
+          echo "Resolved IMAGE_TAG: ${SANITIZED}"
+          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          echo "registry=ghcr.io/${OWNER}" >> "$GITHUB_OUTPUT"
+
+      - name: Check if bundle already exists in release
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.tag.outputs.value }}"
+          GPU="${{ matrix.gpu_type }}"
+          if gh release view "${TAG}" &>/dev/null; then
+            # Check if a bundle for this GPU type is already attached
+            if gh release view "${TAG}" --json assets --jq '.assets[].name' 2>/dev/null \
+                | grep -q "auplc-bundle.*${GPU}"; then
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              echo "Bundle for ${GPU} already exists in release ${TAG}, skipping."
+            else
+              echo "skip=false" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run pack command
+        if: steps.check.outputs.skip != 'true'
+        env:
+          GPU_TYPE: ${{ matrix.gpu_type }}
+          IMAGE_REGISTRY: ${{ steps.tag.outputs.registry }}
+          IMAGE_TAG: ${{ steps.tag.outputs.value }}
+        run: ./auplc-installer pack
+
+      - name: Verify bundle
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          BUNDLE=$(ls auplc-bundle-*.tar.gz)
+          echo "Bundle: ${BUNDLE}"
+          echo "Size: $(du -sh "${BUNDLE}" | cut -f1)"
+
+      - name: Upload bundle as artifact
+        if: steps.check.outputs.skip != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: auplc-bundle-${{ matrix.gpu_type }}
+          path: auplc-bundle-*.tar.gz
+          retention-days: 30
+          compression-level: 0  # already compressed
+
+      - name: Attach bundle to GitHub Release
+        if: steps.check.outputs.skip != 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BUNDLE=$(ls auplc-bundle-*.tar.gz)
+          TAG="${{ github.event.workflow_run.head_branch }}"
+
+          # Upload to the release created by the release workflow. If the
+          # release is not available yet, keep the bundle artifact for retry.
+          if gh release view "${TAG}" &>/dev/null; then
+            gh release upload "${TAG}" "${BUNDLE}" --clobber
+            echo "Bundle uploaded to release ${TAG}"
+          else
+            echo "No release found for ${TAG}, skipping upload."
+          fi
+
+  # ── Manual: single GPU target via workflow_dispatch ──
+  pack-manual:
+    name: "Pack Bundle (${{ inputs.gpu_type }})"
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: false
+
+      - name: Check available disk space
+        run: df -h /
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve image tag
+        id: tag
+        run: |
+          # Use explicit input if provided; otherwise derive from branch/tag name.
+          # Sanitize: Docker tags cannot contain '/' — replace with '-'.
+          RAW="${{ inputs.image_tag || github.ref_name }}"
+          echo "value=${RAW//\//-}" >> "$GITHUB_OUTPUT"
+          echo "Resolved IMAGE_TAG: ${RAW//\//-}"
+
+      - name: Run pack command
+        env:
+          GPU_TYPE: ${{ inputs.gpu_type }}
+          IMAGE_REGISTRY: ${{ inputs.image_registry }}
+          IMAGE_TAG: ${{ steps.tag.outputs.value }}
+        run: ./auplc-installer pack
+
+      - name: Verify bundle
+        run: |
+          BUNDLE=$(ls auplc-bundle-*.tar.gz)
+          echo "Bundle: ${BUNDLE}"
+          echo "Size: $(du -sh "${BUNDLE}" | cut -f1)"
+      - name: Upload bundle as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: auplc-bundle-${{ inputs.gpu_type }}
+          path: auplc-bundle-*.tar.gz
+          retention-days: 7
+          compression-level: 0  # already compressed

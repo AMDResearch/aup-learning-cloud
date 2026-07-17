@@ -68,8 +68,9 @@ class QuotaModifyRequest(BaseModel):
 class BatchQuotaUser(BaseModel):
     """User entry for batch quota operation."""
 
-    username: str = Field(..., min_length=1, max_length=200, pattern=r"^[a-zA-Z0-9._@-]+$")
-    amount: int = Field(..., ge=-10_000_000, le=10_000_000)
+    username: str = Field(..., min_length=1, max_length=200, pattern=r"^[a-zA-Z0-9._@:\-]+$")
+    amount: int = Field(default=0, ge=-10_000_000, le=10_000_000)
+    unlimited: bool | None = Field(default=None, description="Set unlimited quota (overrides amount)")
 
 
 class BatchQuotaRequest(BaseModel):
@@ -99,7 +100,7 @@ class QuotaRefreshTargets(BaseModel):
                 raise ValueError("Username must be a non-empty string")
             if len(username) > 200:
                 raise ValueError(f"Username '{username[:20]}...' too long (max 200 characters)")
-            if not re.match(r"^[a-zA-Z0-9._@-]+$", username):
+            if not re.match(r"^[a-zA-Z0-9._@:\-]+$", username):
                 raise ValueError(f"Username '{username}' contains invalid characters")
         return v
 

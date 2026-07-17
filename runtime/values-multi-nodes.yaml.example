@@ -1,5 +1,4 @@
 # Modifications Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
-# Portions of this file consist of AI-generated content.
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
@@ -22,130 +21,633 @@
 # Copy this file and customize for your environment:
 #   cp values-multi-nodes.yaml.example values-multi-nodes.yaml
 #
+# Prerequisites:
+#   - Install the AMD GPU device plugin and ROCm node labeller on GPU nodes.
+#   - Install an RWX-capable StorageClass for user homes; this example uses the
+#     NFS provisioner from deploy/k8s/nfs-provisioner with class nfs-client.
+#   - Create registry pull secrets only if you use private images.
+#
 # Deploy with:
-#   helm install jupyterhub ./chart -n jupyterhub --create-namespace \
-#     -f values.yaml -f values-multi-nodes.yaml
+#   helm upgrade --install jupyterhub ./chart -n jupyterhub --create-namespace \
+#     -f values-multi-nodes.yaml
 
-# Authentication mode: "auto-login" | "dummy" | "github" | "multi"
-#   - auto-login: No credentials required, auto-login as 'student' (default, for single-node)
-#   - dummy: Accept any username/password (for testing)
-#   - github: GitHub OAuth authentication
-#   - multi: GitHub OAuth + Local accounts
+# ============================================================================
+# Course Management Guide
+# ============================================================================
+# Add a new course:
+#   1. Add course image in custom.resources.images
+#   2. Add resource requirements in custom.resources.requirements
+#   3. Add course metadata in custom.resources.metadata
+#   4. Add team access permissions in custom.teams.mapping
+#
+# Modify a course:
+#   - Change image address or tag in images
+#   - Adjust CPU/memory/GPU settings in requirements
+#
+# Add a new accelerator:
+#   - Add a new accelerator entry in custom.accelerators
+# ============================================================================
+
 custom:
+  # Authentication mode
+  # - auto-login: No credentials required, auto-login as 'student' (for single-node dev)
+  # - dummy: Accept any username/password (for testing)
+  # - github: GitHub App authentication
+  # - multi: GitHub App + native first-use accounts
   authMode: "multi"
-  # GitHub organization name for team-based resource access
-  # Users must be members of this org to access resources via GitHub OAuth
-  githubOrgName: "your-github-org"
 
+  # Cluster display name (optional). Appended to "AUP Learning Cloud" in the UI.
+  # Example: "City/University" → "AUP Learning Cloud City/University"
+  clusterName: ""
+
+  # GitHub organization name for team-based resource access
+  githubOrgName: "<YOUR-ORG-NAME>"
+
+  # Auto-create admin user on first install
+  adminUser:
+    enabled: false
+
+  # --------------------------------------------------------------------------
+  # Allowed Origins
+  # --------------------------------------------------------------------------
+  # hub.allowedOrigins      — sets Access-Control-Allow-Origin on Hub responses
+  # notebook.allowedOrigins — passed to notebook servers as
+  #                            --ServerApp.allow_origin_pat for WebSocket access
+  hub:
+    allowedOrigins: []
+  notebook:
+    allowedOrigins: []
+
+  # --------------------------------------------------------------------------
+  # Public Scheme (TLS termination outside the chart)
+  # --------------------------------------------------------------------------
+  # When TLS is terminated by an external component (Cloudflare tunnel,
+  # external ingress / HTTPS load balancer) instead of the chart's autohttps
+  # (proxy.https.enabled=true), set publicScheme="https" so the Hub marks the
+  # _xsrf cookie Secure. Leave unset (or "http") for direct HTTP deployments.
+  # security:
+  #   publicScheme: "https"
+
+  # --------------------------------------------------------------------------
+  # Git Repository Cloning
+  # --------------------------------------------------------------------------
+  # Users can provide an optional Git URL on the spawn form. The repo is cloned
+  # into ~/home at container start via an init container.
+  #
+  # Private repo access, two independent mechanisms that can be used together:
+  #
+  #   1. GitHub App (githubAppName)
+  #      For GitHub App users. Users authorize per-repo read-only access via
+  #      the GitHub App UI. Token is obtained automatically from OAuth session.
+  #      Requires migrating from OAuth App to GitHub App. See below.
+  #
+  #   2. Default Access Token (defaultAccessToken)
+  #      A bot/service-account PAT configured by the admin. Applied transparently
+  #      to all users. Scope the PAT to read-only on specific repos.
+  #
+  # Token priority: OAuth token (GitHub App) > defaultAccessToken > none (public only)
+  #
+  # Migrating from OAuth App to GitHub App:
+  #   1. Create a GitHub App (org settings -> Developer settings -> GitHub Apps)
+  #      - Callback URL: same as current oauth_callback_url
+  #      - Permissions: Contents (read-only), Metadata (read-only), Members (read-only)
+  #      - Webhook: off
+  #   2. Update hub.config.GitHubOAuthenticator:
+  #        app_id: "<GitHub App App ID>"
+  #        installation_id: "<GitHub App Installation ID>"  # Optional; leave blank to auto-discover from the org installation
+  #        private_key_file: "<Mounted GitHub App private key path>"
+  #        client_id: "<GitHub App Client ID>"
+  #        client_secret: "<GitHub App Client Secret>"
+  #        scope: []  # GitHub App does not use OAuth scopes
+  #   3. Set githubAppName below to the App slug
+  #   4. helm upgrade. Existing user sessions continue, new logins use GitHub App.
+  gitClone:
+    # GitHub App slug, e.g. "aup-learning-cloud".
+    githubAppName: ""
+    # Default access token for private repos, e.g. a bot/service-account PAT.
+    defaultAccessToken: ""
+    allowedProviders:
+      - github.com
+      - gitlab.com
+      - bitbucket.org
+    maxCloneTimeout: 300
+    initContainerImage: "alpine/git:2.47.2"
+    # Cloned repositories are kept by default after the user's server stops.
+    # Set to false to restore ephemeral cleanup as the admin-enforced default.
+    # Set allowPersistenceChoice to true to let users choose on the spawn form.
+    # Existing unmanaged same-name directories are preserved and not overwritten.
+    defaultPersistence: true
+    allowPersistenceChoice: false
+
+  # --------------------------------------------------------------------------
+  # Accelerator Configuration
+  # --------------------------------------------------------------------------
+  # Define available accelerator entries for the spawn UI.
+  # These selectors follow runtime/values.yaml and use the ROCm node labeller's
+  # amd.com/gpu.product-name labels.
+  accelerators:
+    phx:
+      displayName: "AMD Radeon™ 780M (Phoenix Point iGPU)"
+      description: "RDNA 3.0 (gfx1103) | Compute Units 12 | 4GB LPDDR5X"
+      nodeSelector:
+        amd.com/gpu.product-name: "AMD_Radeon_780M_Graphics"
+      env:
+        # Phoenix hw (gfx1100/1101/1102/1103) shares a single gfx110x ROCm
+        # build — we do not ship dedicated images for gfx1102/gfx1103 — so
+        # force every Phoenix GPU to report as gfx1100 at runtime so it
+        # accepts the shared kernels.
+        HSA_OVERRIDE_GFX_VERSION: "11.0.0"
+      quotaRate: 2
+    strix:
+      displayName: "AMD Radeon™ 890M (Strix Point iGPU)"
+      description: "RDNA 3.5 (gfx1150) | Compute Units 16 | 4GB LPDDR5X"
+      nodeSelector:
+        amd.com/gpu.product-name: "AMD_Radeon_890M_Graphics"
+      env: {}
+      quotaRate: 2
+    strix-halo:
+      displayName: "AMD Radeon™ 8060S (Strix Halo iGPU)"
+      description: "RDNA 3.5 (gfx1151) | Compute Units 40 | 64GB LPDDR5X"
+      nodeSelector:
+        amd.com/gpu.product-name: "AMD_Radeon_8060S_Graphics"
+      env: {}
+      quotaRate: 3
+    9070xt:
+      displayName: "AMD Radeon™ RX 9070 XT (Desktop GPU)"
+      description: "RDNA 4.0 (gfx1201) | Compute Units 64 | 16GB GDDR6"
+      # ROCm labeller publishes the marketing name with spaces -> '_', so the
+      # expected value on a real node is AMD_Radeon_RX_9070_XT. If your fleet
+      # uses the older AMD_Radeon_9070XT normalisation, change it here.
+      nodeSelector:
+        amd.com/gpu.product-name: "AMD_Radeon_RX_9070_XT"
+      env: {}
+      quotaRate: 4
+    r9700:
+      displayName: "AMD Radeon™ AI Pro R9700 (Workstation GPU)"
+      description: "RDNA 4.0 (gfx1201) | Compute Units 64 | 32GB GDDR6"
+      nodeSelector:
+        amd.com/gpu.product-name: "AMD_Radeon_AI_PRO_R9700"
+      env: {}
+      quotaRate: 4
+    9600gre:
+      displayName: "AMD Radeon™ RX 9600 GRE (Desktop GPU)"
+      description: "RDNA 4.0 (gfx120x) | Compute Units 32 | 12GB GDDR6"
+      nodeSelector:
+        amd.com/gpu.product-name: "AMD_Radeon_RX_9600_GRE"
+      env: {}
+      quotaRate: 4
+
+  # --------------------------------------------------------------------------
+  # Course Resources
+  # --------------------------------------------------------------------------
+  resources:
+    # Replace these with your own registry if you mirror or rebuild images.
+    # For production GPU fleets, prefer gfx-specific tags such as
+    # latest-gfx1151 or latest-gfx120x when your images are built per ROCm
+    # target. For heterogeneous fleets, use metadata.acceleratorOverrides below
+    # to route each accelerator to a compatible image tag.
+    images:
+      cpu: "ghcr.io/amdresearch/auplc-default:latest"
+      gpu: "ghcr.io/amdresearch/auplc-base:latest"
+      Course-CV: "ghcr.io/amdresearch/auplc-cv:latest"
+      Course-DL: "ghcr.io/amdresearch/auplc-dl:latest"
+      Course-LLM: "ghcr.io/amdresearch/auplc-llm:latest"
+      Course-PhySim: "ghcr.io/amdresearch/auplc-physim:latest"
+      code-cpu: "ghcr.io/amdresearch/auplc-code-cpu:latest"
+      code-gpu: "ghcr.io/amdresearch/auplc-code-gpu:latest"
+
+    # Optional spawn/Home group display order. Groups not listed here are shown
+    # after these entries using the default alphabetical order.
+    # Example: move DEVELOPMENT before COURSE by listing DEVELOPMENT first.
+    groupOrder:
+      - TEACHING LABS
+      - DEVELOPMENT ENVIRONMENTS
+      - TUTORIALS
+      - CUSTOM REPOS
+
+    requirements:
+      cpu:
+        cpu: "0"
+        memory: "0Gi"
+      gpu:
+        cpu: "0"
+        memory: "0Gi"
+        amd.com/gpu: "1"
+      Course-CV:
+        cpu: "0"
+        memory: "0Gi"
+        amd.com/gpu: "1"
+      Course-DL:
+        cpu: "0"
+        memory: "0Gi"
+        amd.com/gpu: "1"
+      Course-LLM:
+        cpu: "0"
+        memory: "0Gi"
+        amd.com/gpu: "1"
+      Course-PhySim:
+        cpu: "0"
+        memory: "0Gi"
+        amd.com/gpu: "1"
+      code-cpu:
+        cpu: "0"
+        memory: "0Gi"
+      code-gpu:
+        cpu: "0"
+        memory: "0Gi"
+        amd.com/gpu: "1"
+      none:
+        cpu: "0"
+        memory: "0Gi"
+
+    metadata:
+      cpu:
+        group: "CUSTOM REPOS"
+        description: "Basic Python Environment"
+        subDescription: "CPU Only Environment"
+        accelerator: ""
+        acceleratorKeys: []
+        allowGitClone: true
+        resourceType: "notebook"
+      code-cpu:
+        group: "DEVELOPMENT ENVIRONMENTS"
+        description: "VSCode Server CPU"
+        subDescription: "CPU-only development workspace"
+        accelerator: ""
+        acceleratorKeys: []
+        allowGitClone: true
+        launchMode: "code-server"
+        resourceType: "browser-ide"
+      gpu:
+        group: "CUSTOM REPOS"
+        description: "Basic GPU Environment"
+        subDescription: "GPU Accelerated Environment"
+        accelerator: "GPU"
+        # Add only accelerators that exist in this cluster and are validated for
+        # this resource. Image overrides for the curated accelerators are
+        # preconfigured below, so enabling one normally only requires adding its
+        # key here.
+        # If you override GPU resource images with custom tags or registries,
+        # also override the matching acceleratorOverrides entries so accelerator
+        # selection does not fall back to the default latest-* images.
+        acceleratorKeys:
+          - strix-halo
+        acceleratorOverrides:
+          phx:
+            image: "ghcr.io/amdresearch/auplc-base:latest-gfx110x"
+          strix:
+            image: "ghcr.io/amdresearch/auplc-base:latest-gfx1150"
+          strix-halo:
+            image: "ghcr.io/amdresearch/auplc-base:latest-gfx1151"
+          9070xt:
+            image: "ghcr.io/amdresearch/auplc-base:latest-gfx120x"
+          r9700:
+            image: "ghcr.io/amdresearch/auplc-base:latest-gfx120x"
+          9600gre:
+            image: "ghcr.io/amdresearch/auplc-base:latest-gfx120x"
+        allowGitClone: true
+        resourceType: "notebook"
+      code-gpu:
+        group: "DEVELOPMENT ENVIRONMENTS"
+        description: "VSCode Server GPU"
+        subDescription: "GPU-accelerated development workspace"
+        accelerator: "GPU"
+        acceleratorKeys:
+          - strix-halo
+        acceleratorOverrides:
+          phx:
+            image: "ghcr.io/amdresearch/auplc-code-gpu:latest-gfx110x"
+          strix:
+            image: "ghcr.io/amdresearch/auplc-code-gpu:latest-gfx1150"
+          strix-halo:
+            image: "ghcr.io/amdresearch/auplc-code-gpu:latest-gfx1151"
+          9070xt:
+            image: "ghcr.io/amdresearch/auplc-code-gpu:latest-gfx120x"
+          r9700:
+            image: "ghcr.io/amdresearch/auplc-code-gpu:latest-gfx120x"
+          9600gre:
+            image: "ghcr.io/amdresearch/auplc-code-gpu:latest-gfx120x"
+        allowGitClone: true
+        launchMode: "code-server"
+        resourceType: "browser-ide"
+      Course-CV:
+        group: "TEACHING LABS"
+        description: "Computer Vision Course"
+        subDescription: "Suitable for CV experiments with GPU"
+        accelerator: "GPU"
+        acceleratorKeys:
+          - strix-halo
+        resourceType: "notebook"
+        acceleratorOverrides:
+          phx:
+            image: "ghcr.io/amdresearch/auplc-cv:latest-gfx110x"
+          strix:
+            image: "ghcr.io/amdresearch/auplc-cv:latest-gfx1150"
+          strix-halo:
+            image: "ghcr.io/amdresearch/auplc-cv:latest-gfx1151"
+          9070xt:
+            image: "ghcr.io/amdresearch/auplc-cv:latest-gfx120x"
+          r9700:
+            image: "ghcr.io/amdresearch/auplc-cv:latest-gfx120x"
+          9600gre:
+            image: "ghcr.io/amdresearch/auplc-cv:latest-gfx120x"
+      Course-DL:
+        group: "TEACHING LABS"
+        description: "Deep Learning Course"
+        subDescription: "Suitable for DL experiments with GPU"
+        accelerator: "GPU"
+        acceleratorKeys:
+          - strix-halo
+        resourceType: "notebook"
+        acceleratorOverrides:
+          phx:
+            image: "ghcr.io/amdresearch/auplc-dl:latest-gfx110x"
+          strix:
+            image: "ghcr.io/amdresearch/auplc-dl:latest-gfx1150"
+          strix-halo:
+            image: "ghcr.io/amdresearch/auplc-dl:latest-gfx1151"
+          9070xt:
+            image: "ghcr.io/amdresearch/auplc-dl:latest-gfx120x"
+          r9700:
+            image: "ghcr.io/amdresearch/auplc-dl:latest-gfx120x"
+          9600gre:
+            image: "ghcr.io/amdresearch/auplc-dl:latest-gfx120x"
+      Course-LLM:
+        group: "TEACHING LABS"
+        description: "Large Language Models Course"
+        subDescription: "Suitable for LLM experiments with GPU"
+        accelerator: "GPU"
+        acceleratorKeys:
+          - strix-halo
+        resourceType: "notebook"
+        acceleratorOverrides:
+          phx:
+            image: "ghcr.io/amdresearch/auplc-llm:latest-gfx110x"
+          strix:
+            image: "ghcr.io/amdresearch/auplc-llm:latest-gfx1150"
+          strix-halo:
+            image: "ghcr.io/amdresearch/auplc-llm:latest-gfx1151"
+          9070xt:
+            image: "ghcr.io/amdresearch/auplc-llm:latest-gfx120x"
+          r9700:
+            image: "ghcr.io/amdresearch/auplc-llm:latest-gfx120x"
+          9600gre:
+            image: "ghcr.io/amdresearch/auplc-llm:latest-gfx120x"
+      Course-PhySim:
+        group: "TEACHING LABS"
+        description: "Genesis Physical Simulation Course"
+        subDescription: "Suitable for physical simulation experiments with GPU"
+        accelerator: "GPU"
+        acceleratorKeys:
+          - strix-halo
+        resourceType: "notebook"
+        acceleratorOverrides:
+          phx:
+            image: "ghcr.io/amdresearch/auplc-physim:latest-gfx110x"
+          strix:
+            image: "ghcr.io/amdresearch/auplc-physim:latest-gfx1150"
+          strix-halo:
+            image: "ghcr.io/amdresearch/auplc-physim:latest-gfx1151"
+          9070xt:
+            image: "ghcr.io/amdresearch/auplc-physim:latest-gfx120x"
+          r9700:
+            image: "ghcr.io/amdresearch/auplc-physim:latest-gfx120x"
+          9600gre:
+            image: "ghcr.io/amdresearch/auplc-physim:latest-gfx120x"
+
+  # --------------------------------------------------------------------------
+  # Team Permission Configuration
+  # --------------------------------------------------------------------------
+  teams:
+    mapping:
+      cpu:
+        - cpu
+        - code-cpu
+      gpu:
+        - code-gpu
+        - Course-CV
+        - Course-DL
+        - Course-LLM
+        - Course-PhySim
+      official:
+        - cpu
+        - gpu
+        - code-cpu
+        - code-gpu
+        - Course-CV
+        - Course-DL
+        - Course-LLM
+        - Course-PhySim
+      AUP:
+        - Course-CV
+        - Course-DL
+        - Course-LLM
+        - Course-PhySim
+      native-users:
+        - cpu
+        - gpu
+        - code-cpu
+        - code-gpu
+        - Course-CV
+        - Course-DL
+        - Course-LLM
+        - Course-PhySim
+      github-users:
+        - cpu
+        - gpu
+        - code-cpu
+        - code-gpu
+        - Course-CV
+        - Course-DL
+        - Course-LLM
+        - Course-PhySim
+
+  # Native users in multi auth mode are managed by the built-in admin UI or the
+  # batch scripts under scripts/. New native users are automatically assigned to
+  # the native-users group, which controls their default resource access above.
+
+  # --------------------------------------------------------------------------
+  # Quota Management
+  # --------------------------------------------------------------------------
+  quota:
+    enabled: null  # auto-disabled for auto-login/dummy modes
+    cpuRate: 1
+    minimumToStart: 10
+    defaultQuota: 0
+    refreshRules: {}
+
+# ============================================================================
+# Hub Configuration
+# ============================================================================
 hub:
+  # Use the following variable to specify a custom base URL for JupyterHub.
+  # If you would like JupyterHub to be served at https://your.domain.com/jupyterhub/
+  # set baseUrl: "/jupyterhub".
+  # baseUrl: /
+
   db:
     pvc:
       storageClassName: nfs-client
-  # If you modify the hub image, you should change it here.
   image:
     name: ghcr.io/amdresearch/auplc-hub
-    tag: v0.1
-    pullPolicy: Always
+    tag: latest
+    pullPolicy: IfNotPresent
 
-  extraConfig:
-    01-templates-and-static: |
-      import os
-      import tornado.web
-
-      template_path = os.environ.get('JUPYTERHUB_TEMPLATE_PATH', '/tmp/custom_templates')
-      print(f"[DEBUG] Template path: {template_path}")
-
-      c.JupyterHub.template_paths = [template_path]
-      print(f"Template paths set to: {c.JupyterHub.template_paths}")
-
-      if not hasattr(c.JupyterHub, 'extra_handlers') or c.JupyterHub.extra_handlers is None:
-          c.JupyterHub.extra_handlers = []
-      print("Static file handler configuration completed")
-
-    02-hide-logout-for-autologin: |
-      # Hide logout button in auto-login mode
-      if AUTH_MODE == "auto-login":
-          c.JupyterHub.template_vars = {"hide_logout": True}
-          print("[INFO] Auto-login mode: logout button hidden")
+  # Additional Python config snippets (executed after core/setup.py)
+  # Example:
+  #   myconfig: |
+  #     c.JupyterHub.some_setting = "value"
+  extraConfig: {}
 
   extraFiles:
     announcement.txt:
-    # If you want to edit the notice on login.html, change here.
       mountPath: /usr/local/share/jupyterhub/static/announcement.txt
       stringData: |
           <div class="announcement-box" style="padding: 1em; border: 1px solid #ccc; border-radius: 6px; background-color: #f8f8f8;">
-          <h3>Welcome to AUP Remote Lab!</h3>
-          <p>This is a <strong>dynamic announcement</strong>.</p>
-          <p>My location is on <code>runtime/values.yaml</code></p>
-          <p>You can edit this via <strong>ConfigMap</strong> without rebuilding the image.</p>
+          <h3>Welcome to AUP Learning Cloud!</h3>
+          <p>Edit this announcement in <code>values-multi-nodes.yaml</code></p>
           </div>
 
   config:
-    # ---- Hub Core ----
+    JupyterHub:
+      redirect_to_server: false
+
     Authenticator:
       allow_all: true
       admin_users:
-        - ADMIN1
-        - ADMIN2
+        - your-github-username
 
-    # ---- GitHub OAuth ----
-    # If you are only using GitHub Oath, not Multi-Auth, the link should be:
-    # https://<Your.domain>/hub/oauth_callback
+    # GitHub App OAuth (replaces legacy OAuth App)
+    # Create at: https://github.com/organizations/<YOUR-ORG>/settings/apps/new
+    # Permissions: Contents (read-only), Metadata (read-only), Members (read-only)
+    # Webhook: off
     GitHubOAuthenticator:
-      oauth_callback_url: "https://<Your.domain>/hub/github/oauth_callback"
+      oauth_callback_url: "https://your.domain.com/hub/github/oauth_callback"
+      app_id: ""
+      # Optional; leave blank when the GitHub App is installed on the org and the Hub can auto-discover it.
+      installation_id: ""
+      private_key_file: ""
+      private_key: ""
+      team_sync_ttl_seconds: 3600
       client_id: "TODO"
       client_secret: "TODO"
       allowed_organizations:
         - <YOUR-ORG-NAME>
-      scope:
-        - read:user
-        - read:org
+      # Use [] for GitHub App credentials. For legacy OAuth Apps, use
+      # read:user and read:org instead.
+      scope: []
 
-    # ---- KubeSpawner Prepuller Setup ----
     KubeSpawner:
       image_pull_policy: IfNotPresent
 
-# singleuser:
-#   extraEnv:
-#   #this should be configured based on your AIPC  GPU type.
-#      HSA_OVERRIDE_GFX_VERSION: "11.0.0"
-#   storage:
-#     dynamic:
-#       storageClass: nfs-client
-
-debug:
+monitoring:
   enabled: false
+  namespace: monitoring
+  releaseLabel: monitoring
 
+  hubMetrics:
+    enabled: false
+    # Keep JupyterHub's read:metrics scope requirement enabled by default.
+    # Set this to true only for isolated environments where /hub/metrics is not
+    # reachable through a public proxy, NodePort, LoadBalancer, or Ingress.
+    allowUnauthenticatedScrape: false
+    serviceAnnotations:
+      # Annotation-based Prometheus scraping cannot attach the JupyterHub token.
+      # Prefer the ServiceMonitor below for authenticated in-cluster scraping.
+      enabled: false
+
+  serviceMonitor:
+    enabled: false
+    interval: 15s
+    authorization:
+      enabled: true
+      type: Bearer
+      hubServiceName: prometheus-metrics
+      secret:
+        create: true
+        name: ""
+        key: token
+
+  grafana:
+    dashboard:
+      enabled: false
+
+  prometheusRule:
+    enabled: false
+
+singleuser:
+  extraPodConfig:
+    securityContext:
+      fsGroup: 100
+      supplementalGroups:
+        - 993
+  storage:
+    dynamic:
+      storageClass: nfs-client
+
+# Use ClusterIP + Ingress for production domains
 proxy:
   service:
-    # If you want to use <domain>, config the domain on Ingress section.
-    #type: ClusterIP
-    # If you want to use LocadBalancer
-    #type: LoadBalancer
-    # If you want to use <IP>:<Port>
-    type: NodePort
+    type: ClusterIP
     nodePorts:
-      http: 30890
+      http: null
+      https: null
 
-imagePullSecrets:
-  - github-registry-secret
+# If using Ingress (recommended for production)
+# ingress:
+#   enabled: true
+#   ingressClassName: traefik  # or nginx
+#   hosts:
+#     - your.domain.com
+#   tls:
+#     - hosts:
+#         - your.domain.com
+#       secretName: jupyter-tls-cert
 
+# If not using Ingress, use NodePort instead:
+# proxy:
+#   service:
+#     type: NodePort
+#     nodePorts:
+#       http: 30890
 
-# Set up all your images here for prepulling.
+# Uncomment if your registry requires authentication and you already created
+# the Kubernetes docker-registry secret in the jupyterhub namespace.
+# imagePullSecrets:
+#   - github-registry-secret
+
+# Pre-pull images for faster startup. Keep this list synchronized with
+# custom.resources.images above if you change image names or tags.
 prePuller:
+  hook:
+    enabled: true
+  continuous:
+    enabled: true
   extraImages:
-    aup-cpu-notebook:
-      name: ghcr.io/amdresearch/aup-cpu-notebook
-      tag: v1.0
-    aup-course-cv:
+    auplc-default:
+      name: ghcr.io/amdresearch/auplc-default
+      tag: latest
+    auplc-base:
+      name: ghcr.io/amdresearch/auplc-base
+      tag: latest
+    auplc-cv:
       name: ghcr.io/amdresearch/auplc-cv
-      tag: v1.0
-    aup-course-dl:
+      tag: latest
+    auplc-dl:
       name: ghcr.io/amdresearch/auplc-dl
-      tag: v1.0
-    aup-course-llm:
+      tag: latest
+    auplc-llm:
       name: ghcr.io/amdresearch/auplc-llm
-      tag: v1.0
-    aup-jupyterhub-hub:
+      tag: latest
+    auplc-physim:
+      name: ghcr.io/amdresearch/auplc-physim
+      tag: latest
+    auplc-code-cpu:
+      name: ghcr.io/amdresearch/auplc-code-cpu
+      tag: latest
+    auplc-code-gpu:
+      name: ghcr.io/amdresearch/auplc-code-gpu
+      tag: latest
+    auplc-hub:
       name: ghcr.io/amdresearch/auplc-hub
-      tag: v0.1
+      tag: latest

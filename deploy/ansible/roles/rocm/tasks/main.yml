@@ -38,18 +38,40 @@
 
 - name: Download AMDGPU installer
   get_url:
-    url: https://repo.radeon.com/amdgpu-install/7.1/ubuntu/noble/amdgpu-install_7.1.70100-1_all.deb
-    dest: /tmp/amdgpu-install_7.1.70100-1_all.deb
+    url: https://repo.radeon.com/amdgpu-install/31.30/ubuntu/noble/amdgpu-install_31.30.313000-1_all.deb
+    dest: /tmp/amdgpu-install_31.30.313000-1_all.deb
 
 - name: Install AMDGPU installer
   apt:
-    deb: /tmp/amdgpu-install_7.1.70100-1_all.deb
+    deb: /tmp/amdgpu-install_31.30.313000-1_all.deb
 
 - name: Update apt cache again
   apt:
     update_cache: yes
 
-- name: Install ROCm
+- name: Install AMD GPU DKMS driver
   apt:
-    name: rocm
+    name: amdgpu-dkms
     state: present
+
+- name: Ensure render group exists with consistent GID
+  group:
+    name: render
+    gid: 993
+    state: present
+
+- name: Set udev rules for ROCm devices with correct permissions
+  copy:
+    content: |
+      # ROCm device permissions
+      # Grant render group access to AMD GPU devices
+      # Reference: https://rocm.docs.amd.com/projects/install-on-linux/en/latest/install/prerequisites.html#using-udev-rules
+      KERNEL=="kfd", GROUP="render", MODE="0660"
+      SUBSYSTEM=="drm", KERNEL=="renderD*", GROUP="render", MODE="0660"
+    dest: /etc/udev/rules.d/70-amdgpu.rules
+    mode: '0644'
+  register: udev_rules_changed
+
+- name: Reload udev rules if changed
+  shell: udevadm control --reload-rules && udevadm trigger
+  when: udev_rules_changed.changed

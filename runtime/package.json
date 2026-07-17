@@ -1,0 +1,27 @@
+{
+  "name": "auplc-runtime-workspace",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm -r --parallel run dev",
+    "dev:admin": "pnpm --filter @auplc/admin run dev",
+    "dev:spawn": "pnpm --filter @auplc/spawn run dev",
+    "dev:home": "pnpm --filter @auplc/home run dev",
+    "build": "pnpm -r --filter './hub/frontend/apps/**...' --filter './hub/frontend/packages/login-css...' run build",
+    "build:hub": "pnpm -r --filter './hub/frontend/apps/**...' --filter './hub/frontend/packages/login-css...' run build",
+    "build:notebook": "pnpm --filter @auplc/runtime-status run build && pnpm --filter @auplc/jupyterlab-runtime-status run build",
+    "build:code": "pnpm --filter @auplc/runtime-status run build && pnpm --filter auplc-hub-link run build",
+    "build:all": "pnpm -r --filter './hub/frontend/apps/**...' --filter './hub/frontend/packages/login-css...' run build && pnpm --filter @auplc/runtime-status run build && pnpm --filter @auplc/jupyterlab-runtime-status run build && pnpm --filter auplc-hub-link run build",
+    "build:admin": "pnpm --filter @auplc/admin run build",
+    "build:spawn": "pnpm --filter @auplc/spawn run build",
+    "build:home": "pnpm --filter @auplc/home run build",
+    "test": "pnpm -r --if-present run test",
+    "lint": "pnpm -r run lint",
+    "clean": "pnpm -r exec rm -rf dist node_modules"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  }
+}

@@ -167,6 +167,7 @@ def migrate_quota_data(target_db_url: str) -> dict:
                 usage_session = UsageSession(
                     username=row["username"],
                     resource_type=row["resource_type"],
+                    accelerator_type=row["resource_type"],
                     start_time=_parse_datetime(row["start_time"]) or datetime.now(),
                     end_time=_parse_datetime(_row_get(row, "end_time")),
                     duration_minutes=_row_get(row, "duration_minutes"),

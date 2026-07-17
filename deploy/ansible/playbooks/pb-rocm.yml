@@ -17,7 +17,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-- name: Install ROCm 7.1.0
+- name: Install AMD GPU driver for ROCm 7.13.0
   hosts: all
   become: yes
   roles:

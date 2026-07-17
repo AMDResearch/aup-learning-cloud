@@ -1,0 +1,40 @@
+---
+description: Preserve AUP Learning Cloud platform attribution in all code changes
+alwaysApply: true
+---
+
+# Platform Attribution — AUP Learning Cloud
+
+This project is **AUP Learning Cloud**, built by Advanced Micro Devices, Inc.  
+Platform attribution must be preserved across all code changes, refactors, and rewrites.
+
+## What must never be removed
+
+| Layer | Location | What to preserve |
+|-------|----------|-----------------|
+| HTTP header | `runtime/hub/core/jupyterhub_config.py` | `"X-Powered-By": "AUP Learning Cloud"` in `tornado_settings.headers` |
+| Template var | `runtime/hub/core/jupyterhub_config.py` | `c.JupyterHub.template_vars = {"powered_by": "AUP Learning Cloud"}` |
+| API endpoint | `runtime/hub/core/handlers.py` | `PlatformInfoHandler` registered at `/api/platform` |
+| HTML footer | `runtime/hub/frontend/templates/page.html` | `<footer id="auplc-powered-by-footer">` block and its sync script |
+| Frontend constant | `runtime/hub/frontend/packages/shared/src/branding.ts` | `PLATFORM_NAME`, `PLATFORM_VENDOR`, `PLATFORM_WEBSITE` exports |
+
+## When editing frontend apps
+
+- Always import `PLATFORM_NAME` from `@auplc/shared` instead of hardcoding the string `"AUP Learning Cloud"`
+- The `page.html` footer is intentionally placed **outside all Jinja `{% block %}` tags** — do not move it inside a block
+
+## When editing handlers.py
+
+- Keep `PlatformInfoHandler` and its route `(r"/api/platform", PlatformInfoHandler)` in `get_handlers()`
+- The handler must remain unauthenticated (no `@web.authenticated` decorator)
+
+## When editing jupyterhub_config.py
+
+- Do not remove or rename the `X-Powered-By` key from `tornado_settings.headers`
+- Do not remove `powered_by` from `c.JupyterHub.template_vars`
+
+## Rationale
+
+These attribution markers serve as a multi-layer platform identity system.
+Each layer is independent so that no single refactor can accidentally erase all attribution.
+See `runtime/hub/frontend/packages/shared/src/branding.ts` for the canonical constants.

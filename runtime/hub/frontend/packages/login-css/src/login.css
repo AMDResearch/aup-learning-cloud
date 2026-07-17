@@ -1,0 +1,182 @@
+/*
+ * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
+/*
+ * Same-origin Tailwind CSS for the JupyterHub login Jinja template.
+ *
+ * The login page is server-rendered by JupyterHub (not a React app), so
+ * it cannot go through the apps/admin|spawn|home Vite pipeline. We build
+ * a dedicated static CSS bundle here that scans the Jinja templates for
+ * class usage and emits a minified file served from /hub/static/css/.
+ *
+ * Replaces https://cdn.tailwindcss.com which is a development-only JIT
+ * compiler not meant for production, and which introduced a third-party
+ * supply-chain dependency without Subresource Integrity (see security
+ * audit - remove-tailwind-cdn).
+ */
+
+/*
+ * Disable Tailwind v4 auto-detection and scan only the Jinja templates.
+ * Auto-detection would otherwise crawl packages/apps/ and either
+ * duplicate what the React apps already emit or pull in classes this
+ * small login bundle doesn't need.
+ */
+@import "tailwindcss" source(none);
+@source "../../../templates/**/*.html";
+
+@layer components {
+  .login-main-panel {
+    background: #f9fafb;
+  }
+
+  .login-card {
+    background: #ffffff;
+    border: 1px solid transparent;
+  }
+
+  .login-heading {
+    color: #1f2937;
+  }
+
+  .login-announcement {
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    color: #1e3a8a;
+  }
+
+  .login-error {
+    color: #ef4444;
+  }
+
+  .login-dev-mode {
+    color: #ea580c;
+  }
+
+  .login-github-button,
+  .login-input {
+    background: #ffffff;
+    border: 1px solid #d1d5db;
+    color: #374151;
+  }
+
+  .login-github-button:hover {
+    background: #f9fafb;
+  }
+
+  .login-helper {
+    color: #4b5563;
+  }
+
+  .login-field-label {
+    color: #374151;
+  }
+
+  .login-input {
+    color: #111827;
+  }
+
+  .login-input::placeholder {
+    color: #9ca3af;
+  }
+
+  .login-submit {
+    background: #2563eb;
+  }
+
+  .login-submit:hover {
+    background: #1d4ed8;
+  }
+
+  .login-divider .border-t {
+    border-color: #d1d5db;
+  }
+
+  .login-divider span {
+    background: #ffffff;
+    color: #6b7280;
+  }
+
+  [data-bs-theme="dark"] .login-main-panel {
+    background: #030712 !important;
+  }
+
+  [data-bs-theme="dark"] .login-card {
+    background: #111827 !important;
+    border-color: #374151 !important;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.4) !important;
+  }
+
+  [data-bs-theme="dark"] .login-heading {
+    color: #f9fafb !important;
+  }
+
+  [data-bs-theme="dark"] .login-announcement {
+    background: #172554 !important;
+    border-color: #1e40af !important;
+    color: #dbeafe !important;
+  }
+
+  [data-bs-theme="dark"] .login-error {
+    color: #fca5a5 !important;
+  }
+
+  [data-bs-theme="dark"] .login-dev-mode {
+    color: #fdba74 !important;
+  }
+
+  [data-bs-theme="dark"] .login-github-button,
+  [data-bs-theme="dark"] .login-input {
+    background: #1f2937 !important;
+    border-color: #4b5563 !important;
+    color: #f9fafb !important;
+  }
+
+  [data-bs-theme="dark"] .login-github-button:hover {
+    background: #374151 !important;
+  }
+
+  [data-bs-theme="dark"] .login-helper,
+  [data-bs-theme="dark"] .login-divider span {
+    color: #d1d5db !important;
+  }
+
+  [data-bs-theme="dark"] .login-field-label {
+    color: #e5e7eb !important;
+  }
+
+  [data-bs-theme="dark"] .login-input::placeholder {
+    color: #9ca3af !important;
+  }
+
+  [data-bs-theme="dark"] .login-divider .border-t {
+    border-color: #374151 !important;
+  }
+
+  [data-bs-theme="dark"] .login-divider span {
+    background: #111827 !important;
+  }
+
+  [data-bs-theme="dark"] .login-submit:focus,
+  [data-bs-theme="dark"] .login-github-button:focus,
+  [data-bs-theme="dark"] .login-input:focus {
+    --tw-ring-offset-color: #111827;
+  }
+}
