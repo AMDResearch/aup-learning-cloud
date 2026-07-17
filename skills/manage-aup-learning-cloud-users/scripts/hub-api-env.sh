@@ -23,6 +23,9 @@ if [ -z "$_auplc_token" ]; then
   echo "hub-api-env: could not read api-token from secret 'jupyterhub-admin-credentials'" >&2
   echo "  - is custom.adminUser.enabled: true and the Hub deployed?" >&2
   echo "  - is your kube context/namespace ('$_auplc_ns') correct?" >&2
+  # This file is meant to be sourced; `return` exits the caller's shell. The
+  # `exit 1` fallback only runs if the file is executed directly.
+  # shellcheck disable=SC2317
   return 1 2>/dev/null || exit 1
 fi
 

@@ -28,6 +28,7 @@ Usage:
 Exit codes: 0 if every check passed (warnings allowed); 1 if any check failed;
 2 on a usage error.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -80,7 +81,7 @@ def list_nonempty(text: str, key: str) -> bool:
     if not m:
         return False
     indent = len(m.group(1))
-    tail = text[m.end():].splitlines()
+    tail = text[m.end() :].splitlines()
     for line in tail:
         if not line.strip():
             continue
@@ -139,8 +140,10 @@ def check_version_sync(repo: Path) -> None:
     if agent_ver == server_ver:
         ok(f"k3s_version == pxe_k3s_version ({server_ver})")
     else:
-        fail(f"version mismatch: inventory k3s_version={server_ver} but "
-             f"pxe_k3s_version={agent_ver}. Agents must not be newer than the server.")
+        fail(
+            f"version mismatch: inventory k3s_version={server_ver} but "
+            f"pxe_k3s_version={agent_ver}. Agents must not be newer than the server."
+        )
 
 
 def collect_values_text(repo: Path, values: list[str]) -> str:
@@ -156,26 +159,25 @@ def collect_values_text(repo: Path, values: list[str]) -> str:
 
 
 def check_accelerator_labels(values_text: str, cluster: dict | None) -> None:
-    declared = sorted(set(re.findall(
-        r"amd\.com/gpu\.product-name\s*:\s*[\"']?([A-Za-z0-9_]+)[\"']?", values_text)))
+    declared = sorted(set(re.findall(r"amd\.com/gpu\.product-name\s*:\s*[\"']?([A-Za-z0-9_]+)[\"']?", values_text)))
     if not declared:
         warn("no amd.com/gpu.product-name nodeSelector found in the values overlay")
         return
     if cluster is None:
-        warn("no --cluster snapshot; cannot confirm nodeSelector labels match real "
-             f"nodes. Declared: {', '.join(declared)}")
+        warn(
+            "no --cluster snapshot; cannot confirm nodeSelector labels match real "
+            f"nodes. Declared: {', '.join(declared)}"
+        )
         return
     real = set(cluster.get("gpu_product_names", []))
     if not real:
-        warn("cluster snapshot reports no GPU product labels yet (device plugin / "
-             "labeller not ready?)")
+        warn("cluster snapshot reports no GPU product labels yet (device plugin / labeller not ready?)")
         return
     for d in declared:
         if d in real:
             ok(f"nodeSelector '{d}' matches a real node label")
         else:
-            fail(f"nodeSelector '{d}' matches no node label. Real labels: "
-                 f"{', '.join(sorted(real))}")
+            fail(f"nodeSelector '{d}' matches no node label. Real labels: {', '.join(sorted(real))}")
 
 
 def check_helm(repo: Path, values: list[str]) -> None:
@@ -187,7 +189,7 @@ def check_helm(repo: Path, values: list[str]) -> None:
         warn(f"chart not found at {CHART}; skipped dry-run")
         return
     cmd = ["helm", "template", "jupyterhub", str(chart)]
-    for rel in (values or ["runtime/values.yaml"]):
+    for rel in values or ["runtime/values.yaml"]:
         p = (repo / rel) if not Path(rel).is_absolute() else Path(rel)
         if p.exists():
             cmd += ["-f", str(p)]
@@ -200,11 +202,11 @@ def check_helm(repo: Path, values: list[str]) -> None:
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--repo", required=True, help="path to the aup-learning-cloud checkout")
-    ap.add_argument("--values", action="append", default=[],
-                    help="values file (repeatable); defaults to runtime/values.yaml")
+    ap.add_argument(
+        "--values", action="append", default=[], help="values file (repeatable); defaults to runtime/values.yaml"
+    )
     ap.add_argument("--cluster", help="detect_cluster.sh JSON output to match labels against")
     ap.add_argument("--helm-dry-run", action="store_true", help="also run `helm template`")
     ap.add_argument("--json", action="store_true", help="emit a JSON report instead of text")
@@ -231,8 +233,12 @@ def main(argv=None) -> int:
         check_helm(repo, args.values)
 
     if args.json:
-        print(json.dumps({"passed": passed, "warnings": warnings, "errors": errors,
-                          "status": "ok" if not errors else "error"}, indent=2))
+        print(
+            json.dumps(
+                {"passed": passed, "warnings": warnings, "errors": errors, "status": "ok" if not errors else "error"},
+                indent=2,
+            )
+        )
     else:
         for m in passed:
             print(f"[ OK ] {m}")

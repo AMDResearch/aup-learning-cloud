@@ -33,6 +33,7 @@ Usage:
 
 Exit codes: 0 on success; 1 on a spec/validation error; 2 on a usage error.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -78,12 +79,11 @@ SCHEMA = {
     "storage": {"class": "nfs-client"},
     "proxy": {"node_port": 30890},
     "auth_mode": "auto-login",
-    "images": {"cpu": "ghcr.io/amdresearch/auplc-default:latest",
-               "gpu": "ghcr.io/amdresearch/auplc-base:latest"},
+    "images": {"cpu": "ghcr.io/amdresearch/auplc-default:latest", "gpu": "ghcr.io/amdresearch/auplc-base:latest"},
 }
 
 
-def die(msg: str, code: int = 1) -> "None":
+def die(msg: str, code: int = 1) -> None:
     print(f"gen_configs: {msg}", file=sys.stderr)
     raise SystemExit(code)
 
@@ -134,8 +134,7 @@ def render_inventory(spec: dict, token: str) -> str:
         "    ansible_user: root",
         f"    k3s_version: {k3s_version}",
         f"    token: {yaml_quote(token)}",
-        "    api_endpoint: \"{{ hostvars[groups['server'][0]]['ansible_host']"
-        " | default(groups['server'][0]) }}\"",
+        "    api_endpoint: \"{{ hostvars[groups['server'][0]]['ansible_host'] | default(groups['server'][0]) }}\"",
     ]
     if topo == "pxe-diskless":
         lines += [
@@ -204,8 +203,10 @@ def render_values(spec: dict) -> str:
         for key, cfg in accel.items():
             product = (cfg or {}).get("product_name") or DEFAULT_ACCEL_LABELS.get(key)
             if not product:
-                die(f"accelerator '{key}' has no product_name and no known default; "
-                    "add accelerators.<key>.product_name from `kubectl describe node`")
+                die(
+                    f"accelerator '{key}' has no product_name and no known default; "
+                    "add accelerators.<key>.product_name from `kubectl describe node`"
+                )
             lines += [
                 f"    {key}:",
                 "      nodeSelector:",
@@ -246,16 +247,12 @@ def write_file(path: Path, content: str, force: bool, secret: bool = False) -> N
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--spec", help="path to the cluster-spec JSON, or - for stdin")
-    ap.add_argument("--out-dir", default="generated",
-                    help="directory to write artifacts into (default: ./generated)")
-    ap.add_argument("--token-file",
-                    help="read the k3s token from this file instead of generating one")
+    ap.add_argument("--out-dir", default="generated", help="directory to write artifacts into (default: ./generated)")
+    ap.add_argument("--token-file", help="read the k3s token from this file instead of generating one")
     ap.add_argument("--force", action="store_true", help="overwrite existing files")
-    ap.add_argument("--print-schema", action="store_true",
-                    help="print an example cluster-spec and exit")
+    ap.add_argument("--print-schema", action="store_true", help="print an example cluster-spec and exit")
     args = ap.parse_args(argv)
 
     if args.print_schema:
@@ -290,8 +287,10 @@ def main(argv=None) -> int:
         write_file(out / "pb-pxe-controller.vars.yml", render_pxe_vars(spec), args.force)
     write_file(out / "values-basic-example.yaml", render_values(spec), args.force)
 
-    print("\nNext: review the files, then copy them into your aup-learning-cloud "
-          "checkout. Never commit inventory.yml -- it holds the k3s token.")
+    print(
+        "\nNext: review the files, then copy them into your aup-learning-cloud "
+        "checkout. Never commit inventory.yml -- it holds the k3s token."
+    )
     return 0
 
 

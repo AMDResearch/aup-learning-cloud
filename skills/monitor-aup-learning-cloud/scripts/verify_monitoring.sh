@@ -26,9 +26,11 @@ warn() { printf '  [WARN] %s\n' "$1"; rc=1; }
 
 echo "Checking monitoring objects (mon ns=$MON_NS, hub ns=$HUB_NS)..."
 
-kubectl -n "$MON_NS" get servicemonitor hub-metrics >/dev/null 2>&1 \
-  && pass "ServiceMonitor hub-metrics present" \
-  || warn "ServiceMonitor hub-metrics missing (serviceMonitor.enabled?)"
+if kubectl -n "$MON_NS" get servicemonitor hub-metrics >/dev/null 2>&1; then
+  pass "ServiceMonitor hub-metrics present"
+else
+  warn "ServiceMonitor hub-metrics missing (serviceMonitor.enabled?)"
+fi
 
 if kubectl -n "$MON_NS" get secret 2>/dev/null | grep -q 'metrics-token'; then
   pass "metrics token secret present"
@@ -36,13 +38,17 @@ else
   warn "metrics token secret missing (authorization.secret.create?)"
 fi
 
-kubectl -n "$MON_NS" get configmap grafana-dashboard-aup-hub >/dev/null 2>&1 \
-  && pass "Grafana dashboard ConfigMap present" \
-  || warn "Grafana dashboard ConfigMap missing (grafana.dashboard.enabled?)"
+if kubectl -n "$MON_NS" get configmap grafana-dashboard-aup-hub >/dev/null 2>&1; then
+  pass "Grafana dashboard ConfigMap present"
+else
+  warn "Grafana dashboard ConfigMap missing (grafana.dashboard.enabled?)"
+fi
 
-kubectl -n "$HUB_NS" get networkpolicy hub-metrics >/dev/null 2>&1 \
-  && pass "metrics NetworkPolicy present" \
-  || warn "metrics NetworkPolicy missing (hubMetrics.enabled?)"
+if kubectl -n "$HUB_NS" get networkpolicy hub-metrics >/dev/null 2>&1; then
+  pass "metrics NetworkPolicy present"
+else
+  warn "metrics NetworkPolicy missing (hubMetrics.enabled?)"
+fi
 
 echo "Checking the live Prometheus target..."
 if ! kubectl -n "$MON_NS" get svc "$PROM_SVC" >/dev/null 2>&1; then
