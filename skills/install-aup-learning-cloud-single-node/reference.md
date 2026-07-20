@@ -16,7 +16,7 @@ flags and version pins; this file condenses the opinionated path.
 
 ```bash
 # Ryzen AI APU only: ROCm OEM kernel (reboot afterwards)
-sudo apt update && sudo apt install linux-image-6.14.0-1018-oem
+sudo apt update && sudo apt install linux-oem-6.14
 
 # Docker (rootless usage)
 curl -fsSL https://get.docker.com | sh

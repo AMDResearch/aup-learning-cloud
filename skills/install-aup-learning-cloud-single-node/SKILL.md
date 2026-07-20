@@ -33,7 +33,7 @@ table, offline flow, and troubleshooting are in **[reference.md](reference.md)**
 - **Ubuntu 24.04**. Docker installed and usable without `sudo`
   (`docker run hello-world` as the user).
 - **Ryzen AI APU only:** the ROCm OEM kernel
-  (`sudo apt install linux-image-6.14.0-1018-oem`) and a reboot. Radeon dGPU
+  (`sudo apt install linux-oem-6.14`) and a reboot. Radeon dGPU
   boxes typically use the stock kernel — confirm against ROCm docs.
 - For the interactive TUI: `python3-questionary` + `python3-prompt-toolkit`
   (apt), or `pip install questionary prompt_toolkit` in a venv. The
