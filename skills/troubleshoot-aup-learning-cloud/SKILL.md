@@ -26,8 +26,15 @@ matrices live in **[reference.md](reference.md)**.
 - Access to the cluster (`kubectl`, the right `KUBECONFIG`) and/or the service
   machine (for PXE/host issues).
 - A checkout of `aup-learning-cloud` for config cross-checks.
-- The deploy skill's `scripts/detect_cluster.sh` is a fast way to snapshot
+- The deploy skill's `$DEPLOY_SCRIPTS/detect_cluster.sh` is a fast way to snapshot
   nodes, GPU labels, storage classes, and the device plugin/labeller state.
+
+From any checkout directory, define
+`REPO_ROOT="$(git rev-parse --show-toplevel)"` and
+`DEPLOY_SCRIPTS="$REPO_ROOT/skills/deploy-aup-learning-cloud/scripts"`. For an
+installed plugin, define `DEPLOY_SKILL_DIR` as the absolute directory containing
+the loaded deploy skill's `SKILL.md`, then set
+`DEPLOY_SCRIPTS="$DEPLOY_SKILL_DIR/scripts"`.
 
 ## Method (don't thrash)
 
@@ -39,7 +46,7 @@ matrices live in **[reference.md](reference.md)**.
    kubectl get nodes -o wide
    kubectl get pods -A | grep -Ev 'Running|Completed'
    kubectl describe pod -n jupyterhub <pod>     # Events explain Pending/ImagePull
-   scripts/detect_cluster.sh                     # from the deploy skill
+    "$DEPLOY_SCRIPTS/detect_cluster.sh"            # from the deploy skill
    ```
 
 3. **Match to a cause** using the [reference.md](reference.md) matrices.

@@ -19,7 +19,13 @@ troubleshooting. Workflow and gates are in [SKILL.md](SKILL.md).
 | Chart | `runtime/chart/Chart.yaml` |
 
 Keep `pxe_k3s_version == k3s_version`. The deploy skill's
-`scripts/validate.py` cross-checks this.
+`$DEPLOY_SCRIPTS/validate.py` cross-checks this when invoked with
+`--topology pxe-diskless`. From a checkout, resolve that helper with
+`REPO_ROOT="$(git rev-parse --show-toplevel)"` and
+`DEPLOY_SCRIPTS="$REPO_ROOT/skills/deploy-aup-learning-cloud/scripts"`; from
+an installed plugin, define `DEPLOY_SKILL_DIR` as the absolute directory
+containing the loaded deploy skill's `SKILL.md`, then set
+`DEPLOY_SCRIPTS="$DEPLOY_SKILL_DIR/scripts"`.
 
 ## Hub (Helm) upgrade — values / image / chart
 
