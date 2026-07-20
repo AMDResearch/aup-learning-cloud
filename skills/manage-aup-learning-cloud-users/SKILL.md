@@ -28,7 +28,7 @@ The two built-in scripts are the primary automation surface:
 - `scripts/generate_users_template.py` creates CSV/Excel rosters with the
   columns `manage_users.py` expects.
 - `scripts/manage_users.py` performs API-backed user/admin/password work and
-  quota commands that also exec into the Hub pod.
+  quota commands.
 
 Exact command variants, file formats, env setup, and the quota field guide are
 in **[reference.md](reference.md)**.
@@ -43,8 +43,9 @@ in **[reference.md](reference.md)**.
 - `manage_users.py` requires `JUPYTERHUB_URL` and `JUPYTERHUB_TOKEN` for every
   subcommand. The bundled `scripts/hub-api-env.sh` derives both from the
   `jupyterhub-admin-credentials` secret and checks reachability.
-- Quota subcommands also require `kubectl` access to the Hub namespace because
-  they call `kubectl exec deployment/hub` after the API-token preflight.
+- Quota subcommands use the Hub admin API. `kubectl` is only needed to bootstrap
+  an API token from `jupyterhub-admin-credentials` or inspect scheduled quota
+  refresh CronJobs.
 - Native-user creation/password reset requires `authMode: multi` (or another
   mode with native accounts). Password actions never apply to GitHub identities.
 
@@ -138,8 +139,9 @@ refresh). Quota **rates and enable/disable knobs** (`custom.quota.*`,
 - **`set-admin` grants full platform control** — confirm the target list.
 - **Quota refresh rules apply broadly.** A global Refresh Quota or a broad
   `refreshRules` filter touches many users; confirm before applying.
-- CLI quota commands run `kubectl exec` into `deployment/hub`; they need both a
-  valid API token for the script preflight and a healthy kube context/namespace.
+- CLI quota commands call the Hub admin API; they need a valid API token and a
+  reachable Hub, not `kubectl` access. Use `kubectl` only for the secret
+  bootstrap or scheduled-refresh CronJob inspection described above.
 
 ## Reference
 

@@ -41,8 +41,9 @@ source skills/manage-aup-learning-cloud-users/scripts/hub-api-env.sh
 HUB_URL="https://hub.example.com" source skills/manage-aup-learning-cloud-users/scripts/hub-api-env.sh
 ```
 
-CLI **quota** commands also use `kubectl exec` into `deployment/hub`, so they
-need a working kube context + namespace in addition to the API token preflight.
+CLI **quota** commands call the Hub admin API, so they need a valid API token
+and a reachable Hub. `kubectl` is only needed to bootstrap the token from the
+secret above or inspect scheduled quota refresh CronJobs.
 
 ## Python dependencies
 
@@ -102,11 +103,12 @@ python scripts/manage_users.py add-quota --file users.csv --amount 100
 python scripts/manage_users.py list-quota
 ```
 
-Every command accepts `--url` and `--token`, but prefer exported env vars so
-tokens do not appear in shell history:
+Every command accepts `--url` and `--token`, but export the environment instead
+so tokens do not appear in shell history or process arguments. Use a read-only
+CLI command to confirm reachability:
 
 ```bash
-python scripts/manage_users.py --url "$JUPYTERHUB_URL" --token "$JUPYTERHUB_TOKEN" list
+python scripts/manage_users.py list
 ```
 
 ### Command behavior notes
@@ -140,9 +142,9 @@ python scripts/manage_users.py --url "$JUPYTERHUB_URL" --token "$JUPYTERHUB_TOKE
   users, usage trends, resource distribution, top users, live sessions, pending
   spawns.
 
-Admin quota API endpoints used by the UI: `GET/POST /admin/api/quota/`,
-`POST /admin/api/quota/batch`, `POST /admin/api/quota/refresh`,
-`GET /api/quota/rates`, `GET /api/quota/me`.
+Admin quota API endpoints used by the UI: `GET/POST /hub/admin/api/quota/`,
+`POST /hub/admin/api/quota/batch`, `POST /hub/admin/api/quota/refresh`,
+`GET /hub/api/quota/rates`, `GET /hub/api/quota/me`.
 
 ## Scheduled quota refresh (`refreshRules`)
 
@@ -226,9 +228,9 @@ cd runtime && helm upgrade --install jupyterhub ./chart \
 
 | Symptom | Likely cause | First checks |
 | --- | --- | --- |
-| Script cannot connect to the Hub | `JUPYTERHUB_URL`/`JUPYTERHUB_TOKEN` wrong | Confirm both; `curl -H "Authorization: token $JUPYTERHUB_TOKEN" $JUPYTERHUB_URL/hub/api/` |
+| Script cannot connect to the Hub | `JUPYTERHUB_URL`/`JUPYTERHUB_TOKEN` wrong | Re-source `hub-api-env.sh`, then run `python scripts/manage_users.py list` |
 | Password reset fails | Target is a GitHub user, weak password, or session lacks perms | Native users only; meet the strength policy |
-| Quota command passes API check but fails later | CLI uses `kubectl exec` into `deployment/hub` | Check kube context, namespace, and `kubectl -n jupyterhub get deploy/hub` |
+| Quota command fails | Hub admin API rejects the token or is unreachable | Re-source the API environment and run `python scripts/manage_users.py list` before retrying quota work |
 | No api-token secret | `custom.adminUser.enabled: false` | Enable admin bootstrap, re-apply |
 | Group membership can't be edited | System-managed or GitHub-synced group | Only manual/editable groups accept edits |
 | Refresh rule didn't run | Rule disabled or absent from the applied values | `kubectl … get cronjobs -l …quota-refresh`; re-apply |

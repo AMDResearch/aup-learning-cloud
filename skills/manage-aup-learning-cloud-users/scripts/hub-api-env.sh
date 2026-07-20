@@ -34,9 +34,9 @@ export JUPYTERHUB_TOKEN="$_auplc_token"
 
 # Probe the API (non-fatal: token may still be valid behind an auth proxy).
 if command -v curl >/dev/null 2>&1; then
-  _auplc_code="$(curl -s -o /dev/null -w '%{http_code}' \
-    -H "Authorization: token ${JUPYTERHUB_TOKEN}" \
-    "${JUPYTERHUB_URL%/}/hub/api/" 2>/dev/null)"
+  _auplc_code="$(printf 'header = "Authorization: token %s"\n' "$JUPYTERHUB_TOKEN" | \
+    curl --config - -s -o /dev/null -w '%{http_code}' \
+      "${JUPYTERHUB_URL%/}/hub/api/" 2>/dev/null)"
   case "$_auplc_code" in
     200) echo "hub-api-env: OK — $JUPYTERHUB_URL/hub/api/ reachable (200)" ;;
     *)   echo "hub-api-env: WARNING — $JUPYTERHUB_URL/hub/api/ returned '$_auplc_code'; check HUB_URL/network" >&2 ;;
