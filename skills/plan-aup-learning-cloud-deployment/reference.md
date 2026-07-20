@@ -128,6 +128,7 @@ chip-selection driver:
 | `strix-halo` | Radeon 8060S (Strix Halo iGPU) | 64 GB unified | 40 | `AMD_Radeon_8060S_Graphics` | CV/DL/LLM/PhySim |
 | `9070xt` | Radeon RX 9070 XT | 16 GB GDDR6 | 64 | `AMD_Radeon_RX_9070_XT` | CV/DL; mid LLM |
 | `r9700` | Radeon AI PRO R9700 | 32 GB GDDR6 | 64 | `AMD_Radeon_AI_PRO_R9700` | CV/DL/LLM; multi-card workstation/server |
+| `9600gre` | Radeon RX 9600 GRE | 12 GB GDDR6 | 32 | `AMD_Radeon_RX_9600_GRE` | CV/DL; light to mid LLM |
 
 `phx` also sets `HSA_OVERRIDE_GFX_VERSION: 11.0.0`. If a fleet normalizes a
 product name differently, the `nodeSelector` string must be changed to match
@@ -144,7 +145,7 @@ Always confirm against current AMD product pages; silicon refreshes often.
 2. **ROCm gate.** Only recommend chips with confirmed ROCm support; otherwise
    the GPU notebooks will not run.
 3. **Map to a chart key.** Fit the chip to an existing accelerator key
-   (`phx`/`strix`/`strix-halo`/`9070xt`/`r9700`) and the expected
+   (`phx`/`strix`/`strix-halo`/`9070xt`/`r9700`/`9600gre`) and the expected
    `amd.com/gpu.product-name`. If it is a brand-new product with no key yet,
    tell the user it needs a `configure-aup-learning-cloud-courses` accelerator
    entry (and possibly a new image) before deployment.

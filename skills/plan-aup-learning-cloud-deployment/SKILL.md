@@ -73,10 +73,12 @@ the requirements:
    servers**. Compare by **compute (CU/TFLOPs) and VRAM**, not marketing tier.
 2. **Gate every candidate on ROCm support** — if a chip is not ROCm-supported it
    cannot run the GPU notebooks.
-3. **Map the chip to a chart accelerator key** (`phx`, `strix`, `strix-halo`,
-   `9070xt`, `r9700`, or the generic `rdna4`) and the expected
-   `amd.com/gpu.product-name` node label. A brand-new chip with no existing key
-   is a flag to raise with the user.
+3. **Map the chip to an existing chart accelerator key** (`phx`, `strix`,
+   `strix-halo`, `9070xt`, `r9700`, or `9600gre`) and the expected
+   `amd.com/gpu.product-name` node label. `rdna4` is an installer detection
+   fallback, not an existing chart accelerator key accepted by
+   `gen_configs.py`. A new chart key requires
+   `configure-aup-learning-cloud-courses` work before it can be generated.
 4. Prefer **multi-GPU chassis** (workstation/server) when peak concurrent GPU
    users is high enough that many single-GPU AIPCs become impractical to cable,
    power, and manage. Keep AIPCs for small labs and the demo-like experience.
