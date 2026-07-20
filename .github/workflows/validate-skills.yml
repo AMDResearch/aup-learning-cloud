@@ -10,6 +10,12 @@ on:
       - ".cursor-plugin/**"
       - ".github/scripts/**"
       - ".github/workflows/validate-skills.yml"
+      - "pyproject.toml"
+      - "plugin-metadata.json"
+      - "scripts/check_skills_version.py"
+      - "tests/skills/**"
+      - "README-SKILL.md"
+      - "plugin-docs/**"
   pull_request:
     paths:
       - "skills/**"
@@ -18,6 +24,12 @@ on:
       - ".cursor-plugin/**"
       - ".github/scripts/**"
       - ".github/workflows/validate-skills.yml"
+      - "pyproject.toml"
+      - "plugin-metadata.json"
+      - "scripts/check_skills_version.py"
+      - "tests/skills/**"
+      - "README-SKILL.md"
+      - "plugin-docs/**"
   workflow_dispatch:
 
 # Least privilege: these jobs only read the repo to validate skills/manifests.
@@ -65,10 +77,10 @@ jobs:
       - name: Validate skill
         run: uv run .github/scripts/validate_skills.py --skill "${{ matrix.skill }}"
 
-  # Repo-wide checks that aren't tied to a single skill: the generated plugin
-  # manifests.
+  # Repo-wide checks that aren't tied to a single skill: version sync, public
+  # skill CLI tests, and generated plugin manifests.
   validate-manifests:
-    name: Validate plugin manifests
+    name: Validate plugin metadata and manifests
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -79,6 +91,12 @@ jobs:
 
       - name: Validate marketplace manifest
         run: uv run .github/scripts/validate_skills.py --marketplace-only
+
+      - name: Validate skill version sync
+        run: uv run python scripts/check_skills_version.py
+
+      - name: Run skill tests
+        run: uv run --extra test pytest tests/skills
 
       - name: Validate generated Cursor manifest
         run: uv run .github/scripts/generate_cursor_marketplace.py --check
