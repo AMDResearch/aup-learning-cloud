@@ -35,6 +35,25 @@ table live in **[reference.md](reference.md)**.
 - The user supplies the physical hardware. **No site values (IPs, subnet, SSH
   keys, tokens) ship in the repo** — this skill generates them.
 
+## Helper script paths
+
+Resolve the deploy helpers before running the commands below. From any directory
+in an AUP Learning Cloud checkout:
+
+```bash
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+DEPLOY_SCRIPTS="$REPO_ROOT/skills/deploy-aup-learning-cloud/scripts"
+```
+
+When this skill is installed as a plugin rather than used from a checkout, set
+`DEPLOY_SKILL_DIR` to the absolute directory containing the loaded `SKILL.md`,
+then derive the helpers from that directory:
+
+```bash
+DEPLOY_SKILL_DIR="/absolute/path/to/deploy-aup-learning-cloud"
+DEPLOY_SCRIPTS="$DEPLOY_SKILL_DIR/scripts"
+```
+
 ## Phase 1 — Interview
 
 Work through this in order. **The deployment-method choice (1a) is a hard gate:
@@ -65,8 +84,9 @@ Collect, and confirm back to the user, before touching anything:
    - *SSH path only:* also the hostname + IP of every agent node, and confirm
      passwordless root SSH already reaches each one.
 3. **GPU — do not ask the user to name the model.** Let the tooling find it: the
-   detectors report the GPUs (`detect_hardware.sh` in Phase 2) and the real ROCm
-   `amd.com/gpu.product-name` label (`detect_cluster.sh` in Phase 5). Then
+   detectors report the GPUs (`$DEPLOY_SCRIPTS/detect_hardware.sh` in Phase 2)
+   and the real ROCm `amd.com/gpu.product-name` label
+   (`$DEPLOY_SCRIPTS/detect_cluster.sh` in Phase 5). Then
    **confirm the detected GPU → accelerator-key mapping with the user** before it
    goes into the values file.
 4. *PXE path only:* service-machine NIC, subnet (CIDR), gateway, and DNS servers
@@ -83,7 +103,7 @@ On the service machine, run the bundled detector and cross-check its JSON
 against the Phase 1 answers:
 
 ```bash
-scripts/detect_hardware.sh   # JSON: nic, ip, subnet_cidr, gateway, dns_servers, gpus[]
+"$DEPLOY_SCRIPTS/detect_hardware.sh"   # JSON: nic, ip, subnet_cidr, gateway, dns_servers, gpus[]
 ```
 
 It reports the default-route NIC, the service-machine IP + subnet CIDR, the
@@ -96,21 +116,22 @@ name them, so surface the detected list and confirm it with the user.
 
 ## Phase 3 — Generate config
 
-Drive `scripts/gen_configs.py` rather than hand-writing YAML — it keeps the
+Drive `$DEPLOY_SCRIPTS/gen_configs.py` rather than hand-writing YAML — it keeps the
 three artifacts consistent, mints the k3s token locally with a CSPRNG (never
 printed), `chmod 600`s the inventory, and pins `pxe_k3s_version == k3s_version`.
 
 ```bash
-scripts/gen_configs.py --print-schema > spec.json   # fill from Phase 1 + 2
-scripts/gen_configs.py --spec spec.json --out-dir ./generated
+python3 "$DEPLOY_SCRIPTS/gen_configs.py" --print-schema > spec.json   # fill from Phase 1 + 2
+GENERATED_DIR="$REPO_ROOT/generated"
+python3 "$DEPLOY_SCRIPTS/gen_configs.py" --spec spec.json --out-dir "$GENERATED_DIR"
 ```
 
 It writes, into `--out-dir`:
 
 1. `inventory.yml` — `server` host + `token` + `k3s_version` (agents empty for
    PXE; listed for SSH) plus the `pxe_controller` group for PXE.
-2. `pb-pxe-controller.vars.yml` — PXE path only: the `vars:` to merge into
-   `deploy/ansible/playbooks/pb-pxe-controller.yml` (`pxe_network_interface`,
+2. `pb-pxe-controller.vars.yml` — PXE path only: extra vars passed to
+   `deploy/ansible/playbooks/pb-pxe-controller.yml` with `-e @<absolute-path>` (`pxe_network_interface`,
    `pxe_subnet`, `pxe_gateway`, `pxe_dns_servers`, `pxe_controller_ip`,
    `pxe_k3s_server_ips`, `pxe_k3s_version`, `pxe_web_port`,
    `pxe_rootfs_password`, `pxe_rootfs_authorized_keys`).
@@ -118,9 +139,25 @@ It writes, into `--out-dir`:
    to real GPU labels in Phase 5), `custom.resources.images`, the storage class
    (`nfs-client`), `custom.authMode`, and the proxy `NodePort` (e.g. 30890).
 
-Review the artifacts, then copy them into the `aup-learning-cloud` checkout.
+Review the artifacts, install the inventory and runtime overlay into the
+checkout, and keep the PXE vars in the generated directory.
 **Never commit `inventory.yml` — it holds the token.** Field-by-field guidance
 is in [reference.md](reference.md).
+
+Map the generated artifacts into the checkout before Phase 5 validation:
+
+```bash
+install -m 0600 "$GENERATED_DIR/inventory.yml" "$REPO_ROOT/deploy/ansible/inventory.yml"
+install -m 0644 "$GENERATED_DIR/values-basic-example.yaml" "$REPO_ROOT/runtime/values-basic-example.yaml"
+
+# PXE only: keep this generated secret in place and use its absolute path.
+PXE_VARS="$(realpath "$GENERATED_DIR/pb-pxe-controller.vars.yml")"
+chmod 0600 "$PXE_VARS"
+```
+
+The generated `gpu.acceleratorKeys` activates the selected accelerators only
+for the generic GPU resource. Wire selected accelerators into course resources
+separately with `configure-aup-learning-cloud-courses`.
 
 ## Phase 4 — Execute (with confirmation gates)
 
@@ -128,11 +165,19 @@ Run the install in order. **Pause for explicit user confirmation before each
 risky/irreversible step** (see Safety). The PXE path is, in brief:
 
 1. Install host packages on the service machine.
-2. `pb-pxe-controller.yml` to build the PXE/NFS rootfs, then verify the
+2. Run `pb-pxe-controller.yml -e @"$PXE_VARS"` to build the PXE/NFS rootfs,
+   then verify the
    controller (dnsmasq, NFS, apache2, TFTP boot files).
 3. `pb-base.yml` + `pb-k3s-site.yml` to install the single-node k3s server.
 4. Publish the k3s token + kubeconfig for agents over the apache `/k3s/` endpoint.
 5. Netboot the agents; watch them auto-join with `kubectl get nodes -o wide`.
+
+Run the PXE controller step with the generated vars file:
+
+```bash
+cd "$REPO_ROOT/deploy/ansible"
+ansible-playbook -i inventory.yml playbooks/pb-pxe-controller.yml -e @"$PXE_VARS"
+```
 
 The SSH path runs `pb-base.yml`, `pb-k3s-site.yml`, and `pb-rocm.yml` against
 the inventory instead. Full commands for both paths are in [reference.md](reference.md).
@@ -143,7 +188,7 @@ the inventory instead. Full commands for both paths are in [reference.md](refere
    cluster state:
 
    ```bash
-   scripts/detect_cluster.sh > cluster.json   # nodes[], gpu_product_names[], storage_classes[]
+"$DEPLOY_SCRIPTS/detect_cluster.sh" > cluster.json   # nodes[], gpu_product_names[], storage_classes[]
    ```
 
    Confirm the detected GPU → accelerator-key mapping with the user, then patch
@@ -152,10 +197,15 @@ the inventory instead. Full commands for both paths are in [reference.md](refere
    pre-flight (exits non-zero on any mismatch):
 
    ```bash
-   scripts/validate.py --repo ~/aup-learning-cloud \
-     --values runtime/values.yaml --values runtime/values-basic-example.yaml \
-     --cluster cluster.json --helm-dry-run
-   ```
+# Set this to the topology selected in Phase 1a.
+DEPLOY_TOPOLOGY=pxe-diskless
+python3 "$DEPLOY_SCRIPTS/validate.py" --repo "$REPO_ROOT" --topology "$DEPLOY_TOPOLOGY" \
+      --values runtime/values.yaml --values runtime/values-basic-example.yaml \
+      --pxe-vars "$PXE_VARS" --cluster cluster.json --helm-dry-run
+```
+
+For the PXE path, the validator and Ansible receive the same generated vars
+file. Omit `--pxe-vars "$PXE_VARS"` for the SSH path.
 
 2. Create the notebook-PVC NFS export and install the `nfs-subdir-external-provisioner`
    (storage class `nfs-client`).

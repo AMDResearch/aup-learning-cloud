@@ -21,6 +21,10 @@ workflow and confirmation gates are in [SKILL.md](SKILL.md).
 Treat the live docs as the source of truth for version pins; this file
 condenses the opinionated path.
 
+The helper commands are resolved through `DEPLOY_SCRIPTS` as defined in
+[SKILL.md](SKILL.md#helper-script-paths), not through a checkout-root
+`scripts/` directory.
+
 The two topology sections below are the two branches of the Phase 1a gate in
 [SKILL.md](SKILL.md): **PXE Diskless Netboot** (`topology: pxe-diskless`) →
 [PXE-diskless topology](#pxe-diskless-topology-3-node-mini-cluster); **Multi Node
@@ -86,12 +90,21 @@ pxe_controller:
     ansible_user: root
 ```
 
-### Step 3 — Configure the PXE controller playbook
+### Step 3 — Prepare the generated PXE controller vars
 
-Edit the `vars:` block in `deploy/ansible/playbooks/pb-pxe-controller.yml`. The
-network, controller, server-IP, and SSH-key values are empty by default and the
-role asserts on them. `scripts/gen_configs.py` emits this exact block as
-`pb-pxe-controller.vars.yml` — generate it and merge, or hand-edit:
+The network, controller, server-IP, and SSH-key values are empty by default and
+the role asserts on them. `$DEPLOY_SCRIPTS/gen_configs.py` writes these values
+to `generated/pb-pxe-controller.vars.yml`. Keep that file at mode `0600`; it can
+contain `pxe_rootfs_password`. Resolve its absolute path for the Ansible and
+validator commands instead of copying or merging it into the playbook:
+
+```bash
+PXE_VARS="$(realpath ./generated/pb-pxe-controller.vars.yml)"
+chmod 0600 "$PXE_VARS"
+test "$(stat -c '%a' "$PXE_VARS")" = 600
+```
+
+Review the generated values before the first run:
 
 ```yaml
 pxe_rootfs_force_rebuild: true        # true for the first build (RISKY: rebuilds rootfs)
@@ -118,8 +131,15 @@ unless discovery flagged a need.
 ### Step 4 — Run the PXE controller playbook
 
 ```bash
-cd ~/aup-learning-cloud/deploy/ansible
-ansible-playbook -i inventory.yml playbooks/pb-pxe-controller.yml
+cd ~/aup-learning-cloud
+REPO_ROOT="$(pwd)"
+DEPLOY_SCRIPTS="$REPO_ROOT/skills/deploy-aup-learning-cloud/scripts"
+PXE_VARS="$(realpath "$REPO_ROOT/generated/pb-pxe-controller.vars.yml")"
+python3 "$DEPLOY_SCRIPTS/validate.py" --repo "$REPO_ROOT" \
+  --topology pxe-diskless --pxe-vars "$PXE_VARS" \
+  --values runtime/values.yaml --values runtime/values-basic-example.yaml
+cd "$REPO_ROOT/deploy/ansible"
+ansible-playbook -i inventory.yml playbooks/pb-pxe-controller.yml -e @"$PXE_VARS"
 ```
 
 ### Step 5 — Verify the controller
@@ -285,9 +305,15 @@ kubectl get storageclass
 
 ## Step 12 — Configure JupyterHub values
 
+The generated `runtime/values-basic-example.yaml` is the canonical deployment
+overlay. Review and keep it when Phase 3 generated one. Only when no generated
+overlay exists, start a manual overlay from the example:
+
 ```bash
 cd ~/aup-learning-cloud/runtime
-cp values-multi-nodes.yaml.example values-basic-example.yaml
+if [ ! -e values-basic-example.yaml ]; then
+  cp values-multi-nodes.yaml.example values-basic-example.yaml
+fi
 ```
 
 Minimum edits (see the [field guide](#valuesyaml-field-guide)):
@@ -363,14 +389,15 @@ differently per fleet.
 | `AMD_Radeon_8060S_Graphics` | `strix-halo` |
 | `AMD_Radeon_RX_9070_XT` | `9070xt` |
 | `AMD_Radeon_AI_PRO_R9700` | `r9700` |
+| `AMD_Radeon_RX_9600_GRE` | `9600gre` |
 
 If your labeller reports a different product name, update the matching
 `custom.accelerators.*.nodeSelector` entry to that exact string.
 
 ## values.yaml field guide
 
-Sections to review in `values-basic-example.yaml` (from
-`values-multi-nodes.yaml.example`):
+Sections to review in the generated `values-basic-example.yaml`, or in the
+manual `values-multi-nodes.yaml.example` copy when generation was not used:
 
 | Field | Purpose |
 | --- | --- |
