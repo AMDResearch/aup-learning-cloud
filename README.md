@@ -201,6 +201,7 @@ Full documentation is available at: **https://amdresearch.github.io/aup-learning
 - [Authentication Guide](https://amdresearch.github.io/aup-learning-cloud/jupyterhub/authentication-guide.html) - GitHub App and native authentication
 - [User Management Guide](https://amdresearch.github.io/aup-learning-cloud/jupyterhub/user-management.html) - Batch user operations with scripts
 - [User Quota System](https://amdresearch.github.io/aup-learning-cloud/jupyterhub/quota-system.html) - Resource usage tracking and quota management
+- [AUP Learning Cloud Skills](README-SKILL.md) - Agent Skills for deploying and maintaining AUP Learning Cloud
 
 ## Contributing
 
