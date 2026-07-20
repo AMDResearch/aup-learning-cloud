@@ -5,13 +5,13 @@
 Catches the mistakes that otherwise surface only after a long playbook or a
 failed spawn:
 
-  * required PXE vars empty (interface / subnet / controller_ip / dns /
-    k3s_server_ips / at least one authorized key);
-  * the k3s server version and the PXE agent rootfs version disagree
-    (agents must not be newer than the server);
-  * a custom.accelerators.*.nodeSelector that names a GPU product label no
-    node actually reports (the #1 cause of GPU notebooks stuck Pending) --
-    checked against detect_cluster.sh output when supplied;
+  * required PXE vars empty (PXE topology only: interface / subnet /
+    controller_ip / dns / k3s_server_ips / at least one authorized key);
+  * the k3s server version and the PXE agent rootfs version disagree (PXE
+    topology only; agents must not be newer than the server);
+  * nodeSelectors for the accelerators actually referenced by effective
+    custom.resources.metadata.*.acceleratorKeys, checked against
+    detect_cluster.sh output when supplied;
   * (optional) the chart does not render: a `helm template` dry-run.
 
 This intentionally uses regex/line scanning rather than a YAML parser so it
@@ -20,8 +20,9 @@ validator: it reports what it can prove wrong, and says so when it cannot
 inspect something.
 
 Usage:
-    validate.py --repo ~/aup-learning-cloud
+    validate.py --repo ~/aup-learning-cloud --topology pxe-diskless
     validate.py --repo ~/aup-learning-cloud \
+        --topology ssh-preinstalled \
         --values runtime/values.yaml --values runtime/values-basic-example.yaml \
         --cluster cluster.json --helm-dry-run
 
@@ -69,6 +70,10 @@ def scalar(text: str, key: str) -> str | None:
     return val or None
 
 
+def key_occurrences(text: str, key: str) -> int:
+    return len(re.findall(rf"^\s*{re.escape(key)}\s*:", text, re.MULTILINE))
+
+
 def list_nonempty(text: str, key: str) -> bool:
     """True if `key:` is a YAML list with at least one item, or an inline
     non-empty flow list (``[...]`` with content)."""
@@ -93,10 +98,14 @@ def list_nonempty(text: str, key: str) -> bool:
     return False
 
 
-def check_pxe_vars(repo: Path) -> None:
-    pb = repo / PXE_PLAYBOOK
+def pxe_vars_path(repo: Path, configured_path: str | None) -> Path:
+    return Path(configured_path).expanduser() if configured_path else repo / PXE_PLAYBOOK
+
+
+def check_pxe_vars(repo: Path, configured_path: str | None = None) -> None:
+    pb = pxe_vars_path(repo, configured_path)
     if not pb.exists():
-        warn(f"{PXE_PLAYBOOK} not found; skipping PXE checks (SSH topology?)")
+        fail(f"PXE vars file not found: {pb}")
         return
     text = pb.read_text(encoding="utf-8")
     required_scalars = {
@@ -105,6 +114,10 @@ def check_pxe_vars(repo: Path) -> None:
         "pxe_controller_ip": "service host IP",
         "pxe_dns_servers": "rootfs DNS servers",
     }
+    safety_keys = [*required_scalars, "pxe_k3s_server_ips", "pxe_rootfs_authorized_keys", "pxe_k3s_version"]
+    for key in safety_keys:
+        if key_occurrences(text, key) > 1:
+            fail(f"duplicate PXE key '{key}' in {pb}")
     for key, what in required_scalars.items():
         if scalar(text, key):
             ok(f"PXE var {key} is set")
@@ -120,13 +133,17 @@ def check_pxe_vars(repo: Path) -> None:
         fail("PXE var pxe_rootfs_authorized_keys is empty (rootfs would be unreachable)")
 
 
-def check_version_sync(repo: Path) -> None:
+def check_version_sync(repo: Path, configured_path: str | None = None) -> None:
     inv = repo / INVENTORY
-    pb = repo / PXE_PLAYBOOK
+    pb = pxe_vars_path(repo, configured_path)
     if not inv.exists():
         warn(f"{INVENTORY} not found; skipping k3s version sync check")
         return
-    server_ver = scalar(inv.read_text(encoding="utf-8"), "k3s_version")
+    inventory_text = inv.read_text(encoding="utf-8")
+    if key_occurrences(inventory_text, "k3s_version") > 1:
+        fail(f"duplicate inventory key 'k3s_version' in {inv}")
+        return
+    server_ver = scalar(inventory_text, "k3s_version")
     if not server_ver:
         warn("k3s_version not found in inventory.yml")
         return
@@ -146,22 +163,137 @@ def check_version_sync(repo: Path) -> None:
         )
 
 
-def collect_values_text(repo: Path, values: list[str]) -> str:
+def yaml_scalar(value: str) -> str:
+    return value.strip().strip('"').strip("'")
+
+
+def yaml_optional_scalar(value: str) -> str:
+    scalar_value = yaml_scalar(value)
+    return "" if scalar_value in {"", "null", "~"} else scalar_value
+
+
+def yaml_indent(line: str) -> int:
+    return len(line) - len(line.lstrip())
+
+
+def parse_inline_list(value: str) -> list[str]:
+    items = value.strip()[1:-1].strip()
+    if not items:
+        return []
+    return [yaml_scalar(item) for item in items.split(",") if yaml_scalar(item)]
+
+
+def is_relevant_flow_path(path: tuple[str, ...]) -> bool:
+    return path == ("custom",) or path[:2] in {("custom", "accelerators"), ("custom", "resources")}
+
+
+def unsupported_yaml_syntax(value: str) -> bool:
+    return value.startswith(("&", "*", "!", "|", ">"))
+
+
+def parse_values_file(text: str) -> tuple[dict[str, str | None], dict[str, list[str]], list[str]]:
+    """Extract the deploy-relevant mappings from a fixed-shape values YAML file.
+
+    The helpers deliberately remain stdlib-only. This scanner handles the
+    mapping/list shapes used by values overlays, rather than pretending to be a
+    general YAML parser.
+    """
+    accelerators: dict[str, str | None] = {}
+    metadata: dict[str, list[str]] = {}
+    parse_errors: list[str] = []
+    stack: list[tuple[int, str]] = []
+
+    for raw_line in text.splitlines():
+        line = raw_line.split("#", 1)[0].rstrip()
+        if not line.strip():
+            continue
+        indent = yaml_indent(line)
+        stripped = line.strip()
+
+        while stack and indent <= stack[-1][0]:
+            stack.pop()
+        path = tuple(key for _, key in stack)
+
+        if stripped.startswith("- "):
+            if len(path) == 5 and path[:3] == ("custom", "resources", "metadata") and path[-1] == "acceleratorKeys":
+                metadata.setdefault(path[3], []).append(yaml_scalar(stripped[2:]))
+            continue
+
+        product_label_match = re.fullmatch(
+            r"(?:[\"']amd\.com/gpu\.product-name[\"']|amd\.com/gpu\.product-name):\s*(.*)", stripped
+        )
+        if product_label_match:
+            if len(path) == 4 and path[:2] == ("custom", "accelerators") and path[-1] == "nodeSelector":
+                value = product_label_match.group(1).strip()
+                if unsupported_yaml_syntax(value):
+                    parse_errors.append(
+                        f"unsupported YAML syntax at custom.accelerators.{path[2]}.nodeSelector.amd.com/gpu.product-name"
+                    )
+                else:
+                    accelerators[path[2]] = yaml_optional_scalar(value)
+            continue
+
+        mapping_match = re.fullmatch(r"(.+?):(?:\s*(.*))?", stripped)
+        if not mapping_match:
+            continue
+        key = mapping_match.group(1).strip("\"'")
+        value = (mapping_match.group(2) or "").strip()
+        candidate_path = path + (key,)
+        if value.startswith("{") and value != "{}" and is_relevant_flow_path(candidate_path):
+            parse_errors.append(f"unsupported non-empty flow-style mapping at {'.'.join(candidate_path)}")
+        if unsupported_yaml_syntax(value) and is_relevant_flow_path(candidate_path):
+            parse_errors.append(f"unsupported YAML syntax at {'.'.join(candidate_path)}")
+        if path == ("custom", "accelerators"):
+            accelerators.setdefault(key, None)
+        if len(path) == 4 and path[:3] == ("custom", "resources", "metadata") and key == "acceleratorKeys":
+            resource_key = path[3]
+            if unsupported_yaml_syntax(value):
+                parse_errors.append(f"unsupported YAML syntax at {'.'.join(candidate_path)}")
+            elif value.startswith("[") and value.endswith("]"):
+                metadata[resource_key] = parse_inline_list(value)
+            elif not value or value in {"null", "~"}:
+                metadata[resource_key] = []
+            else:
+                parse_errors.append(f"acceleratorKeys must be a list at {'.'.join(candidate_path)}")
+        stack.append((indent, key))
+    return accelerators, metadata, parse_errors
+
+
+def collect_effective_values(repo: Path, values: list[str]) -> tuple[dict[str, str], dict[str, list[str]], list[str]]:
     paths = values or ["runtime/values.yaml"]
-    chunks = []
+    accelerators: dict[str, str] = {}
+    metadata: dict[str, list[str]] = {}
+    parse_errors: list[str] = []
     for rel in paths:
         p = (repo / rel) if not Path(rel).is_absolute() else Path(rel)
         if p.exists():
-            chunks.append(p.read_text(encoding="utf-8"))
+            parsed_accelerators, parsed_metadata, file_errors = parse_values_file(p.read_text(encoding="utf-8"))
+            for key, selector in parsed_accelerators.items():
+                if selector is not None or key not in accelerators:
+                    accelerators[key] = selector
+            metadata.update(parsed_metadata)
+            parse_errors.extend(file_errors)
         else:
-            warn(f"values file not found: {rel}")
-    return "\n".join(chunks)
+            fail(f"values file not found: {rel}")
+    return accelerators, metadata, parse_errors
 
 
-def check_accelerator_labels(values_text: str, cluster: dict | None) -> None:
-    declared = sorted(set(re.findall(r"amd\.com/gpu\.product-name\s*:\s*[\"']?([A-Za-z0-9_]+)[\"']?", values_text)))
+def check_accelerator_labels(
+    accelerators: dict[str, str], metadata: dict[str, list[str]], cluster: dict | None
+) -> None:
+    active_keys = sorted({key for keys in metadata.values() for key in keys})
+    if not active_keys:
+        warn("no acceleratorKeys found in effective custom.resources.metadata")
+        return
+    declared: list[str] = []
+    for key in active_keys:
+        if key not in accelerators:
+            fail(f"active accelerator '{key}' is not defined under custom.accelerators")
+        elif not accelerators[key]:
+            fail(f"active accelerator '{key}' has no amd.com/gpu.product-name nodeSelector")
+        else:
+            declared.append(accelerators[key])
     if not declared:
-        warn("no amd.com/gpu.product-name nodeSelector found in the values overlay")
         return
     if cluster is None:
         warn(
@@ -171,7 +303,7 @@ def check_accelerator_labels(values_text: str, cluster: dict | None) -> None:
         return
     real = set(cluster.get("gpu_product_names", []))
     if not real:
-        warn("cluster snapshot reports no GPU product labels yet (device plugin / labeller not ready?)")
+        fail("cluster snapshot has no GPU product labels for active accelerators")
         return
     for d in declared:
         if d in real:
@@ -202,10 +334,24 @@ def check_helm(repo: Path, values: list[str]) -> None:
 
 
 def main(argv=None) -> int:
+    global errors, passed, warnings
+    errors = []
+    warnings = []
+    passed = []
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--repo", required=True, help="path to the aup-learning-cloud checkout")
     ap.add_argument(
+        "--topology",
+        choices=("pxe-diskless", "ssh-preinstalled"),
+        default="pxe-diskless",
+        help="deployment topology (default: pxe-diskless)",
+    )
+    ap.add_argument(
         "--values", action="append", default=[], help="values file (repeatable); defaults to runtime/values.yaml"
+    )
+    ap.add_argument(
+        "--pxe-vars",
+        help="PXE vars file to validate instead of deploy/ansible/playbooks/pb-pxe-controller.yml",
     )
     ap.add_argument("--cluster", help="detect_cluster.sh JSON output to match labels against")
     ap.add_argument("--helm-dry-run", action="store_true", help="also run `helm template`")
@@ -225,10 +371,15 @@ def main(argv=None) -> int:
             print(f"validate: cannot read --cluster: {exc}", file=sys.stderr)
             return 2
 
-    check_pxe_vars(repo)
-    check_version_sync(repo)
-    values_text = collect_values_text(repo, args.values)
-    check_accelerator_labels(values_text, cluster)
+    if args.topology == "pxe-diskless":
+        check_pxe_vars(repo, args.pxe_vars)
+        check_version_sync(repo, args.pxe_vars)
+    else:
+        ok("skipped PXE checks for ssh-preinstalled topology")
+    accelerators, metadata, parse_errors = collect_effective_values(repo, args.values)
+    for message in parse_errors:
+        fail(message)
+    check_accelerator_labels(accelerators, metadata, cluster)
     if args.helm_dry_run:
         check_helm(repo, args.values)
 

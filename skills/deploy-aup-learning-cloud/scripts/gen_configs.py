@@ -8,9 +8,9 @@ deploy skill needs, keeping them mutually consistent:
   1. ``inventory.yml``               -- Ansible inventory (server + token +
                                         k3s_version; agents listed for the
                                         SSH topology, empty for PXE).
-  2. ``pb-pxe-controller.vars.yml``  -- PXE topology only: the ``vars:`` values
-                                        to merge into
-                                        deploy/ansible/playbooks/pb-pxe-controller.yml.
+  2. ``pb-pxe-controller.vars.yml``  -- PXE topology only: extra vars passed to
+                                        pb-pxe-controller.yml with
+                                        ``-e @<absolute-path>``.
   3. ``values-basic-example.yaml``   -- Helm overlay: accelerator nodeSelectors,
                                         storage class, proxy NodePort, authMode.
 
@@ -39,8 +39,12 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import os
 import secrets
+import shutil
 import sys
+import tempfile
+from contextlib import suppress
 from pathlib import Path
 
 HEADER_HASH = (
@@ -57,6 +61,7 @@ DEFAULT_ACCEL_LABELS = {
     "strix-halo": "AMD_Radeon_8060S_Graphics",
     "9070xt": "AMD_Radeon_RX_9070_XT",
     "r9700": "AMD_Radeon_AI_PRO_R9700",
+    "9600gre": "AMD_Radeon_RX_9600_GRE",
 }
 
 SCHEMA = {
@@ -104,6 +109,31 @@ def require(spec: dict, path: str):
 
 def yaml_quote(s: str) -> str:
     return '"' + str(s).replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def validate_accelerators(spec: dict) -> None:
+    if "accelerators" not in spec:
+        return
+    accelerators = spec["accelerators"]
+    if not isinstance(accelerators, dict):
+        die("spec.accelerators must be a mapping")
+    unsupported = sorted(set(accelerators) - set(DEFAULT_ACCEL_LABELS))
+    if len(unsupported) == 1:
+        die(f"unsupported accelerator key '{unsupported[0]}'")
+    if unsupported:
+        die(f"unsupported accelerator keys: {', '.join(unsupported)}")
+    for key, config in accelerators.items():
+        if not isinstance(config, dict):
+            die(f"accelerators.{key} must be a mapping")
+
+
+def validate_config_shapes(spec: dict) -> None:
+    if not isinstance(spec, dict):
+        die("spec must be a mapping")
+    validate_accelerators(spec)
+    for key in ("network", "pxe", "storage", "proxy", "images"):
+        if key in spec and not isinstance(spec[key], dict):
+            die(f"spec.{key} must be a mapping")
 
 
 def render_inventory(spec: dict, token: str) -> str:
@@ -160,8 +190,8 @@ def render_pxe_vars(spec: dict) -> str:
     k3s_version = spec["k3s_version"]
     lines = [
         HEADER_HASH,
-        "# Merge these into the vars: block of",
-        "# deploy/ansible/playbooks/pb-pxe-controller.yml",
+        "# Pass this file to pb-pxe-controller.yml with",
+        "# ansible-playbook ... -e @<absolute-path-to-this-file>",
         "# pxe_k3s_version is pinned to k3s_version so agents are never newer",
         "# than the server.",
         "pxe_rootfs_force_rebuild: true   # first build only; set false afterwards",
@@ -212,8 +242,12 @@ def render_values(spec: dict) -> str:
                 "      nodeSelector:",
                 f"        amd.com/gpu.product-name: {yaml_quote(product)}",
             ]
-    if images:
+    if accel or images:
         lines.append("  resources:")
+    if accel:
+        lines += ["    metadata:", "      gpu:", "        acceleratorKeys:"]
+        lines.extend(f"          - {yaml_quote(key)}" for key in accel)
+    if images:
         lines.append("    images:")
         for k, v in images.items():
             lines.append(f"      {k}: {yaml_quote(v)}")
@@ -235,15 +269,77 @@ def render_values(spec: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
-def write_file(path: Path, content: str, force: bool, secret: bool = False) -> None:
-    if path.exists() and not force:
-        die(f"refusing to overwrite existing {path} (use --force)", 1)
+def preflight_destinations(paths: list[Path], force: bool) -> None:
+    if force:
+        return
+    for path in paths:
+        if os.path.lexists(path):
+            die(f"refusing to overwrite existing {path} (use --force)", 1)
+
+
+def stage_file(path: Path, content: str, mode: int) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
-    # Tighten perms on files that carry the cluster token.
-    if secret:
-        path.chmod(0o600)
-    print(f"wrote {path}" + ("  (chmod 600 -- contains the k3s token)" if secret else ""))
+    fd, staged_path = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    try:
+        os.fchmod(fd, mode)
+        with os.fdopen(fd, "w", encoding="utf-8") as staged_file:
+            staged_file.write(content)
+            staged_file.flush()
+            os.fsync(staged_file.fileno())
+    except OSError:
+        with suppress(OSError):
+            os.close(fd)
+        Path(staged_path).unlink(missing_ok=True)
+        raise
+    return Path(staged_path)
+
+
+def remove_destination(path: Path) -> None:
+    if path.is_dir() and not path.is_symlink():
+        shutil.rmtree(path)
+    else:
+        path.unlink(missing_ok=True)
+
+
+def backup_destination(path: Path) -> tuple[Path, Path]:
+    backup_dir = Path(tempfile.mkdtemp(prefix=f".{path.name}.backup.", dir=path.parent))
+    backup_path = backup_dir / path.name
+    os.replace(path, backup_path)
+    return backup_dir, backup_path
+
+
+def publish_artifacts(artifacts: list[tuple[Path, str, int, bool]], force: bool) -> None:
+    staged: list[tuple[Path, Path, bool]] = []
+    published: list[Path] = []
+    backups: list[tuple[Path, Path, Path]] = []
+    try:
+        for path, content, mode, secret in artifacts:
+            staged.append((path, stage_file(path, content, mode), secret))
+        for path, staged_path, secret in staged:
+            if force and os.path.lexists(path):
+                backup_dir, backup_path = backup_destination(path)
+                backups.append((path, backup_dir, backup_path))
+            if force:
+                os.replace(staged_path, path)
+            else:
+                os.link(staged_path, path)
+                os.unlink(staged_path)
+            published.append(path)
+            print(f"wrote {path}" + ("  (chmod 600 -- contains the k3s token)" if secret else ""))
+    except OSError as exc:
+        for path in reversed(published):
+            remove_destination(path)
+        for path, backup_dir, backup_path in reversed(backups):
+            remove_destination(path)
+            os.replace(backup_path, path)
+            backup_dir.rmdir()
+        die(f"could not publish generated artifacts: {exc}")
+    else:
+        for _, backup_dir, _ in backups:
+            shutil.rmtree(backup_dir)
+    finally:
+        for _, staged_path, _ in staged:
+            staged_path.unlink(missing_ok=True)
 
 
 def main(argv=None) -> int:
@@ -267,12 +363,15 @@ def main(argv=None) -> int:
     except json.JSONDecodeError as exc:
         die(f"spec is not valid JSON: {exc}")
 
+    if not isinstance(spec, dict):
+        die("spec must be a mapping")
     topo = spec.get("topology")
     if topo not in ("pxe-diskless", "ssh-preinstalled"):
         die("spec.topology must be 'pxe-diskless' or 'ssh-preinstalled'")
     require(spec, "k3s_version")
     require(spec, "server.name")
     require(spec, "server.ip")
+    validate_config_shapes(spec)
 
     if args.token_file:
         token = Path(args.token_file).read_text(encoding="utf-8").strip()
@@ -282,10 +381,12 @@ def main(argv=None) -> int:
         token = gen_token()
 
     out = Path(args.out_dir)
-    write_file(out / "inventory.yml", render_inventory(spec, token), args.force, secret=True)
+    artifacts = [(out / "inventory.yml", render_inventory(spec, token), 0o600, True)]
     if topo == "pxe-diskless":
-        write_file(out / "pb-pxe-controller.vars.yml", render_pxe_vars(spec), args.force)
-    write_file(out / "values-basic-example.yaml", render_values(spec), args.force)
+        artifacts.append((out / "pb-pxe-controller.vars.yml", render_pxe_vars(spec), 0o600, False))
+    artifacts.append((out / "values-basic-example.yaml", render_values(spec), 0o644, False))
+    preflight_destinations([path for path, _, _, _ in artifacts], args.force)
+    publish_artifacts(artifacts, args.force)
 
     print(
         "\nNext: review the files, then copy them into your aup-learning-cloud "
