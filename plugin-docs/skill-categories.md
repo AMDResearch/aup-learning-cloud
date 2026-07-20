@@ -76,5 +76,5 @@ Tasks often cross a boundary; hand off rather than stretch a skill:
 
 Assign exactly one group, prepend the group's `Group:` tag to the new skill's
 `description`, add its row under that group's table in the
-[README](../README.md), and list it here. See
+[skills README](../README-SKILL.md), and list it here. See
 [adding-a-skill.md](adding-a-skill.md) for the full procedure.

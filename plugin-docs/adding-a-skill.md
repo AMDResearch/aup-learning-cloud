@@ -40,7 +40,7 @@ Fill in the `## Description` and `## Owner` sections. See
 The repo ships as a single bundled plugin (`source: "./"`), so the plugin
 manifests do **not** need a per-skill entry — dropping the folder under
 `skills/` is enough for every install method to pick it up. Add a row to the
-catalog table in the [README](../README.md) **under the skill's group section**,
+catalog table in the [skills README](../README-SKILL.md) **under the skill's group section**,
 list it under that group in [skill-categories.md](skill-categories.md) so people
 can discover it, then keep the Cursor manifests in sync:
 
@@ -55,7 +55,7 @@ can discover it, then keep the Cursor manifests in sync:
 ```
 
 CI runs the same validation on every pull request via
-`.github/workflows/validate.yml`, fanning out one job per skill so a single
+`.github/workflows/validate-skills.yml`, fanning out one job per skill so a single
 broken skill is easy to spot.
 
 ## Ideas for future skills
@@ -63,7 +63,7 @@ broken skill is easy to spot.
 The catalog now covers install, deploy, configure (courses), build, upgrade,
 and troubleshoot, plus auth, user/quota management, monitoring, network/storage
 exposure, per-user repo cloning, and course authoring (see the
-[README](../README.md)). Natural next additions, each following the same
+[skills README](../README-SKILL.md)). Natural next additions, each following the same
 procedure:
 
 | Skill | Outcome |
