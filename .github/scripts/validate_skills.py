@@ -5,7 +5,7 @@
 # ///
 """Validate auplc-skills against the standardized Agent Skills format.
 
-Enforces the rules documented in CONTRIBUTING.md:
+Enforces the repository's skill format and governance requirements:
 
   - SKILL.md exists at the skill root
   - YAML frontmatter is parseable
@@ -31,7 +31,7 @@ Run from the repo root:
     uv run .github/scripts/validate_skills.py --marketplace-only    # manifest only
 
 The `--list` / `--skill` options let CI validate each skill in its own job
-(see .github/workflows/validate.yml) so a single bad skill doesn't mask the
+(see .github/workflows/validate-skills.yml) so a single bad skill doesn't mask the
 status of the others.
 
 Exits non-zero if any validated skill (or the marketplace check) fails.
@@ -53,7 +53,7 @@ DEFAULT_SKILLS_DIR = REPO_ROOT / "skills"
 CLAUDE_MARKETPLACE = REPO_ROOT / ".claude-plugin" / "marketplace.json"
 CLAUDE_PLUGIN = REPO_ROOT / ".claude-plugin" / "plugin.json"
 
-# Limits from CONTRIBUTING.md and the standardized Agent Skills format.
+# Limits from the standardized Agent Skills format and repository policy.
 MAX_NAME_LEN = 64
 MAX_DESCRIPTION_LEN = 1024
 MAX_BODY_LINES = 500
@@ -65,7 +65,7 @@ FRONTMATTER_RE = re.compile(
 )
 RESERVED_NAME_SUBSTRINGS = ("anthropic", "claude")
 
-# Per-skill governance card (see docs/skill-cards.md). Each section must be a
+# Per-skill governance card (see plugin-docs/skill-cards.md). Each section must be a
 # top-level `##` heading followed by some non-empty body text.
 CARD_FILENAME = "skill-card.md"
 REQUIRED_CARD_SECTIONS = ("Description", "Owner")
@@ -90,8 +90,7 @@ def validate_skill(skill_dir: Path) -> SkillReport:
     match = FRONTMATTER_RE.match(text)
     if match is None:
         report.errors.append(
-            "SKILL.md must start with a `---` YAML frontmatter block "
-            "followed by `---` on its own line."
+            "SKILL.md must start with a `---` YAML frontmatter block followed by `---` on its own line."
         )
         return report
 
@@ -102,10 +101,7 @@ def validate_skill(skill_dir: Path) -> SkillReport:
         return report
 
     if not isinstance(frontmatter, dict):
-        report.errors.append(
-            "YAML frontmatter must be a mapping with at least `name` "
-            "and `description`."
-        )
+        report.errors.append("YAML frontmatter must be a mapping with at least `name` and `description`.")
         return report
 
     _validate_name(frontmatter.get("name"), skill_dir.name, report)
@@ -121,34 +117,24 @@ def _validate_name(name: object, dir_name: str, report: SkillReport) -> None:
         return
 
     if len(name) > MAX_NAME_LEN:
-        report.errors.append(
-            f"`name` length {len(name)} exceeds {MAX_NAME_LEN} characters."
-        )
+        report.errors.append(f"`name` length {len(name)} exceeds {MAX_NAME_LEN} characters.")
     if not NAME_RE.match(name):
         report.errors.append(
-            f"`name` `{name}` must be lowercase-with-hyphens "
-            "(letters, digits, single hyphens between segments)."
+            f"`name` `{name}` must be lowercase-with-hyphens (letters, digits, single hyphens between segments)."
         )
     for sub in RESERVED_NAME_SUBSTRINGS:
         if sub in name.lower():
             report.errors.append(f"`name` may not contain `{sub}`.")
     if name != dir_name:
-        report.errors.append(
-            f"`name` `{name}` must match the skill directory name `{dir_name}`."
-        )
+        report.errors.append(f"`name` `{name}` must match the skill directory name `{dir_name}`.")
 
 
 def _validate_description(description: object, report: SkillReport) -> None:
     if not isinstance(description, str) or not description:
-        report.errors.append(
-            "Frontmatter `description` is missing or not a non-empty string."
-        )
+        report.errors.append("Frontmatter `description` is missing or not a non-empty string.")
         return
     if len(description) > MAX_DESCRIPTION_LEN:
-        report.errors.append(
-            f"`description` length {len(description)} exceeds "
-            f"{MAX_DESCRIPTION_LEN} characters."
-        )
+        report.errors.append(f"`description` length {len(description)} exceeds {MAX_DESCRIPTION_LEN} characters.")
 
 
 def _validate_body(body: str, report: SkillReport) -> None:
@@ -172,7 +158,7 @@ def _validate_card(skill_dir: Path, report: SkillReport) -> None:
     card = skill_dir / CARD_FILENAME
     if not card.exists():
         report.errors.append(
-            f"Missing {CARD_FILENAME} (governance card). See docs/skill-cards.md; "
+            f"Missing {CARD_FILENAME} (governance card). See plugin-docs/skill-cards.md; "
             "it needs `## Description` and `## Owner` sections."
         )
         return
@@ -212,9 +198,7 @@ def discover_skills(root: Path) -> list[Path]:
     """List skill directories under `root`, ignoring dotfiles."""
     if not root.exists():
         return []
-    return sorted(
-        p for p in root.iterdir() if p.is_dir() and not p.name.startswith(".")
-    )
+    return sorted(p for p in root.iterdir() if p.is_dir() and not p.name.startswith("."))
 
 
 def validate_claude_marketplace() -> list[str]:
@@ -224,7 +208,7 @@ def validate_claude_marketplace() -> list[str]:
     repo), so the marketplace must list exactly one plugin and a matching
     `.claude-plugin/plugin.json` must exist. The marketplace's human-readable
     `description` is intentionally allowed to differ from the SKILL.md
-    descriptions (per CONTRIBUTING.md), so its text is not cross-checked.
+    descriptions, so its text is not cross-checked.
     """
     errors: list[str] = []
 
@@ -241,10 +225,7 @@ def validate_claude_marketplace() -> list[str]:
 
     plugins = data.get("plugins") if isinstance(data, dict) else None
     if not isinstance(plugins, list):
-        return [
-            f"{CLAUDE_MARKETPLACE.relative_to(REPO_ROOT)}: top-level `plugins` "
-            "array is missing."
-        ]
+        return [f"{CLAUDE_MARKETPLACE.relative_to(REPO_ROOT)}: top-level `plugins` array is missing."]
     if len(plugins) != 1:
         return [
             f"{CLAUDE_MARKETPLACE.relative_to(REPO_ROOT)}: expected exactly one "
@@ -353,9 +334,7 @@ def run(skills_dir: Path) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
-    )
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument(
         "--skills-dir",
         type=Path,
@@ -371,8 +350,7 @@ def main(argv: list[str] | None = None) -> int:
     group.add_argument(
         "--skill",
         metavar="NAME",
-        help="Validate only the named skill directory (skips the marketplace "
-        "cross-check, which is repo-wide).",
+        help="Validate only the named skill directory (skips the marketplace cross-check, which is repo-wide).",
     )
     group.add_argument(
         "--marketplace-only",

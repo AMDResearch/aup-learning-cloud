@@ -18,7 +18,7 @@ The skills are organized into three groups so an agent can start in the right
 place for a task. It is still **one bundled plugin** — installing it brings
 every skill at once; the groups are a routing aid (each skill's `description`
 also carries its `Group:` tag). See
-[docs/skill-categories.md](docs/skill-categories.md) for the full taxonomy and
+[plugin-docs/skill-categories.md](plugin-docs/skill-categories.md) for the full taxonomy and
 routing guidance.
 
 ### Plan and deploy AUP Learning Cloud
@@ -30,7 +30,7 @@ images.
 | --- | --- | --- |
 | [`plan-aup-learning-cloud-deployment`](skills/plan-aup-learning-cloud-deployment/SKILL.md) | Size a new deployment for a prospective adopter: interview course/headcount needs and the network, research current AMD silicon, then recommend how many AIPCs/workstations/servers and routers/switches to buy, the topology, an IP plan, and a buyer-facing bill of materials. | in-repo |
 | [`install-aup-learning-cloud-single-node`](skills/install-aup-learning-cloud-single-node/SKILL.md) | Install on a single AMD GPU/APU box with the `./auplc-installer` flow: prerequisites, GPU/courses/image flags, gated install, verify at `localhost:30890`. | in-repo |
-| [`deploy-aup-learning-cloud`](skills/deploy-aup-learning-cloud/SKILL.md) | Deploy end to end on a multi-AIPC PXE/k3s cluster: interview the operator, generate the Ansible inventory + PXE vars + Helm values (helper scripts), then drive the install with confirmation gates at risky steps. | in-repo |
+| [`deploy-aup-learning-cloud`](skills/deploy-aup-learning-cloud/SKILL.md) | Deploy end to end on a multi-AIPC PXE-diskless or SSH-preinstalled k3s cluster: interview the operator, generate the Ansible inventory + PXE vars + Helm values (helper scripts), then drive the install with confirmation gates at risky steps. | in-repo |
 | [`build-aup-learning-cloud-images`](skills/build-aup-learning-cloud-images/SKILL.md) | Build and publish the Hub and notebook/course Docker images with `img build`, incl. GPU-target tagging and registry push. | in-repo |
 
 ### Maintain AUP Learning Cloud
@@ -201,7 +201,7 @@ before touching any machine.
 ```
 skills/                  # All skills the agent can load
 templates/skill-template # Starting point for a new skill
-docs/                    # Authoring + governance docs
+plugin-docs/             # Plugin authoring + governance docs
 .claude-plugin/          # Claude marketplace + bundled-plugin manifest (hand-maintained)
 .cursor-plugin/          # Cursor marketplace + plugin manifest (generated)
 plugin-metadata.json     # Vendor-neutral identity/discovery metadata
@@ -212,7 +212,7 @@ plugin-metadata.json     # Vendor-neutral identity/discovery metadata
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for authoring conventions and
-[docs/adding-a-skill.md](docs/adding-a-skill.md) for the step-by-step procedure
+[plugin-docs/adding-a-skill.md](plugin-docs/adding-a-skill.md) for the step-by-step procedure
 to add a new skill. Run the same checks CI runs before opening a PR:
 
 ```bash
