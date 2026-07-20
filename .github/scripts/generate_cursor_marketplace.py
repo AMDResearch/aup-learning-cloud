@@ -56,9 +56,7 @@ def load_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def check_identity_consistency(
-    metadata: dict, claude: dict, claude_plugin: dict
-) -> list[str]:
+def check_identity_consistency(metadata: dict, claude: dict, claude_plugin: dict) -> list[str]:
     """Return error strings if the Claude manifests' identity has drifted from
     the canonical `plugin-metadata.json`."""
     errors: list[str] = []
@@ -72,11 +70,9 @@ def check_identity_consistency(
             f".claude-plugin/marketplace.json `name` ({claude.get('name')!r}) "
             f"must match plugin-metadata.json `name` ({name!r})."
         )
-    if claude.get("description") != description:
-        errors.append(
-            ".claude-plugin/marketplace.json `description` must match "
-            "plugin-metadata.json `description`."
-        )
+    claude_description = claude.get("description")
+    if claude_description != description:
+        errors.append(".claude-plugin/marketplace.json `description` must match plugin-metadata.json `description`.")
     claude_version = (claude.get("metadata") or {}).get("version")
     if claude_version != version:
         errors.append(
@@ -88,10 +84,7 @@ def check_identity_consistency(
     # The single bundled plugin entry's name must match the plugin manifest.
     plugins = claude.get("plugins")
     if not isinstance(plugins, list) or len(plugins) != 1:
-        errors.append(
-            ".claude-plugin/marketplace.json must list exactly one bundled "
-            "plugin (source `./`)."
-        )
+        errors.append(".claude-plugin/marketplace.json must list exactly one bundled plugin (source `./`).")
     else:
         entry_name = plugins[0].get("name")
         if entry_name != claude_plugin.get("name"):
@@ -119,7 +112,6 @@ def build_cursor_marketplace(metadata: dict, claude: dict) -> dict:
         "owner": {"name": owner_name} if owner_name else {},
         "description": metadata["description"],
         "metadata": {
-            "description": metadata["description"],
             "version": metadata["version"],
         },
         "plugins": claude.get("plugins", []),
@@ -180,11 +172,7 @@ def main(argv: list[str] | None = None) -> int:
         CURSOR_PLUGIN: render_json(build_cursor_plugin(metadata, claude_plugin)),
     }
 
-    stale = [
-        path
-        for path, content in targets.items()
-        if not write_or_check(path, content, check=args.check)
-    ]
+    stale = [path for path, content in targets.items() if not write_or_check(path, content, check=args.check)]
 
     if args.check:
         if stale:

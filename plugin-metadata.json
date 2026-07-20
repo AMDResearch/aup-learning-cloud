@@ -1,12 +1,12 @@
 {
   "name": "auplc-skills",
   "description": "Agent Skills for deploying and maintaining AUP Learning Cloud.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "author": {
     "name": "AMD Research"
   },
   "homepage": "https://github.com/AMDResearch/aup-learning-cloud",
-  "repository": "https://github.com/AMDResearch/auplc-skills",
+  "repository": "https://github.com/AMDResearch/aup-learning-cloud",
   "license": "MIT",
   "keywords": [
     "aup-learning-cloud",
