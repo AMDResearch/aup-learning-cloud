@@ -299,9 +299,6 @@ class RemoteLabKubeSpawner(KubeSpawner):
         if resource_type not in self.resource_images:
             raise RuntimeError(f"Unknown Resource: {resource_type}")
 
-        # Configure spawner based on selections
-        self._configure_spawner(resource_type, gpu_selection)
-
         self.log.debug(
             f"User selected resource: {resource_type} with GPU: {gpu_selection} for {runtime_minutes} minutes"
         )
@@ -765,6 +762,75 @@ class RemoteLabKubeSpawner(KubeSpawner):
 
         self._has_git_init_container = False
 
+    async def _resolve_auto_accelerator(self, resource_type: str, eligible_keys: list[str]) -> str:
+        """Pick the best available accelerator from eligible_keys.
+
+        Strategy: query K8s for GPU availability on nodes matching each
+        accelerator's nodeSelector, prefer nodes with free GPUs, break ties
+        by cheapest quotaRate.
+        """
+        if not eligible_keys:
+            raise RuntimeError(f"No eligible accelerators for auto-selection on resource '{resource_type}'")
+
+        if len(eligible_keys) == 1:
+            return eligible_keys[0]
+
+        try:
+            from kubernetes_asyncio import client as k8s_client
+            from kubernetes_asyncio.client import ApiClient
+
+            async with ApiClient() as api_client:
+                v1 = k8s_client.CoreV1Api(api_client)
+                nodes = await v1.list_node()
+                pods = await v1.list_pod_for_all_namespaces(field_selector="status.phase=Running")
+
+            node_labels = {
+                node.metadata.name: (node.metadata.labels or {}, node.status.allocatable or {})
+                for node in nodes.items
+            }
+
+            used_gpus: dict[str, int] = {}
+            for pod in pods.items:
+                if not pod.spec.node_name:
+                    continue
+                for container in pod.spec.containers or []:
+                    requests = (container.resources.requests or {}) if container.resources else {}
+                    gpu_req = int(requests.get("amd.com/gpu", 0))
+                    if gpu_req > 0:
+                        used_gpus[pod.spec.node_name] = used_gpus.get(pod.spec.node_name, 0) + gpu_req
+
+            availability = []
+            for key in eligible_keys:
+                selector = self.node_selector_mapping.get(key, {})
+                if not selector:
+                    continue
+
+                free = 0
+                for node_name, (labels, allocatable) in node_labels.items():
+                    if all(labels.get(k) == v for k, v in selector.items()):
+                        total = int(allocatable.get("amd.com/gpu", 0))
+                        free += max(0, total - used_gpus.get(node_name, 0))
+
+                rate = self.quota_rates.get(key, 99)
+                availability.append((key, free, rate))
+
+            if not availability:
+                self.log.warning("Auto-select found no matching accelerators, using first eligible key")
+                return eligible_keys[0]
+
+            availability.sort(key=lambda x: (-x[1], x[2]))
+            chosen = availability[0]
+            self.log.info(
+                f"Auto-select candidates: {[(k, f'free={f}', f'rate={r}') for k, f, r in availability]} -> {chosen[0]}"
+            )
+            return chosen[0]
+
+        except Exception as e:
+            self.log.warning(f"Auto-accelerator K8s query failed, falling back to cheapest: {e}")
+            rated = [(k, self.quota_rates.get(k, 99)) for k in eligible_keys]
+            rated.sort(key=lambda x: x[1])
+            return rated[0][0]
+
     def _configure_spawner(self, resource_type: str, gpu_selection: str | None = None) -> None:
         """Configure the spawner based on the resource type and GPU selection."""
 
@@ -903,6 +969,16 @@ class RemoteLabKubeSpawner(KubeSpawner):
         resource_type = self.user_options.get("resource_type", "cpu")
         gpu_selection = self.user_options.get("gpu_selection", None)
         username = self.user.name.lower()
+
+        # Resolve "auto" accelerator selection before configuring the spawner
+        if gpu_selection == "auto":
+            metadata = self._hub_config.get_resource_metadata(resource_type) if self._hub_config else None
+            eligible = list(metadata.acceleratorKeys) if metadata and metadata.acceleratorKeys else []
+            gpu_selection = await self._resolve_auto_accelerator(resource_type, eligible)
+            self.user_options["gpu_selection"] = gpu_selection
+            self.log.info(f"Auto-selected accelerator '{gpu_selection}' for resource '{resource_type}'")
+
+        self._configure_spawner(resource_type, gpu_selection)
 
         # Determine accelerator type for quota calculation
         accelerator_type = gpu_selection if gpu_selection else "cpu"

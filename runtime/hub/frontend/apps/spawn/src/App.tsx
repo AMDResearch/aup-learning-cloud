@@ -185,7 +185,19 @@ function App() {
 
   const availableAccelerators = useMemo(() => {
     if (!selectedResource?.metadata?.acceleratorKeys) return [];
-    return accelerators.filter(acc => selectedResource.metadata?.acceleratorKeys?.includes(acc.key));
+    const real = accelerators.filter(acc => selectedResource.metadata?.acceleratorKeys?.includes(acc.key));
+    if (real.length <= 1) return real;
+    const rates = real.map(a => a.quotaRate);
+    const minRate = Math.min(...rates);
+    const maxRate = Math.max(...rates);
+    const rateDesc = minRate === maxRate ? `${minRate} credits/min` : `${minRate}–${maxRate} credits/min`;
+    const autoOption: Accelerator = {
+      key: 'auto',
+      displayName: 'Auto (Best Available)',
+      description: `Automatically selected based on availability. Rate: ${rateDesc}`,
+      quotaRate: minRate,
+    };
+    return [autoOption, ...real];
   }, [selectedResource, accelerators]);
 
   const selectedAccelerator = useMemo(() => {
@@ -217,17 +229,26 @@ function App() {
     return `${spawnBase}?${params.toString()}`;
   }, [normalizedRepoUrl, repoBranch, repoUrlError, allowGitClone, selectedResource, selectedAccelerator]);
 
-  const { cost, canAfford, insufficientQuota, maxRuntime } = useMemo(() => {
+  const { cost, costMax, isAutoAccelerator, canAfford, insufficientQuota, maxRuntime } = useMemo(() => {
+    const isAuto = selectedAccelerator?.key === 'auto';
     const rate = selectedAccelerator?.quotaRate ?? quota?.rates?.cpu ?? 1;
     const calculatedCost = quota?.enabled ? rate * runtime : 0;
+    let maxCost = calculatedCost;
+    if (isAuto && quota?.enabled) {
+      const realAccelerators = availableAccelerators.filter(a => a.key !== 'auto');
+      const maxRate = Math.max(...realAccelerators.map(a => a.quotaRate));
+      maxCost = maxRate * runtime;
+    }
     const balance = quota?.balance ?? 0;
     return {
       cost: calculatedCost,
-      canAfford: quota?.unlimited || balance >= calculatedCost,
+      costMax: maxCost,
+      isAutoAccelerator: isAuto,
+      canAfford: quota?.unlimited || balance >= maxCost,
       insufficientQuota: quota?.enabled && !quota?.unlimited && balance < 10,
       maxRuntime: quota?.enabled && !quota?.unlimited ? Math.min(240, Math.floor(balance / rate)) : 240,
     };
-  }, [quota, selectedAccelerator?.quotaRate, runtime]);
+  }, [quota, selectedAccelerator?.quotaRate, selectedAccelerator?.key, runtime, availableAccelerators]);
   const canStart = selectedResource && canAfford && !repoUrlError && !repoValidating;
 
   const toggleFavorite = useCallback((key: string) => {
@@ -575,12 +596,18 @@ function App() {
                   </div>
                   {quota?.enabled && !quota?.unlimited && (
                     <div className="sidebar-quota-preview">
-                      Est. cost: <strong style={{ color: canAfford ? '#2e7d32' : '#c62828' }}>{cost}</strong>
-                      {' · '}Remaining: <strong style={{ color: canAfford ? '#2e7d32' : '#c62828' }}>{(quota?.balance ?? 0) - cost}</strong>
+                      Est. cost: <strong style={{ color: canAfford ? '#2e7d32' : '#c62828' }}>
+                        {isAutoAccelerator && cost !== costMax ? `${cost}–${costMax}` : cost}
+                      </strong>
+                      {' · '}Remaining: <strong style={{ color: canAfford ? '#2e7d32' : '#c62828' }}>
+                        {(quota?.balance ?? 0) - (isAutoAccelerator ? costMax : cost)}
+                      </strong>
                       <span className="quota-rate-tip" title={
-                        `Rate: ${selectedAccelerator?.quotaRate ?? quota?.rates?.cpu ?? 1} credits/min` +
-                        (selectedAccelerator ? ` (${selectedAccelerator.displayName})` : ' (CPU)') +
-                        `\nCost = rate × ${runtime} min = ${cost} credits`
+                        isAutoAccelerator
+                          ? `Rate: varies by GPU assigned\nCost = ${cost}–${costMax} credits`
+                          : `Rate: ${selectedAccelerator?.quotaRate ?? quota?.rates?.cpu ?? 1} credits/min` +
+                            (selectedAccelerator ? ` (${selectedAccelerator.displayName})` : ' (CPU)') +
+                            `\nCost = rate × ${runtime} min = ${cost} credits`
                       }>?</span>
                     </div>
                   )}
@@ -590,7 +617,7 @@ function App() {
               {/* Quota warning */}
               {quota?.enabled && !quota?.unlimited && !canAfford && selectedResource && (
                 <div className="sidebar-quota-warning">
-                  <strong>Insufficient Quota</strong> — You need {cost} credits but only have {quota?.balance ?? 0}. Reduce runtime or contact an administrator.
+                  <strong>Insufficient Quota</strong> — You need {isAutoAccelerator && cost !== costMax ? `up to ${costMax}` : cost} credits but only have {quota?.balance ?? 0}. Reduce runtime or contact an administrator.
                 </div>
               )}
 

@@ -86,7 +86,19 @@ export const CourseCard = memo(function CourseCard({
     if (!acceleratorKeys || acceleratorKeys.length === 0) {
       return [];
     }
-    return accelerators.filter(acc => acceleratorKeys.includes(acc.key));
+    const real = accelerators.filter(acc => acceleratorKeys.includes(acc.key));
+    if (real.length <= 1) return real;
+    const rates = real.map(a => a.quotaRate);
+    const minRate = Math.min(...rates);
+    const maxRate = Math.max(...rates);
+    const rateDesc = minRate === maxRate ? `${minRate} credits/min` : `${minRate}–${maxRate} credits/min`;
+    const autoOption: Accelerator = {
+      key: 'auto',
+      displayName: 'Auto (Best Available)',
+      description: `Automatically selected based on availability. Rate: ${rateDesc}`,
+      quotaRate: minRate,
+    };
+    return [autoOption, ...real];
   }, [acceleratorKeys, accelerators]);
 
   // Memoize resource tag to avoid recalculation
