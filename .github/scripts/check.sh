@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Validate every SKILL.md and that generated plugin manifests are up to date.
+# Validate skills, version metadata, skill tests, and generated plugin manifests.
 #
 # Usage:
-#   ./.github/scripts/check.sh              Validate every skill and check manifests.
+#   ./.github/scripts/check.sh              Run every skill-package validation.
 #   ./.github/scripts/check.sh -h|--help    Print this help.
 #
 # Requires `uv` (https://github.com/astral-sh/uv).
@@ -19,6 +19,8 @@ usage() {
 case "${1:-}" in
   "")
     uv run .github/scripts/validate_skills.py
+    uv run python scripts/check_skills_version.py
+    uv run --extra test pytest tests/skills
     uv run .github/scripts/generate_cursor_marketplace.py --check
     ;;
   -h|--help)
