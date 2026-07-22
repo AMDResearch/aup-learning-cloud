@@ -13,7 +13,8 @@ from unittest.mock import patch
 import pytest
 
 from auplc_installer.catalog import COURSE_PRESET_ALL, CourseSelection
-from auplc_installer.cli import _apply_global_flags, _build_parser, cmd_install_plan, main
+from auplc_installer.cli import HELP_TEXT, _apply_global_flags, _build_parser, cmd_install_plan, main
+from auplc_installer.gpu import CURATED_ACCELERATOR_KEYS
 from auplc_installer.state import InstallerState
 from auplc_installer.summary import (
     IMAGE_SOURCE_BUILD,
@@ -110,11 +111,24 @@ def test_format_configuration_summary_includes_core_fields() -> None:
 
 
 def test_apply_global_flags_gpu_auto_clears_override() -> None:
-    state = InstallerState(gpu_type="strix")
+    state = InstallerState(gpu_type="9070xt")
     parser = _build_parser()
     args = parser.parse_args(["--gpu=auto"])
     _apply_global_flags(state, args)
     assert state.gpu_type == ""
+
+
+def test_help_lists_only_curated_gpu_hardware_choices() -> None:
+    for accelerator_key in CURATED_ACCELERATOR_KEYS:
+        assert accelerator_key in HELP_TEXT
+    for removed_key in ("phx", "strix      -", "9600gre", "rdna4|dgpu"):
+        assert removed_key not in HELP_TEXT
+
+
+def test_tui_lists_only_curated_gpu_hardware_choices() -> None:
+    from auplc_installer.tui import GPU_CHOICES
+
+    assert tuple(choice.value for choice in GPU_CHOICES) == ("", *CURATED_ACCELERATOR_KEYS)
 
 
 def test_apply_global_flags_runtime_containerd() -> None:
@@ -194,6 +208,18 @@ def test_main_install_dry_run(mock_from_env, mock_root) -> None:
     assert "Configuration summary" in out
     assert "develop" in out
     assert "  Image source     : pull" in out
+
+
+@patch("auplc_installer.cli._resolve_source_root")
+@patch("auplc_installer.cli.InstallerState.from_environment")
+def test_main_install_dry_run_rejects_unsupported_gpu_override(mock_from_env, mock_root) -> None:
+    mock_root.return_value = Path("/repo")
+    mock_from_env.return_value = InstallerState()
+
+    with pytest.raises(SystemExit) as exc_info:
+        main(["install", "--dry-run", "--gpu=unsupported-gpu"])
+
+    assert exc_info.value.code == 1
 
 
 @patch("auplc_installer.cli._resolve_source_root")

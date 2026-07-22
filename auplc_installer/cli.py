@@ -21,6 +21,7 @@ from auplc_installer.catalog import parse_selection_spec
 from auplc_installer.gpu import (
     detect_and_configure_gpu,
     refine_gpu_config_from_node_labels,
+    resolve_gpu_config,
 )
 from auplc_installer.helm import (
     deploy_runtime,
@@ -108,15 +109,14 @@ Commands:
 Options (can also be set via environment variables):
   --gpu=TYPE        Override auto-detected GPU type. Accepts:
                       auto       - auto-detect (same as omitting the flag)
-                      phx        - Phoenix Point iGPU (gfx1100..gfx1103)
-                      strix      - Strix Point iGPU (gfx1150)
                       strix-halo - Strix Halo iGPU (gfx1151)
+                      9060       - Radeon RX 9060 (gfx1200)
+                      9060xt     - Radeon RX 9060 XT (gfx1200)
+                      9070       - Radeon RX 9070 (gfx1201)
                       9070xt     - Radeon RX 9070 XT (gfx1201)
                       r9700      - Radeon AI PRO R9700 (gfx1201)
-                      9600gre    - Radeon RX 9600 GRE (gfx1200)
-                      rdna4|dgpu - Generic RDNA4 fallback
-                      gfxNNNN    - any matching gfx family token also works
-                    Auto-detection uses rocminfo or KFD topology.
+                    Auto-detection uses ROCm product names, with gfx target
+                    detection only as a fallback when it is unambiguous.
                     Env: GPU_TYPE
 
   --runtime=MODE    K3s container runtime: docker (default) or containerd.
@@ -176,10 +176,10 @@ Options (can also be set via environment variables):
     ./auplc-installer install --runtime=containerd --image-source=build
     ./auplc-installer install --gpu=strix-halo
     ./auplc-installer install --gpu=auto --dry-run
-    ./auplc-installer install --gpu=phx --docker=0     # legacy flags
+    ./auplc-installer install --gpu=9060 --docker=0    # legacy runtime flag
     ./auplc-installer install --courses=basic          # base + code-server envs
     ./auplc-installer install --courses=cpu,gpu,Course-CV
-    ./auplc-installer img build base-rocm --gpu=strix
+    ./auplc-installer img build base-rocm --gpu=9070xt
     ./auplc-installer install --mirror=mirror.example.com
 
 Image Registry (legacy env-only aliases still work):
@@ -204,7 +204,7 @@ def show_help() -> None:
 
 # ---------------------------------------------------------------------------
 # Argparse (we intentionally keep most logic in a hand-rolled pre-pass so
-# we can preserve the bash version's flag positioning quirks: ``--gpu=phx``
+# we can preserve the bash version's flag positioning quirks: ``--gpu=9060``
 # can appear anywhere on the command line.)
 # ---------------------------------------------------------------------------
 
@@ -292,6 +292,9 @@ def _install_pull_and_label(
 
 def cmd_install_plan(state: InstallerState, *, legacy_pull: bool = False) -> None:
     """Print the install Configuration summary without side effects."""
+    if state.gpu_type:
+        resolve_gpu_config(state.gpu_type)
+    detect_and_configure_gpu(state.gpu, gpu_type_override=state.gpu_type)
     _, label = _install_pull_and_label(state, legacy_pull=legacy_pull)
     sys.stdout.write(format_configuration_summary(state, image_source_label=label) + "\n")
 
@@ -330,7 +333,7 @@ def _cmd_install_inner(state: InstallerState, *, pull: bool) -> None:
     else:
         image_stage_label = "Pulling external images & building custom images"
 
-    total = 8
+    total = 9
 
     with stage("Detecting GPU", idx=1, total=total):
         detect_and_configure_gpu(state.gpu, gpu_type_override=state.gpu_type)
@@ -338,7 +341,7 @@ def _cmd_install_inner(state: InstallerState, *, pull: bool) -> None:
 
     with stage("Generating values overlay (initial)", idx=2, total=total):
         # First pass: use local detection so image pulls / builds get the
-        # right GPU_TARGET. Overlay is regenerated again below from
+        # right image profile. Overlay is regenerated again below from
         # labeller-published labels.
         generate_values_overlay(
             state.gpu,
@@ -360,51 +363,22 @@ def _cmd_install_inner(state: InstallerState, *, pull: bool) -> None:
             mirror_prefix=state.mirror_prefix,
         )
 
-    with stage(image_stage_label, idx=5, total=total):
-        if state.offline_mode and state.bundle_dir is not None:
-            load_offline_images(state.bundle_dir)
-        elif pull:
-            pull_custom_images(
-                cfg=state.gpu,
-                courses=state.courses,
-                image_registry=state.image_registry,
-                image_tag=state.image_tag,
-                use_docker=state.use_docker,
-                k3s_images_dir=state.k3s_images_dir,
-                mirror_prefix=state.mirror_prefix,
-            )
-            pull_external_images(
-                skip_build_only=True,  # match bash: `pull_external_images 1`
-                use_docker=state.use_docker,
-                k3s_images_dir=state.k3s_images_dir,
-                mirror_prefix=state.mirror_prefix,
-            )
-        else:
-            pull_external_images(
-                skip_build_only=False,
-                use_docker=state.use_docker,
-                k3s_images_dir=state.k3s_images_dir,
-                mirror_prefix=state.mirror_prefix,
-            )
-            local_image_build(
-                [],
-                cfg=state.gpu,
-                courses=state.courses,
-                mirror_prefix=state.mirror_prefix,
-                mirror_pip=state.mirror_pip,
-                mirror_npm=state.mirror_npm,
-                use_docker=state.use_docker,
-                k3s_images_dir=state.k3s_images_dir,
-            )
+    if state.offline_mode:
+        with stage(image_stage_label, idx=5, total=total):
+            if state.bundle_dir is not None:
+                load_offline_images(state.bundle_dir)
 
-    with stage("Deploying ROCm GPU device plugin + node labeller", idx=6, total=total):
+    with stage("Deploying ROCm GPU device plugin + node labeller", idx=6 if state.offline_mode else 5, total=total):
         deploy_rocm_gpu_device_plugin(
             offline_mode=state.offline_mode,
             bundle_dir=state.bundle_dir,
         )
 
-    with stage("Refreshing values overlay from node labels", idx=7, total=total):
+    refine_stage = 7 if state.offline_mode else 6
+    with stage("Refining GPU profile from node labels", idx=refine_stage, total=total):
         refine_gpu_config_from_node_labels(state.gpu)
+
+    with stage("Generating values overlay (final)", idx=8 if state.offline_mode else 7, total=total):
         generate_values_overlay(
             state.gpu,
             image_registry=state.image_registry,
@@ -414,7 +388,43 @@ def _cmd_install_inner(state: InstallerState, *, pull: bool) -> None:
             overlay_path=paths.overlay_path,
         )
 
-    with stage("Deploying JupyterHub runtime (helm install + wait)", idx=8, total=total):
+    if not state.offline_mode:
+        with stage(image_stage_label, idx=8, total=total):
+            if pull:
+                pull_custom_images(
+                    cfg=state.gpu,
+                    courses=state.courses,
+                    image_registry=state.image_registry,
+                    image_tag=state.image_tag,
+                    use_docker=state.use_docker,
+                    k3s_images_dir=state.k3s_images_dir,
+                    mirror_prefix=state.mirror_prefix,
+                )
+                pull_external_images(
+                    skip_build_only=True,  # match bash: `pull_external_images 1`
+                    use_docker=state.use_docker,
+                    k3s_images_dir=state.k3s_images_dir,
+                    mirror_prefix=state.mirror_prefix,
+                )
+            else:
+                pull_external_images(
+                    skip_build_only=False,
+                    use_docker=state.use_docker,
+                    k3s_images_dir=state.k3s_images_dir,
+                    mirror_prefix=state.mirror_prefix,
+                )
+                local_image_build(
+                    [],
+                    cfg=state.gpu,
+                    courses=state.courses,
+                    mirror_prefix=state.mirror_prefix,
+                    mirror_pip=state.mirror_pip,
+                    mirror_npm=state.mirror_npm,
+                    use_docker=state.use_docker,
+                    k3s_images_dir=state.k3s_images_dir,
+                )
+
+    with stage("Deploying JupyterHub runtime (helm install + wait)", idx=9, total=total):
         deploy_runtime(paths)
 
     _print_success_banner()
