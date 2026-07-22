@@ -26,14 +26,28 @@
       "distribution": "torch",
       "version": "2.12.0+rocm7.14.0",
       "index_url": "https://repo.amd.com/rocm/whl-multi-arch/",
-      "provides_extras": ["device-gfx1151", "device-gfx1200", "device-gfx1201"]
+      "provides_extras": [
+        "device-gfx1103",
+        "device-gfx1150",
+        "device-gfx1151",
+        "device-gfx1152",
+        "device-gfx1200",
+        "device-gfx1201"
+      ]
     },
     "torchvision-0.27.0-rocm7.14.0": {
       "source": "selected wheel METADATA",
       "distribution": "torchvision",
       "version": "0.27.0+rocm7.14.0",
       "index_url": "https://repo.amd.com/rocm/whl-multi-arch/",
-      "provides_extras": ["device-gfx1151", "device-gfx1200", "device-gfx1201"]
+      "provides_extras": [
+        "device-gfx1103",
+        "device-gfx1150",
+        "device-gfx1151",
+        "device-gfx1152",
+        "device-gfx1200",
+        "device-gfx1201"
+      ]
     },
     "torchaudio-2.11.0-rocm7.14.0": {
       "source": "selected wheel METADATA",
@@ -44,12 +58,45 @@
     }
   },
   "targets": {
+    "gfx1103": {
+      "rocm_package": "amdrocm-core-sdk7.14-gfx1103",
+      "torch_extra": "device-gfx1103",
+      "torchvision_extra": "device-gfx1103",
+      "torch_requirement": "torch[device-gfx1103]==2.12.0+rocm7.14.0",
+      "torchvision_requirement": "torchvision[device-gfx1103]==0.27.0+rocm7.14.0",
+      "torchaudio_requirement": "torchaudio==2.11.0+rocm7.14.0",
+      "torch_metadata": "torch-2.12.0-rocm7.14.0",
+      "torchvision_metadata": "torchvision-0.27.0-rocm7.14.0",
+      "torchaudio_metadata": "torchaudio-2.11.0-rocm7.14.0"
+    },
+    "gfx1150": {
+      "rocm_package": "amdrocm-core-sdk7.14-gfx1150",
+      "torch_extra": "device-gfx1150",
+      "torchvision_extra": "device-gfx1150",
+      "torch_requirement": "torch[device-gfx1150]==2.12.0+rocm7.14.0",
+      "torchvision_requirement": "torchvision[device-gfx1150]==0.27.0+rocm7.14.0",
+      "torchaudio_requirement": "torchaudio==2.11.0+rocm7.14.0",
+      "torch_metadata": "torch-2.12.0-rocm7.14.0",
+      "torchvision_metadata": "torchvision-0.27.0-rocm7.14.0",
+      "torchaudio_metadata": "torchaudio-2.11.0-rocm7.14.0"
+    },
     "gfx1151": {
       "rocm_package": "amdrocm-core-sdk7.14-gfx1151",
       "torch_extra": "device-gfx1151",
       "torchvision_extra": "device-gfx1151",
       "torch_requirement": "torch[device-gfx1151]==2.12.0+rocm7.14.0",
       "torchvision_requirement": "torchvision[device-gfx1151]==0.27.0+rocm7.14.0",
+      "torchaudio_requirement": "torchaudio==2.11.0+rocm7.14.0",
+      "torch_metadata": "torch-2.12.0-rocm7.14.0",
+      "torchvision_metadata": "torchvision-0.27.0-rocm7.14.0",
+      "torchaudio_metadata": "torchaudio-2.11.0-rocm7.14.0"
+    },
+    "gfx1152": {
+      "rocm_package": "amdrocm-core-sdk7.14-gfx1152",
+      "torch_extra": "device-gfx1152",
+      "torchvision_extra": "device-gfx1152",
+      "torch_requirement": "torch[device-gfx1152]==2.12.0+rocm7.14.0",
+      "torchvision_requirement": "torchvision[device-gfx1152]==0.27.0+rocm7.14.0",
       "torchaudio_requirement": "torchaudio==2.11.0+rocm7.14.0",
       "torch_metadata": "torch-2.12.0-rocm7.14.0",
       "torchvision_metadata": "torchvision-0.27.0-rocm7.14.0",
@@ -79,9 +126,21 @@
     }
   },
   "profiles": {
+    "gfx1103": {
+      "tag_suffix": "gfx1103",
+      "targets": ["gfx1103"]
+    },
+    "gfx1150": {
+      "tag_suffix": "gfx1150",
+      "targets": ["gfx1150"]
+    },
     "gfx1151": {
       "tag_suffix": "gfx1151",
       "targets": ["gfx1151"]
+    },
+    "gfx1152": {
+      "tag_suffix": "gfx1152",
+      "targets": ["gfx1152"]
     },
     "gfx1200": {
       "tag_suffix": "gfx1200",

@@ -38,9 +38,16 @@ profile and let the resolver select artifacts and tag suffixes.
 
 | AUP_IMAGE_PROFILE | Current resolved target | Image tag suffix |
 |-------------------|-------------------------|------------------|
+| gfx1103 | gfx1103 | gfx1103 |
+| gfx1150 | gfx1150 | gfx1150 |
 | gfx1151 | gfx1151 | gfx1151 |
+| gfx1152 | gfx1152 | gfx1152 |
 | gfx1200 | gfx1200 | gfx1200 |
 | gfx1201 | gfx1201 | gfx1201 |
+
+All six profiles are buildable through the catalog. `gfx1152` is build-only:
+it has no runtime accelerator or ROCm labeller product mapping. Runtime bundles
+are produced for `gfx1103`, `gfx1150`, `gfx1151`, `gfx1200`, and `gfx1201`.
 
 `auplc_installer/data/rocm-7.14-profiles.json` is the canonical catalog.
 `dockerfiles/Base/rocm-targets.py` resolves a profile to its complete

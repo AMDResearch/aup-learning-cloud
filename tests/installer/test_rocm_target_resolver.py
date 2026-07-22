@@ -25,14 +25,24 @@ def run_cli(*args: str) -> subprocess.CompletedProcess[str]:
 def test_catalog_separates_concrete_targets_from_one_to_one_profiles() -> None:
     catalog = load_catalog()
 
-    assert tuple(catalog.targets) == ("gfx1151", "gfx1200", "gfx1201")
-    assert tuple(catalog.profiles) == ("gfx1151", "gfx1200", "gfx1201")
+    assert tuple(catalog.targets) == ("gfx1103", "gfx1150", "gfx1151", "gfx1152", "gfx1200", "gfx1201")
+    assert tuple(catalog.profiles) == ("gfx1103", "gfx1150", "gfx1151", "gfx1152", "gfx1200", "gfx1201")
     assert [profile.targets for profile in catalog.profiles.values()] == [
+        ("gfx1103",),
+        ("gfx1150",),
         ("gfx1151",),
+        ("gfx1152",),
         ("gfx1200",),
         ("gfx1201",),
     ]
-    assert [profile.tag_suffix for profile in catalog.profiles.values()] == ["gfx1151", "gfx1200", "gfx1201"]
+    assert [profile.tag_suffix for profile in catalog.profiles.values()] == [
+        "gfx1103",
+        "gfx1150",
+        "gfx1151",
+        "gfx1152",
+        "gfx1200",
+        "gfx1201",
+    ]
 
 
 def test_catalog_json_keeps_artifacts_out_of_profiles() -> None:
@@ -46,10 +56,28 @@ def test_catalog_json_keeps_artifacts_out_of_profiles() -> None:
     ("profile", "package", "torch", "vision"),
     [
         (
+            "gfx1103",
+            "amdrocm-core-sdk7.14-gfx1103",
+            "torch[device-gfx1103]==2.12.0+rocm7.14.0",
+            "torchvision[device-gfx1103]==0.27.0+rocm7.14.0",
+        ),
+        (
+            "gfx1150",
+            "amdrocm-core-sdk7.14-gfx1150",
+            "torch[device-gfx1150]==2.12.0+rocm7.14.0",
+            "torchvision[device-gfx1150]==0.27.0+rocm7.14.0",
+        ),
+        (
             "gfx1151",
             "amdrocm-core-sdk7.14-gfx1151",
             "torch[device-gfx1151]==2.12.0+rocm7.14.0",
             "torchvision[device-gfx1151]==0.27.0+rocm7.14.0",
+        ),
+        (
+            "gfx1152",
+            "amdrocm-core-sdk7.14-gfx1152",
+            "torch[device-gfx1152]==2.12.0+rocm7.14.0",
+            "torchvision[device-gfx1152]==0.27.0+rocm7.14.0",
         ),
         (
             "gfx1200",
@@ -106,12 +134,27 @@ def test_wheel_metadata_authority_does_not_claim_unknown_artifact_identity() -> 
         assert "digest" not in authority
 
 
+def test_wheel_metadata_authorities_list_every_concrete_profile_extra() -> None:
+    raw = json.loads(CATALOG.read_text(encoding="utf-8"))
+
+    expected_extras = [
+        "device-gfx1103",
+        "device-gfx1150",
+        "device-gfx1151",
+        "device-gfx1152",
+        "device-gfx1200",
+        "device-gfx1201",
+    ]
+    assert raw["wheel_metadata_authorities"]["torch-2.12.0-rocm7.14.0"]["provides_extras"] == expected_extras
+    assert raw["wheel_metadata_authorities"]["torchvision-0.27.0-rocm7.14.0"]["provides_extras"] == expected_extras
+
+
 def test_omitted_and_empty_profiles_use_gfx1151() -> None:
     assert resolve_profile().profile == "gfx1151"
     assert resolve_profile("").profile == "gfx1151"
 
 
-@pytest.mark.parametrize("profile", ["gfx120x", "gfx110x", "gfx1150"])
+@pytest.mark.parametrize("profile", ["gfx120x", "gfx110x", "gfx1100"])
 def test_unsupported_profiles_fail_explicitly(profile: str) -> None:
     with pytest.raises(CatalogError, match=rf"unsupported ROCm profile '{profile}'"):
         resolve_profile(profile)
@@ -188,8 +231,8 @@ def test_public_cli_validates_lists_and_emits_complete_plans() -> None:
     resolved = run_cli("resolve-profile", "gfx1200", "--format", "lines")
 
     assert (validated.returncode, validated.stdout, validated.stderr) == (0, "valid\n", "")
-    assert json.loads(listed.stdout) == ["gfx1151", "gfx1200", "gfx1201"]
-    assert listed_lines.stdout == "gfx1151\ngfx1200\ngfx1201\n"
+    assert json.loads(listed.stdout) == ["gfx1103", "gfx1150", "gfx1151", "gfx1152", "gfx1200", "gfx1201"]
+    assert listed_lines.stdout == "gfx1103\ngfx1150\ngfx1151\ngfx1152\ngfx1200\ngfx1201\n"
     assert resolved.returncode == 0
     assert "ROCM_PACKAGE=amdrocm-core-sdk7.14-gfx1200" in resolved.stdout
     assert "PROFILE=gfx1200" in resolved.stdout
