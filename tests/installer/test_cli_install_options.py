@@ -119,9 +119,20 @@ def test_apply_global_flags_gpu_auto_clears_override() -> None:
 
 
 def test_help_lists_only_curated_gpu_hardware_choices() -> None:
-    for accelerator_key in CURATED_ACCELERATOR_KEYS:
-        assert accelerator_key in HELP_TEXT
-    for removed_key in ("phx", "strix      -", "9600gre", "rdna4|dgpu"):
+    expected_lines = (
+        "                       phx        - Radeon 780M (gfx1103)",
+        "                       strix      - Radeon 890M (gfx1150)",
+        "                       strix-halo - Strix Halo iGPU (gfx1151)",
+        "                      9060       - Radeon RX 9060 (gfx1200)",
+        "                      9060xt     - Radeon RX 9060 XT (gfx1200)",
+        "                      9070       - Radeon RX 9070 (gfx1201)",
+        "                      9070xt     - Radeon RX 9070 XT (gfx1201)",
+        "                      r9700      - Radeon AI PRO R9700 (gfx1201)",
+    )
+    help_lines = HELP_TEXT.splitlines()
+    for expected_line in expected_lines:
+        assert expected_line in help_lines
+    for removed_key in ("9600gre", "rdna4", "dgpu", "gfx1152"):
         assert removed_key not in HELP_TEXT
 
 
@@ -129,6 +140,7 @@ def test_tui_lists_only_curated_gpu_hardware_choices() -> None:
     from auplc_installer.tui import GPU_CHOICES
 
     assert tuple(choice.value for choice in GPU_CHOICES) == ("", *CURATED_ACCELERATOR_KEYS)
+    assert "gfx1152" not in {choice.value for choice in GPU_CHOICES}
 
 
 def test_apply_global_flags_runtime_containerd() -> None:

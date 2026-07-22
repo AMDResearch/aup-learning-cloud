@@ -108,8 +108,10 @@ Commands:
 
 Options (can also be set via environment variables):
   --gpu=TYPE        Override auto-detected GPU type. Accepts:
-                      auto       - auto-detect (same as omitting the flag)
-                      strix-halo - Strix Halo iGPU (gfx1151)
+                       auto       - auto-detect (same as omitting the flag)
+                       phx        - Radeon 780M (gfx1103)
+                       strix      - Radeon 890M (gfx1150)
+                       strix-halo - Strix Halo iGPU (gfx1151)
                       9060       - Radeon RX 9060 (gfx1200)
                       9060xt     - Radeon RX 9060 XT (gfx1200)
                       9070       - Radeon RX 9070 (gfx1201)

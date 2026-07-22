@@ -507,6 +507,8 @@ def _stdlib_checkbox(
 
 GPU_CHOICES: tuple[Choice, ...] = (
     Choice("", "Auto-detect (rocminfo / KFD topology)"),
+    Choice("phx", "phx        - Radeon 780M (gfx1103)"),
+    Choice("strix", "strix      - Radeon 890M (gfx1150)"),
     Choice("strix-halo", "strix-halo - Strix Halo iGPU (gfx1151)"),
     Choice("9060", "9060       - Radeon RX 9060 (gfx1200)"),
     Choice("9060xt", "9060xt     - Radeon RX 9060 XT (gfx1200)"),
