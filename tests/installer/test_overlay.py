@@ -18,6 +18,7 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
+import pytest
 import yaml
 
 from auplc_installer.catalog import (
@@ -31,6 +32,7 @@ from auplc_installer.overlay import (
     generate_values_overlay,
     try_load_courses_from_overlay,
 )
+from auplc_installer.util import InstallerError
 
 
 def _strix_halo_cfg() -> GpuConfig:
@@ -61,21 +63,21 @@ def _mixed_config() -> GpuConfig:
     # primary: strix-halo / gfx1151
     cfg.append(
         SkuEntry(
-            accel_key="strix-halo",
+            accelerator_key="strix-halo",
             product_name="AMD_Radeon_8060S_Graphics",
-            gpu_target="gfx1151",
-            accel_env="",
+            image_profile="gfx1151",
+            accelerator_env="",
             quota_rate=3,
             display_name="",
         )
     )
-    # secondary: r9700 / gfx120x  (different family → triggers overrides)
+    # secondary: Radeon AI PRO R9700 / gfx1201 (different profile triggers overrides)
     cfg.append(
         SkuEntry(
-            accel_key="r9700",
+            accelerator_key="r9700",
             product_name="AMD_Radeon_AI_PRO_R9700",
-            gpu_target="gfx120x",
-            accel_env="",
+            image_profile="gfx1201",
+            accelerator_env="",
             quota_rate=4,
             display_name="",
         )
@@ -133,16 +135,10 @@ def test_curated_sku_with_product_name_emits_node_selector() -> None:
     assert accelerators["strix-halo"]["nodeSelector"]["amd.com/gpu.product-name"] == "AMD_Radeon_8060S_Graphics"
 
 
-def test_9600gre_uses_curated_overlay_path() -> None:
+def test_removed_9600gre_fails_before_overlay_generation() -> None:
     cfg = GpuConfig()
-    append_product(cfg, "AMD_Radeon_RX_9600_GRE")
-    text, parsed = _render(cfg, courses=CourseSelection.default())
-    accel = parsed["custom"]["accelerators"]["9600gre"]
-    assert accel["nodeSelector"]["amd.com/gpu.product-name"] == "AMD_Radeon_RX_9600_GRE"
-    assert "displayName" not in accel
-    assert "description" not in accel
-    assert "quotaRate" not in accel
-    assert "SKU '9600gre' is not curated in values.yaml" not in text
+    with pytest.raises(InstallerError, match="Unsupported AMD GPU product"):
+        append_product(cfg, "AMD_Radeon_RX_9600_GRE")
 
 
 def test_basic_emits_filtered_teams_mapping() -> None:
@@ -201,49 +197,42 @@ def test_online_mode_omits_hub_image_override() -> None:
     assert "hub" not in parsed
 
 
-def test_uncurated_sku_emits_full_stanza_with_quota() -> None:
+def test_unknown_sku_fails_before_overlay_generation() -> None:
     cfg = GpuConfig()
-    append_product(cfg, "AMD_Some_Future_GPU")
-    _, parsed = _render(cfg, courses=CourseSelection.default())
-    accel = parsed["custom"]["accelerators"]["amd-some-future-gpu"]
-    assert accel["quotaRate"] == 4
-    assert "displayName" in accel
-    assert "description" in accel
-    assert accel["nodeSelector"]["amd.com/gpu.product-name"] == "AMD_Some_Future_GPU"
+    with pytest.raises(InstallerError, match="Unsupported AMD GPU product"):
+        append_product(cfg, "AMD_Some_Future_GPU")
 
 
-def test_mixed_targets_emit_accelerator_overrides() -> None:
+def test_mixed_profiles_emit_accelerator_overrides() -> None:
     _, parsed = _render(_mixed_config(), courses=CourseSelection.default())
     gpu_metadata = parsed["custom"]["resources"]["metadata"]["gpu"]
     assert "acceleratorOverrides" in gpu_metadata
     overrides = gpu_metadata["acceleratorOverrides"]
     assert overrides["strix-halo"]["image"] == "ghcr.io/amdresearch/auplc-base:v1.0-gfx1151"
     assert "r9700" in overrides
-    assert overrides["r9700"]["image"] == "ghcr.io/amdresearch/auplc-base:v1.0-gfx120x"
+    assert overrides["r9700"]["image"] == "ghcr.io/amdresearch/auplc-base:v1.0-gfx1201"
 
 
-def test_mixed_targets_acceleratorkeys_lists_every_sku() -> None:
+def test_mixed_profiles_acceleratorkeys_lists_every_sku() -> None:
     _, parsed = _render(_mixed_config(), courses=CourseSelection.default())
     keys = parsed["custom"]["resources"]["metadata"]["gpu"]["acceleratorKeys"]
     assert set(keys) == {"strix-halo", "r9700"}
 
 
-def test_phx_emits_hsa_override_env() -> None:
+def test_removed_phx_fails_before_overlay_generation() -> None:
     cfg = GpuConfig()
-    append_product(cfg, "AMD_Radeon_780M_Graphics")  # phx, sets HSA_OVERRIDE
-    _, parsed = _render(cfg, courses=CourseSelection.default())
-    env = parsed["custom"]["accelerators"]["phx"]["env"]
-    assert env["HSA_OVERRIDE_GFX_VERSION"] == "11.0.0"
+    with pytest.raises(InstallerError, match="Unsupported AMD GPU product"):
+        append_product(cfg, "AMD_Radeon_780M_Graphics")
 
 
 def test_fallback_path_skips_accelerator_stanza_for_curated_sku() -> None:
     cfg = GpuConfig()
     cfg.append(
         SkuEntry(
-            accel_key="strix",
+            accelerator_key="strix-halo",
             product_name="",  # fallback path
-            gpu_target="gfx1150",
-            accel_env="",
+            image_profile="gfx1151",
+            accelerator_env="",
             quota_rate=2,
             display_name="",
         )
