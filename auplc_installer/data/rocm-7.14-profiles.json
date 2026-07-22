@@ -1,0 +1,95 @@
+{
+  "copyright": "Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.",
+  "schema_version": 1,
+  "default_profile": "gfx1151",
+  "versions": {
+    "rocm": "7.14.0",
+    "torch": "2.12.0+rocm7.14.0",
+    "torchvision": "0.27.0+rocm7.14.0",
+    "torchaudio": "2.11.0+rocm7.14.0"
+  },
+  "repositories": {
+    "apt_key_url": "https://repo.amd.com/rocm/packages-multi-arch/gpg/rocm.gpg",
+    "apt_source": "deb [arch=amd64 signed-by=/etc/apt/keyrings/amdrocm.gpg] https://repo.amd.com/rocm/packages-multi-arch/ubuntu2404 stable main",
+    "wheel_index_url": "https://repo.amd.com/rocm/whl-multi-arch/"
+  },
+  "provenance": {
+    "rocm_matrix_url": "https://rocm.docs.amd.com/en/docs-7.14.0/compatibility/compatibility-matrix.html",
+    "packages_stream": "packages-multi-arch",
+    "packages_stream_url": "https://repo.amd.com/rocm/packages-multi-arch/",
+    "therock_commit": "418cd5f63abb7a604bad5874cd7b2e29334e640f",
+    "therock_url": "https://github.com/ROCm/TheRock/tree/418cd5f63abb7a604bad5874cd7b2e29334e640f"
+  },
+  "wheel_metadata_authorities": {
+    "torch-2.12.0-rocm7.14.0": {
+      "source": "selected wheel METADATA",
+      "distribution": "torch",
+      "version": "2.12.0+rocm7.14.0",
+      "index_url": "https://repo.amd.com/rocm/whl-multi-arch/",
+      "provides_extras": ["device-gfx1151", "device-gfx1200", "device-gfx1201"]
+    },
+    "torchvision-0.27.0-rocm7.14.0": {
+      "source": "selected wheel METADATA",
+      "distribution": "torchvision",
+      "version": "0.27.0+rocm7.14.0",
+      "index_url": "https://repo.amd.com/rocm/whl-multi-arch/",
+      "provides_extras": ["device-gfx1151", "device-gfx1200", "device-gfx1201"]
+    },
+    "torchaudio-2.11.0-rocm7.14.0": {
+      "source": "selected wheel METADATA",
+      "distribution": "torchaudio",
+      "version": "2.11.0+rocm7.14.0",
+      "index_url": "https://repo.amd.com/rocm/whl-multi-arch/",
+      "provides_extras": []
+    }
+  },
+  "targets": {
+    "gfx1151": {
+      "rocm_package": "amdrocm-core-sdk7.14-gfx1151",
+      "torch_extra": "device-gfx1151",
+      "torchvision_extra": "device-gfx1151",
+      "torch_requirement": "torch[device-gfx1151]==2.12.0+rocm7.14.0",
+      "torchvision_requirement": "torchvision[device-gfx1151]==0.27.0+rocm7.14.0",
+      "torchaudio_requirement": "torchaudio==2.11.0+rocm7.14.0",
+      "torch_metadata": "torch-2.12.0-rocm7.14.0",
+      "torchvision_metadata": "torchvision-0.27.0-rocm7.14.0",
+      "torchaudio_metadata": "torchaudio-2.11.0-rocm7.14.0"
+    },
+    "gfx1200": {
+      "rocm_package": "amdrocm-core-sdk7.14-gfx1200",
+      "torch_extra": "device-gfx1200",
+      "torchvision_extra": "device-gfx1200",
+      "torch_requirement": "torch[device-gfx1200]==2.12.0+rocm7.14.0",
+      "torchvision_requirement": "torchvision[device-gfx1200]==0.27.0+rocm7.14.0",
+      "torchaudio_requirement": "torchaudio==2.11.0+rocm7.14.0",
+      "torch_metadata": "torch-2.12.0-rocm7.14.0",
+      "torchvision_metadata": "torchvision-0.27.0-rocm7.14.0",
+      "torchaudio_metadata": "torchaudio-2.11.0-rocm7.14.0"
+    },
+    "gfx1201": {
+      "rocm_package": "amdrocm-core-sdk7.14-gfx1201",
+      "torch_extra": "device-gfx1201",
+      "torchvision_extra": "device-gfx1201",
+      "torch_requirement": "torch[device-gfx1201]==2.12.0+rocm7.14.0",
+      "torchvision_requirement": "torchvision[device-gfx1201]==0.27.0+rocm7.14.0",
+      "torchaudio_requirement": "torchaudio==2.11.0+rocm7.14.0",
+      "torch_metadata": "torch-2.12.0-rocm7.14.0",
+      "torchvision_metadata": "torchvision-0.27.0-rocm7.14.0",
+      "torchaudio_metadata": "torchaudio-2.11.0-rocm7.14.0"
+    }
+  },
+  "profiles": {
+    "gfx1151": {
+      "tag_suffix": "gfx1151",
+      "targets": ["gfx1151"]
+    },
+    "gfx1200": {
+      "tag_suffix": "gfx1200",
+      "targets": ["gfx1200"]
+    },
+    "gfx1201": {
+      "tag_suffix": "gfx1201",
+      "targets": ["gfx1201"]
+    }
+  }
+}
