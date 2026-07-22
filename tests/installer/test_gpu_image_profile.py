@@ -14,6 +14,8 @@ from auplc_installer.util import InstallerError
 @pytest.mark.parametrize(
     ("product_name", "accelerator_key", "image_profile"),
     [
+        ("AMD_Radeon_780M_Graphics", "phx", "gfx1103"),
+        ("AMD_Radeon_890M_Graphics", "strix", "gfx1150"),
         ("AMD_Radeon_8060S_Graphics", "strix-halo", "gfx1151"),
         ("AMD_Radeon_RX_9060", "9060", "gfx1200"),
         ("AMD_Radeon_RX_9060_XT", "9060xt", "gfx1200"),

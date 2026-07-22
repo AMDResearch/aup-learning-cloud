@@ -39,6 +39,8 @@ class SkuRow(NamedTuple):
 
 
 PRODUCT_NAME_TO_SKU: dict[str, SkuRow] = {
+    "AMD_Radeon_780M_Graphics": SkuRow("phx", "gfx1103", "", 2, "AMD Radeon 780M (Phoenix iGPU)"),
+    "AMD_Radeon_890M_Graphics": SkuRow("strix", "gfx1150", "", 2, "AMD Radeon 890M (Strix iGPU)"),
     "AMD_Radeon_8060S_Graphics": SkuRow("strix-halo", "gfx1151", "", 3, "AMD Radeon 8060S (Strix Halo iGPU)"),
     "AMD_Radeon_RX_9060": SkuRow("9060", "gfx1200", "", 4, "AMD Radeon RX 9060"),
     "AMD_Radeon_RX_9060_XT": SkuRow("9060xt", "gfx1200", "", 4, "AMD Radeon RX 9060 XT"),
@@ -98,6 +100,11 @@ def resolve_gpu_config(input_key: str) -> SkuRow:
     matches = [row for row in ACCELERATOR_CONFIGS.values() if row.image_profile == profile]
     if len(matches) == 1:
         return _validated_row(matches[0])
+    if not matches:
+        raise InstallerError(
+            f"Detected gfx target '{input_key}' resolves to valid build-only image profile '{profile}', "
+            "which has no supported runtime accelerator."
+        )
     accelerators = ", ".join(row.accelerator_key for row in matches)
     raise InstallerError(
         f"Detected gfx target '{input_key}' resolves to image profile '{profile}', "
