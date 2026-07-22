@@ -225,6 +225,20 @@ custom:
   # Each accelerator uses Kubernetes node selectors such as
   # amd.com/gpu.product-name to target compatible nodes.
   accelerators:
+    phx:
+      displayName: "AMD Radeon™ 780M (Phoenix iGPU)"
+      description: "RDNA 3.0 (gfx1103)"
+      nodeSelector:
+        amd.com/gpu.product-name: "AMD_Radeon_780M_Graphics"
+      env: {}
+      quotaRate: 2
+    strix:
+      displayName: "AMD Radeon™ 890M (Strix iGPU)"
+      description: "RDNA 3.5 (gfx1150)"
+      nodeSelector:
+        amd.com/gpu.product-name: "AMD_Radeon_890M_Graphics"
+      env: {}
+      quotaRate: 2
     strix-halo:
       displayName: "AMD Radeon™ 8060S (Strix Halo iGPU)"
       description: "RDNA 3.5 (gfx1151) | Compute Units 40 | 64GB LPDDR5X"
@@ -372,6 +386,10 @@ custom:
         acceleratorKeys:
           - strix-halo
         acceleratorOverrides:
+          phx:
+            image: "ghcr.io/amdresearch/auplc-base:latest-gfx1103"
+          strix:
+            image: "ghcr.io/amdresearch/auplc-base:latest-gfx1150"
           strix-halo:
             image: "ghcr.io/amdresearch/auplc-base:latest-gfx1151"
           "9060":
@@ -395,6 +413,10 @@ custom:
         acceleratorKeys:
           - strix-halo
         acceleratorOverrides:
+          phx:
+            image: "ghcr.io/amdresearch/auplc-code-gpu:latest-gfx1103"
+          strix:
+            image: "ghcr.io/amdresearch/auplc-code-gpu:latest-gfx1150"
           strix-halo:
             image: "ghcr.io/amdresearch/auplc-code-gpu:latest-gfx1151"
           "9060":
@@ -419,6 +441,10 @@ custom:
         acceleratorKeys:
           - strix-halo
         acceleratorOverrides:
+          phx:
+            image: "ghcr.io/amdresearch/auplc-cv:latest-gfx1103"
+          strix:
+            image: "ghcr.io/amdresearch/auplc-cv:latest-gfx1150"
           strix-halo:
             image: "ghcr.io/amdresearch/auplc-cv:latest-gfx1151"
           "9060":
@@ -441,6 +467,10 @@ custom:
         acceleratorKeys:
           - strix-halo
         acceleratorOverrides:
+          phx:
+            image: "ghcr.io/amdresearch/auplc-dl:latest-gfx1103"
+          strix:
+            image: "ghcr.io/amdresearch/auplc-dl:latest-gfx1150"
           strix-halo:
             image: "ghcr.io/amdresearch/auplc-dl:latest-gfx1151"
           "9060":
@@ -463,6 +493,10 @@ custom:
         acceleratorKeys:
           - strix-halo
         acceleratorOverrides:
+          phx:
+            image: "ghcr.io/amdresearch/auplc-llm:latest-gfx1103"
+          strix:
+            image: "ghcr.io/amdresearch/auplc-llm:latest-gfx1150"
           strix-halo:
             image: "ghcr.io/amdresearch/auplc-llm:latest-gfx1151"
           "9060":
@@ -485,6 +519,10 @@ custom:
         acceleratorKeys:
           - strix-halo
         acceleratorOverrides:
+          phx:
+            image: "ghcr.io/amdresearch/auplc-physim:latest-gfx1103"
+          strix:
+            image: "ghcr.io/amdresearch/auplc-physim:latest-gfx1150"
           strix-halo:
             image: "ghcr.io/amdresearch/auplc-physim:latest-gfx1151"
           "9060":

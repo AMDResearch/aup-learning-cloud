@@ -53,6 +53,13 @@ def test_default_values_keep_visible_gpu_accelerators_conservative() -> None:
             assert metadata[resource_key]["acceleratorKeys"] == ["strix-halo"], values_file
 
 
+def test_default_values_do_not_set_a_phx_environment_override() -> None:
+    for values_file in VALUES_FILES:
+        values = _load_values(values_file)
+
+        assert values["custom"]["accelerators"]["phx"]["env"] == {}, values_file
+
+
 def test_default_values_route_gpu_resources_to_supported_image_tags() -> None:
     for values_file in VALUES_FILES:
         values = _load_values(values_file)

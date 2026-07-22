@@ -219,10 +219,17 @@ def test_mixed_profiles_acceleratorkeys_lists_every_sku() -> None:
     assert set(keys) == {"strix-halo", "r9700"}
 
 
-def test_removed_phx_fails_before_overlay_generation() -> None:
+def test_phx_emits_product_selector_and_profile_override_without_environment() -> None:
     cfg = GpuConfig()
-    with pytest.raises(InstallerError, match="Unsupported AMD GPU product"):
-        append_product(cfg, "AMD_Radeon_780M_Graphics")
+    append_product(cfg, "AMD_Radeon_780M_Graphics")
+
+    _, parsed = _render(cfg, courses=CourseSelection.default())
+
+    accelerator = parsed["custom"]["accelerators"]["phx"]
+    overrides = parsed["custom"]["resources"]["metadata"]["gpu"]["acceleratorOverrides"]
+    assert accelerator["nodeSelector"] == {"amd.com/gpu.product-name": "AMD_Radeon_780M_Graphics"}
+    assert "env" not in accelerator
+    assert overrides["phx"]["image"] == "ghcr.io/amdresearch/auplc-base:v1.0-gfx1103"
 
 
 def test_fallback_path_skips_accelerator_stanza_for_curated_sku() -> None:
