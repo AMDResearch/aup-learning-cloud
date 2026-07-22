@@ -47,6 +47,8 @@ from auplc_installer.util import (
     verify_sha256,
 )
 
+MAKE_IMAGE_REGISTRY = "ghcr.io/amdresearch"
+
 # ---------------------------------------------------------------------------
 # Stage population
 # ---------------------------------------------------------------------------
@@ -175,7 +177,7 @@ def pack_save_custom_images_pull(
     mirror_prefix: str,
 ) -> None:
     """Pull custom images from GHCR, then save them as a single tar."""
-    tag = f"{image_tag}-{cfg.gpu_target}"
+    tag = f"{image_tag}-{cfg.image_profile}"
     log_step(f"Pulling and saving custom images ({image_registry})")
     log(f"    Courses: {courses.description()}")
 
@@ -189,10 +191,8 @@ def pack_save_custom_images_pull(
     for name in courses.gpu_image_basenames():
         image = f"{image_registry}/{name}:{tag}"
         if pull_and_tag(image, mirror_prefix=mirror_prefix):
-            run(["docker", "tag", image, f"{image_registry}/{name}:latest"])
-            all_refs.append(f"{image_registry}/{name}:latest")
             all_refs.append(f"{image_registry}/{name}:{tag}")
-            log(f"  Pulled: {name} (:latest + :{tag})")
+            log(f"  Pulled: {name} (:{tag})")
         else:
             failed += 1
 
@@ -237,16 +237,16 @@ def pack_save_custom_images_local(
 ) -> None:
     """Build custom images locally via Makefile, then save them.
 
-    The Makefile produces ``:latest`` and ``:latest-<gpu_target>`` regardless
-    of ``image_tag``. To stay aligned with the ``--pull`` path (and with the
-    ``:{image_tag}-{gpu_target}`` reference that ``overlay.emit_overlay``
+    The Makefile produces images under ``ghcr.io/amdresearch`` with ``:latest``
+    and ``:latest-<image_profile>`` regardless of ``image_tag``. To stay aligned with the ``--pull`` path (and with the
+    ``:{image_tag}-{image_profile}`` reference that ``overlay.emit_overlay``
     bakes into the bundle's values.local.yaml), retag the GPU images to
-    ``:{image_tag}-<gpu_target>`` and the plain images to ``:{image_tag}``
+    ``:{image_tag}-<image_profile>`` and the plain images to ``:{image_tag}``
     before saving. Skipped when the desired tag already matches the source
     so the no-op ``image_tag=latest`` case stays a docker-tag-no-op.
     """
-    built_gpu_tag = f"latest-{cfg.gpu_target}"
-    desired_gpu_tag = f"{image_tag}-{cfg.gpu_target}"
+    built_gpu_tag = f"latest-{cfg.image_profile}"
+    desired_gpu_tag = f"{image_tag}-{cfg.image_profile}"
     log_step("Building and saving custom images locally")
     log(f"    Courses: {courses.description()}")
 
@@ -261,7 +261,7 @@ def pack_save_custom_images_local(
     run_streaming(
         [
             "make",
-            f"GPU_TARGET={cfg.gpu_target}",
+            f"AUP_IMAGE_PROFILE={cfg.image_profile}",
             f"MIRROR_PREFIX={mirror_prefix}",
             f"MIRROR_PIP={mirror_pip}",
             f"MIRROR_NPM={mirror_npm}",
@@ -274,32 +274,39 @@ def pack_save_custom_images_local(
 
     all_refs: list[str] = []
     for name in courses.gpu_image_basenames():
-        if desired_gpu_tag != built_gpu_tag:
+        source = f"{MAKE_IMAGE_REGISTRY}/{name}:{built_gpu_tag}"
+        destination = f"{image_registry}/{name}:{desired_gpu_tag}"
+        if source != destination:
             run(
                 [
                     "docker",
                     "tag",
-                    f"{image_registry}/{name}:{built_gpu_tag}",
-                    f"{image_registry}/{name}:{desired_gpu_tag}",
+                    source,
+                    destination,
                 ]
             )
-        all_refs.append(f"{image_registry}/{name}:latest")
-        all_refs.append(f"{image_registry}/{name}:{desired_gpu_tag}")
-        log(f"  Queued: {name} (:latest + :{desired_gpu_tag})")
+        all_refs.append(destination)
+        log(f"  Queued: {name} (:{desired_gpu_tag})")
 
     plain_names = [HUB_IMAGE_NAME, *courses.plain_image_basenames()]
     for name in plain_names:
-        if image_tag != "latest":
+        source = f"{MAKE_IMAGE_REGISTRY}/{name}:latest"
+        latest_destination = f"{image_registry}/{name}:latest"
+        tagged_destination = f"{image_registry}/{name}:{image_tag}"
+        if source != latest_destination:
+            run(["docker", "tag", source, latest_destination])
+        if tagged_destination != latest_destination and source != tagged_destination:
             run(
                 [
                     "docker",
                     "tag",
-                    f"{image_registry}/{name}:latest",
-                    f"{image_registry}/{name}:{image_tag}",
+                    source,
+                    tagged_destination,
                 ]
             )
-        all_refs.append(f"{image_registry}/{name}:latest")
-        all_refs.append(f"{image_registry}/{name}:{image_tag}")
+        all_refs.append(latest_destination)
+        if tagged_destination != latest_destination:
+            all_refs.append(tagged_destination)
         log(f"  Queued: {name} (:latest + :{image_tag})")
 
     if not all_refs:
@@ -368,11 +375,10 @@ def pack_write_manifest(
     image_tag: str,
 ) -> None:
     BundleManifest(
-        format_version="1",
         build_date=_dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        gpu_target=cfg.gpu_target,
-        accel_key=cfg.accel_key,
-        accel_env=cfg.accel_env,
+        image_profile=cfg.image_profile,
+        accelerator_key=cfg.accelerator_key,
+        accelerator_env=cfg.accelerator_env,
         image_registry=image_registry,
         image_tag=image_tag,
         k3s_version=K3S_VERSION,
@@ -451,7 +457,7 @@ def pack_bundle(
     detect_and_configure_gpu(cfg, gpu_type_override=gpu_type_override)
 
     date_stamp = _dt.datetime.now().strftime("%Y%m%d")
-    bundle_name = f"auplc-bundle-{cfg.gpu_target}-{date_stamp}"
+    bundle_name = f"auplc-bundle-{cfg.image_profile}-{date_stamp}"
     staging = Path(bundle_name)
     if staging.exists():
         shutil.rmtree(staging)
