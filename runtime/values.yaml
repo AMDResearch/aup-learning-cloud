@@ -225,25 +225,6 @@ custom:
   # Each accelerator uses Kubernetes node selectors such as
   # amd.com/gpu.product-name to target compatible nodes.
   accelerators:
-    phx:
-      displayName: "AMD Radeon™ 780M (Phoenix Point iGPU)"
-      description: "RDNA 3.0 (gfx1103) | Compute Units 12 | 4GB LPDDR5X"
-      nodeSelector:
-        amd.com/gpu.product-name: "AMD_Radeon_780M_Graphics"
-      env:
-        # Phoenix hw (gfx1100/1101/1102/1103) shares a single gfx110x ROCm
-        # build — we do not ship dedicated images for gfx1102/gfx1103 — so
-        # force every Phoenix GPU to report as gfx1100 at runtime so it
-        # accepts the shared kernels.
-        HSA_OVERRIDE_GFX_VERSION: "11.0.0"
-      quotaRate: 2
-    strix:
-      displayName: "AMD Radeon™ 890M (Strix Point iGPU)"
-      description: "RDNA 3.5 (gfx1150) | Compute Units 16 | 4GB LPDDR5X"
-      nodeSelector:
-        amd.com/gpu.product-name: "AMD_Radeon_890M_Graphics"
-      env: {}
-      quotaRate: 2
     strix-halo:
       displayName: "AMD Radeon™ 8060S (Strix Halo iGPU)"
       description: "RDNA 3.5 (gfx1151) | Compute Units 40 | 64GB LPDDR5X"
@@ -251,12 +232,30 @@ custom:
         amd.com/gpu.product-name: "AMD_Radeon_8060S_Graphics"
       env: {}
       quotaRate: 3
+    "9060":
+      displayName: "AMD Radeon™ RX 9060 (Desktop GPU)"
+      description: "RDNA 4.0 (gfx1200)"
+      nodeSelector:
+        amd.com/gpu.product-name: "AMD_Radeon_RX_9060"
+      env: {}
+      quotaRate: 4
+    9060xt:
+      displayName: "AMD Radeon™ RX 9060 XT (Desktop GPU)"
+      description: "RDNA 4.0 (gfx1200)"
+      nodeSelector:
+        amd.com/gpu.product-name: "AMD_Radeon_RX_9060_XT"
+      env: {}
+      quotaRate: 4
+    "9070":
+      displayName: "AMD Radeon™ RX 9070 (Desktop GPU)"
+      description: "RDNA 4.0 (gfx1201)"
+      nodeSelector:
+        amd.com/gpu.product-name: "AMD_Radeon_RX_9070"
+      env: {}
+      quotaRate: 4
     9070xt:
       displayName: "AMD Radeon™ RX 9070 XT (Desktop GPU)"
       description: "RDNA 4.0 (gfx1201) | Compute Units 64 | 16GB GDDR6"
-      # ROCm labeller publishes the marketing name with spaces → '_', so the
-      # expected value on a real node is AMD_Radeon_RX_9070_XT. If your fleet
-      # uses the older AMD_Radeon_9070XT normalisation, change it here.
       nodeSelector:
         amd.com/gpu.product-name: "AMD_Radeon_RX_9070_XT"
       env: {}
@@ -266,13 +265,6 @@ custom:
       description: "RDNA 4.0 (gfx1201) | Compute Units 64 | 32GB GDDR6"
       nodeSelector:
         amd.com/gpu.product-name: "AMD_Radeon_AI_PRO_R9700"
-      env: {}
-      quotaRate: 4
-    9600gre:
-      displayName: "AMD Radeon™ RX 9600 GRE (Desktop GPU)"
-      description: "RDNA 4.0 (gfx120x) | Compute Units 32 | 12GB GDDR6"
-      nodeSelector:
-        amd.com/gpu.product-name: "AMD_Radeon_RX_9600_GRE"
       env: {}
       quotaRate: 4
 
@@ -380,18 +372,18 @@ custom:
         acceleratorKeys:
           - strix-halo
         acceleratorOverrides:
-          phx:
-            image: "ghcr.io/amdresearch/auplc-base:latest-gfx110x"
-          strix:
-            image: "ghcr.io/amdresearch/auplc-base:latest-gfx1150"
           strix-halo:
             image: "ghcr.io/amdresearch/auplc-base:latest-gfx1151"
+          "9060":
+            image: "ghcr.io/amdresearch/auplc-base:latest-gfx1200"
+          9060xt:
+            image: "ghcr.io/amdresearch/auplc-base:latest-gfx1200"
+          "9070":
+            image: "ghcr.io/amdresearch/auplc-base:latest-gfx1201"
           9070xt:
-            image: "ghcr.io/amdresearch/auplc-base:latest-gfx120x"
+            image: "ghcr.io/amdresearch/auplc-base:latest-gfx1201"
           r9700:
-            image: "ghcr.io/amdresearch/auplc-base:latest-gfx120x"
-          9600gre:
-            image: "ghcr.io/amdresearch/auplc-base:latest-gfx120x"
+            image: "ghcr.io/amdresearch/auplc-base:latest-gfx1201"
         allowGitClone: true
         defaultPath: "/home/jovyan"
         resourceType: "notebook"
@@ -403,18 +395,18 @@ custom:
         acceleratorKeys:
           - strix-halo
         acceleratorOverrides:
-          phx:
-            image: "ghcr.io/amdresearch/auplc-code-gpu:latest-gfx110x"
-          strix:
-            image: "ghcr.io/amdresearch/auplc-code-gpu:latest-gfx1150"
           strix-halo:
             image: "ghcr.io/amdresearch/auplc-code-gpu:latest-gfx1151"
+          "9060":
+            image: "ghcr.io/amdresearch/auplc-code-gpu:latest-gfx1200"
+          9060xt:
+            image: "ghcr.io/amdresearch/auplc-code-gpu:latest-gfx1200"
+          "9070":
+            image: "ghcr.io/amdresearch/auplc-code-gpu:latest-gfx1201"
           9070xt:
-            image: "ghcr.io/amdresearch/auplc-code-gpu:latest-gfx120x"
+            image: "ghcr.io/amdresearch/auplc-code-gpu:latest-gfx1201"
           r9700:
-            image: "ghcr.io/amdresearch/auplc-code-gpu:latest-gfx120x"
-          9600gre:
-            image: "ghcr.io/amdresearch/auplc-code-gpu:latest-gfx120x"
+            image: "ghcr.io/amdresearch/auplc-code-gpu:latest-gfx1201"
         allowGitClone: true
         launchMode: "code-server"
         defaultPath: "/home/jovyan"
@@ -427,18 +419,18 @@ custom:
         acceleratorKeys:
           - strix-halo
         acceleratorOverrides:
-          phx:
-            image: "ghcr.io/amdresearch/auplc-cv:latest-gfx110x"
-          strix:
-            image: "ghcr.io/amdresearch/auplc-cv:latest-gfx1150"
           strix-halo:
             image: "ghcr.io/amdresearch/auplc-cv:latest-gfx1151"
+          "9060":
+            image: "ghcr.io/amdresearch/auplc-cv:latest-gfx1200"
+          9060xt:
+            image: "ghcr.io/amdresearch/auplc-cv:latest-gfx1200"
+          "9070":
+            image: "ghcr.io/amdresearch/auplc-cv:latest-gfx1201"
           9070xt:
-            image: "ghcr.io/amdresearch/auplc-cv:latest-gfx120x"
+            image: "ghcr.io/amdresearch/auplc-cv:latest-gfx1201"
           r9700:
-            image: "ghcr.io/amdresearch/auplc-cv:latest-gfx120x"
-          9600gre:
-            image: "ghcr.io/amdresearch/auplc-cv:latest-gfx120x"
+            image: "ghcr.io/amdresearch/auplc-cv:latest-gfx1201"
         defaultPath: "/opt/workspace/CV"
         resourceType: "notebook"
       Course-DL:
@@ -449,18 +441,18 @@ custom:
         acceleratorKeys:
           - strix-halo
         acceleratorOverrides:
-          phx:
-            image: "ghcr.io/amdresearch/auplc-dl:latest-gfx110x"
-          strix:
-            image: "ghcr.io/amdresearch/auplc-dl:latest-gfx1150"
           strix-halo:
             image: "ghcr.io/amdresearch/auplc-dl:latest-gfx1151"
+          "9060":
+            image: "ghcr.io/amdresearch/auplc-dl:latest-gfx1200"
+          9060xt:
+            image: "ghcr.io/amdresearch/auplc-dl:latest-gfx1200"
+          "9070":
+            image: "ghcr.io/amdresearch/auplc-dl:latest-gfx1201"
           9070xt:
-            image: "ghcr.io/amdresearch/auplc-dl:latest-gfx120x"
+            image: "ghcr.io/amdresearch/auplc-dl:latest-gfx1201"
           r9700:
-            image: "ghcr.io/amdresearch/auplc-dl:latest-gfx120x"
-          9600gre:
-            image: "ghcr.io/amdresearch/auplc-dl:latest-gfx120x"
+            image: "ghcr.io/amdresearch/auplc-dl:latest-gfx1201"
         defaultPath: "/opt/workspace/DL"
         resourceType: "notebook"
       Course-LLM:
@@ -471,18 +463,18 @@ custom:
         acceleratorKeys:
           - strix-halo
         acceleratorOverrides:
-          phx:
-            image: "ghcr.io/amdresearch/auplc-llm:latest-gfx110x"
-          strix:
-            image: "ghcr.io/amdresearch/auplc-llm:latest-gfx1150"
           strix-halo:
             image: "ghcr.io/amdresearch/auplc-llm:latest-gfx1151"
+          "9060":
+            image: "ghcr.io/amdresearch/auplc-llm:latest-gfx1200"
+          9060xt:
+            image: "ghcr.io/amdresearch/auplc-llm:latest-gfx1200"
+          "9070":
+            image: "ghcr.io/amdresearch/auplc-llm:latest-gfx1201"
           9070xt:
-            image: "ghcr.io/amdresearch/auplc-llm:latest-gfx120x"
+            image: "ghcr.io/amdresearch/auplc-llm:latest-gfx1201"
           r9700:
-            image: "ghcr.io/amdresearch/auplc-llm:latest-gfx120x"
-          9600gre:
-            image: "ghcr.io/amdresearch/auplc-llm:latest-gfx120x"
+            image: "ghcr.io/amdresearch/auplc-llm:latest-gfx1201"
         defaultPath: "/opt/workspace/LLM"
         resourceType: "notebook"
       Course-PhySim:
@@ -493,18 +485,18 @@ custom:
         acceleratorKeys:
           - strix-halo
         acceleratorOverrides:
-          phx:
-            image: "ghcr.io/amdresearch/auplc-physim:latest-gfx110x"
-          strix:
-            image: "ghcr.io/amdresearch/auplc-physim:latest-gfx1150"
           strix-halo:
             image: "ghcr.io/amdresearch/auplc-physim:latest-gfx1151"
+          "9060":
+            image: "ghcr.io/amdresearch/auplc-physim:latest-gfx1200"
+          9060xt:
+            image: "ghcr.io/amdresearch/auplc-physim:latest-gfx1200"
+          "9070":
+            image: "ghcr.io/amdresearch/auplc-physim:latest-gfx1201"
           9070xt:
-            image: "ghcr.io/amdresearch/auplc-physim:latest-gfx120x"
+            image: "ghcr.io/amdresearch/auplc-physim:latest-gfx1201"
           r9700:
-            image: "ghcr.io/amdresearch/auplc-physim:latest-gfx120x"
-          9600gre:
-            image: "ghcr.io/amdresearch/auplc-physim:latest-gfx120x"
+            image: "ghcr.io/amdresearch/auplc-physim:latest-gfx1201"
         defaultPath: "/opt/workspace/PhySim"
         resourceType: "notebook"
 

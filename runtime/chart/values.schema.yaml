@@ -3338,13 +3338,13 @@ properties:
           Example:
           ```yaml
           accelerators:
-            strix:
-              displayName: "AMD Radeon™ 890M (Strix Point iGPU)"
-              description: "RDNA 3.5 | 16 CUs | 4GB LPDDR5X"
+            strix-halo:
+              displayName: "AMD Radeon™ 8060S (Strix Halo iGPU)"
+              description: "RDNA 3.5 (gfx1151) | Compute Units 40 | 64GB LPDDR5X"
               nodeSelector:
-                amd.com/gpu.product-name: "AMD_Radeon_890M_Graphics"
+                amd.com/gpu.product-name: "AMD_Radeon_8060S_Graphics"
               env: {}
-              quotaRate: 2
+              quotaRate: 3
           ```
 
       resources:
@@ -3522,10 +3522,10 @@ properties:
                   accelerator: "GPU"
                   acceleratorKeys:
                     - strix-halo
-                    - phx
+                    - "9060"
                   acceleratorOverrides:
-                    phx:
-                      image: "ghcr.io/your-org/auplc-cv:<tag-for-phx>"
+                    "9060":
+                      image: "ghcr.io/your-org/auplc-cv:latest-gfx1200"
               ```
 
       teams:
