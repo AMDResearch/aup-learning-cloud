@@ -128,7 +128,7 @@ class QuotaManager:
 
         Args:
             username: The user's username
-            accelerator_type: The accelerator type (e.g., 'phx', 'strix', 'cpu')
+            accelerator_type: The accelerator type (e.g., 'strix-halo', '9060', 'cpu')
             runtime_minutes: Requested runtime in minutes
             quota_rates: Mapping of accelerator type to quota rate per minute
             default_quota: Default quota to grant if user has no record
