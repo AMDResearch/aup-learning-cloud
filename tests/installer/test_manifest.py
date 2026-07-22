@@ -101,6 +101,22 @@ def test_pack_write_manifest_round_trips_gpu_config() -> None:
         assert loaded.image_tag == "v1.0"
 
 
+def test_pack_write_manifest_round_trips_restored_phx_config() -> None:
+    cfg = GpuConfig()
+    append_product(cfg, "AMD_Radeon_780M_Graphics")
+    with tempfile.TemporaryDirectory() as tmp:
+        staging = Path(tmp)
+        pack_write_manifest(
+            staging,
+            cfg=cfg,
+            image_registry="ghcr.io/amdresearch",
+            image_tag="v1.0",
+        )
+        loaded = BundleManifest.from_path(staging / "manifest.json")
+
+    assert (loaded.accelerator_key, loaded.image_profile, loaded.accelerator_env) == ("phx", "gfx1103", "")
+
+
 def test_from_path_rejects_legacy_manifest_format() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "manifest.json"

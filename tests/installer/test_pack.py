@@ -15,6 +15,12 @@ def _gfx1200_config() -> GpuConfig:
     return cfg
 
 
+def _gfx1103_config() -> GpuConfig:
+    cfg = GpuConfig()
+    append_product(cfg, "AMD_Radeon_780M_Graphics")
+    return cfg
+
+
 def _docker_save_references(calls: list[list[str]]) -> list[str]:
     command = next(call for call in calls if call[:2] == ["docker", "save"])
     return command[2 : command.index("-o")]
@@ -41,6 +47,25 @@ def test_local_pack_saves_only_profile_specific_gpu_tags(monkeypatch, tmp_path: 
     assert "ghcr.io/example/auplc-code-gpu:v1-gfx1200" in references
     assert "ghcr.io/example/auplc-base:latest" not in references
     assert "ghcr.io/example/auplc-code-gpu:latest" not in references
+
+
+def test_pull_pack_saves_restored_phx_profile_tags(monkeypatch, tmp_path: Path) -> None:
+    calls: list[list[str]] = []
+    monkeypatch.setattr("auplc_installer.pack.pull_and_tag", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr("auplc_installer.pack.run", lambda command, **_: calls.append(command))
+
+    pack_save_custom_images_pull(
+        tmp_path,
+        cfg=_gfx1103_config(),
+        courses=CourseSelection(picks=["gpu", "code-gpu"]),
+        image_registry="ghcr.io/example",
+        image_tag="v1",
+        mirror_prefix="",
+    )
+
+    references = _docker_save_references(calls)
+    assert "ghcr.io/example/auplc-base:v1-gfx1103" in references
+    assert "ghcr.io/example/auplc-code-gpu:v1-gfx1103" in references
 
 
 def test_local_pack_retags_make_images_from_default_registry_to_custom_registry(monkeypatch, tmp_path: Path) -> None:
