@@ -30,8 +30,10 @@ on:
       - 'runtime/shared/**'
       - 'runtime/code-server/**'
       - 'projects/**'
+      - 'auplc_installer/data/rocm-7.14-profiles.json'
+      - 'auplc_installer/rocm_profiles.py'
+      - 'dockerfiles/Base/rocm-targets.py'
       - '.github/workflows/docker-build.yml'
-      - '.github/build-config.json'
   pull_request:
     branches: [main, develop]
     paths:
@@ -41,8 +43,10 @@ on:
       - 'runtime/shared/**'
       - 'runtime/code-server/**'
       - 'projects/**'
+      - 'auplc_installer/data/rocm-7.14-profiles.json'
+      - 'auplc_installer/rocm_profiles.py'
+      - 'dockerfiles/Base/rocm-targets.py'
       - '.github/workflows/docker-build.yml'
-      - '.github/build-config.json'
   workflow_dispatch:
     inputs:
       version:
@@ -63,20 +67,13 @@ on:
           - courses
           - base-cpu
           - base-gpu
-      gpu_target:
-        description: 'GPU target (all = build every target)'
+      image_profile:
+        description: 'Canonical AUP image profile (leave blank to build every profile)'
         required: false
-        default: 'all'
-        type: choice
-        options:
-          - all
-          - gfx110x
-          - gfx1150
-          - gfx1151
-          - gfx1152
-          - gfx120x
+        default: ''
+        type: string
 
-# Build matrix is defined in .github/build-config.json
+# Image profile names and the default are resolved from the canonical catalog.
 
 # Prevent duplicate builds on the same branch / PR
 concurrency:
@@ -102,9 +99,8 @@ jobs:
       base-gpu: ${{ steps.filter.outputs.base-gpu }}
       registry: ${{ steps.registry.outputs.prefix }}
       is-tag: ${{ steps.check.outputs.is-tag }}
-      gpu-targets: ${{ steps.config.outputs.targets }}
-      gpu-map: ${{ steps.config.outputs.gpu-map }}
-      default-gpu-target: ${{ steps.config.outputs.default }}
+      image-profiles: ${{ steps.config.outputs.profiles }}
+      default-image-profile: ${{ steps.config.outputs.default }}
       course-list: ${{ steps.config.outputs.courses }}
       image-name-suffix: ${{ steps.names.outputs.suffix }}
       hub-image: ${{ steps.names.outputs.hub }}
@@ -146,24 +142,25 @@ jobs:
             echo "is-tag=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Load build config
+      - name: Resolve image profiles
         id: config
+        env:
+          INPUT: ${{ github.event.inputs.image_profile }}
         run: |
-          CONFIG='.github/build-config.json'
-          ALL_NAMES=$(jq -c '[.gpu_targets[].name]' "$CONFIG")
-          DEFAULT=$(jq -r '.default_gpu_target' "$CONFIG")
-          COURSES=$(jq -c '.courses' "$CONFIG")
-          GPU_MAP=$(jq -c '.gpu_targets' "$CONFIG")
+          RESOLVER='dockerfiles/Base/rocm-targets.py'
+          ALL_PROFILES=$(python3 "$RESOLVER" list-profiles)
+          DEFAULT=$(python3 "$RESOLVER" resolve-profile --format lines | awk -F= '$1 == "PROFILE" { print $2 }')
+          COURSES='["CV","DL","LLM","PhySim"]'
 
-          INPUT="${{ github.event.inputs.gpu_target }}"
-          if [[ -n "$INPUT" && "$INPUT" != "all" ]]; then
-            echo "targets=[\"${INPUT}\"]" >> "$GITHUB_OUTPUT"
+          if [[ -n "$INPUT" ]]; then
+            python3 "$RESOLVER" resolve-profile "$INPUT" > /dev/null
+            PROFILES=$(python3 -c 'import json, sys; print(json.dumps([sys.argv[1]], separators=(",", ":")))' "$INPUT")
+            echo "profiles=${PROFILES}" >> "$GITHUB_OUTPUT"
           else
-            echo "targets=${ALL_NAMES}" >> "$GITHUB_OUTPUT"
+            echo "profiles=${ALL_PROFILES}" >> "$GITHUB_OUTPUT"
           fi
           echo "default=${DEFAULT}" >> "$GITHUB_OUTPUT"
           echo "courses=${COURSES}" >> "$GITHUB_OUTPUT"
-          echo "gpu-map=${GPU_MAP}" >> "$GITHUB_OUTPUT"
 
       - uses: dorny/paths-filter@v3
         if: github.ref_type != 'tag' && github.event_name != 'workflow_dispatch'
@@ -192,6 +189,9 @@ jobs:
               - 'runtime/hub/frontend/tsconfig.base.json'
             base-gpu:
               - 'dockerfiles/Base/Dockerfile.rocm'
+              - 'auplc_installer/data/rocm-7.14-profiles.json'
+              - 'auplc_installer/rocm_profiles.py'
+              - 'dockerfiles/Base/rocm-targets.py'
               - 'runtime/notebook/**'
               - 'runtime/shared/**'
               - 'runtime/package.json'
@@ -199,7 +199,6 @@ jobs:
               - 'runtime/pnpm-lock.yaml'
               - 'runtime/pnpm-workspace.yaml'
               - 'runtime/hub/frontend/tsconfig.base.json'
-              - '.github/build-config.json'
 
   # ──────────────────────────────────────────────
   # Hub Image (CPU only, runs on GitHub Actions)
@@ -217,7 +216,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Free disk space
-        uses: jlumbroso/free-disk-space@main
+        uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be
         with:
           tool-cache: true
           android: true
@@ -294,7 +293,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Free disk space
-        uses: jlumbroso/free-disk-space@main
+        uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be
         with:
           tool-cache: true
           android: true
@@ -388,7 +387,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Free disk space
-        uses: jlumbroso/free-disk-space@main
+        uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be
         with:
           tool-cache: true
           android: true
@@ -438,7 +437,7 @@ jobs:
   # Code GPU Image (code-server environment)
   # ──────────────────────────────────────────────
   build-code-gpu:
-    name: "Build Code GPU Image (${{ matrix.gpu_target }})"
+    name: "Build Code GPU Image (${{ matrix.image_profile }})"
     needs: [changes, build-base-gpu]
     if: |
       always() &&
@@ -461,13 +460,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        gpu_target: ${{ fromJSON(needs.changes.outputs.gpu-targets) }}
+        image_profile: ${{ fromJSON(needs.changes.outputs.image-profiles) }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Free disk space
-        uses: jlumbroso/free-disk-space@main
+        uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be
         with:
           tool-cache: true
           android: true
@@ -516,13 +515,34 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Docker metadata (target-suffixed tags)
+      - name: Resolve profile tag suffix
+        id: profile
+        env:
+          IMAGE_PROFILE: ${{ matrix.image_profile }}
+        run: |
+          python3 dockerfiles/Base/rocm-targets.py resolve-profile "$IMAGE_PROFILE" --format lines |
+            awk -F= '$1 == "TAG_SUFFIX" { print "tag_suffix=" $2 }' >> "$GITHUB_OUTPUT"
+
+      - name: Determine same-run base image
+        if: github.event_name != 'pull_request'
+        id: base
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            REF="${GITHUB_REF##*/}"
+          elif [[ "$GITHUB_REF" == refs/heads/main ]]; then
+            REF="latest"
+          else
+            REF=$(echo "${GITHUB_REF##refs/heads/}" | tr '/' '-')
+          fi
+          echo "image=${{ needs.changes.outputs.base-gpu-image }}:${REF}-${{ steps.profile.outputs.tag_suffix }}" >> "$GITHUB_OUTPUT"
+
+      - name: Docker metadata (profile-suffixed tags)
         id: meta-suffixed
         uses: docker/metadata-action@v5
         with:
           images: ${{ needs.changes.outputs.code-gpu-image }}
           flavor: |
-            suffix=-${{ matrix.gpu_target }}
+            suffix=-${{ steps.profile.outputs.tag_suffix }}
           tags: |
             type=semver,pattern=v{{version}}
             type=semver,pattern=v{{major}}.{{minor}}
@@ -534,8 +554,8 @@ jobs:
             type=ref,event=tag
             type=ref,event=pr
 
-      - name: Docker metadata (unsuffixed tags — default target only)
-        if: matrix.gpu_target == needs.changes.outputs.default-gpu-target
+      - name: Docker metadata (unsuffixed tags — default profile only)
+        if: matrix.image_profile == needs.changes.outputs.default-image-profile
         id: meta-default
         uses: docker/metadata-action@v5
         with:
@@ -575,21 +595,22 @@ jobs:
           tags: ${{ steps.tags.outputs.tags }}
           labels: ${{ steps.meta-suffixed.outputs.labels }}
           build-args: |
-            BASE_IMAGE=${{ needs.changes.outputs.base-gpu-image }}:latest-${{ matrix.gpu_target }}
+            # PR builds cannot consume an unpublished same-run Base image; use the registry fallback.
+            BASE_IMAGE=${{ steps.base.outputs.image || format('{0}:latest-{1}', needs.changes.outputs.base-gpu-image, steps.profile.outputs.tag_suffix) }}
             IMAGE_FLAVOR=gpu
-          cache-from: type=gha,scope=code-gpu-${{ matrix.gpu_target }}
-          cache-to: type=gha,mode=max,scope=code-gpu-${{ matrix.gpu_target }}
+          cache-from: type=gha,scope=code-gpu-${{ steps.profile.outputs.tag_suffix }}
+          cache-to: type=gha,mode=max,scope=code-gpu-${{ steps.profile.outputs.tag_suffix }}
           provenance: false
 
   # ──────────────────────────────────────────────
-  # Base GPU Image (multi-target via GPU_TARGET)
+  # Base GPU Image (multi-profile via AUP_IMAGE_PROFILE)
   #
   # No GPU hardware required — only installs ROCm apt packages + pip wheels.
   # Uses free-disk-space action to reclaim runner disk for the large image.
-  # Builds GPU targets in parallel via matrix strategy.
+  # Builds image profiles in parallel via matrix strategy.
   # ──────────────────────────────────────────────
   build-base-gpu:
-    name: "Build Base GPU Image (${{ matrix.gpu_target }})"
+    name: "Build Base GPU Image (${{ matrix.image_profile }})"
     needs: changes
     if: |
       needs.changes.outputs.is-tag == 'true' ||
@@ -599,7 +620,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        gpu_target: ${{ fromJSON(needs.changes.outputs.gpu-targets) }}
+        image_profile: ${{ fromJSON(needs.changes.outputs.image-profiles) }}
     outputs:
       image: ${{ steps.out.outputs.image }}
     steps:
@@ -607,7 +628,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Free disk space
-        uses: jlumbroso/free-disk-space@main
+        uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be
         with:
           tool-cache: true
           android: true
@@ -628,23 +649,21 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Resolve GPU config
-        id: suffix
+      - name: Resolve profile tag suffix
+        id: profile
+        env:
+          IMAGE_PROFILE: ${{ matrix.image_profile }}
         run: |
-          echo "tag_suffix=${{ matrix.gpu_target }}" >> "$GITHUB_OUTPUT"
-          # Look up target-specific build metadata; fall back to gpu_target if not found
-          WHL=$(echo '${{ needs.changes.outputs.gpu-map }}' | jq -r --arg t "${{ matrix.gpu_target }}" '.[] | select(.name == $t) | .pytorch_whl // .name')
-          SDK=$(echo '${{ needs.changes.outputs.gpu-map }}' | jq -r --arg t "${{ matrix.gpu_target }}" '.[] | select(.name == $t) | .rocm_sdk // .name')
-          echo "pytorch_whl=${WHL}" >> "$GITHUB_OUTPUT"
-          echo "rocm_sdk=${SDK}" >> "$GITHUB_OUTPUT"
+          python3 dockerfiles/Base/rocm-targets.py resolve-profile "$IMAGE_PROFILE" --format lines |
+            awk -F= '$1 == "TAG_SUFFIX" { print "tag_suffix=" $2 }' >> "$GITHUB_OUTPUT"
 
-      - name: Docker metadata (target-suffixed tags)
+      - name: Docker metadata (profile-suffixed tags)
         id: meta-suffixed
         uses: docker/metadata-action@v5
         with:
           images: ${{ needs.changes.outputs.base-gpu-image }}
           flavor: |
-            suffix=-${{ steps.suffix.outputs.tag_suffix }}
+            suffix=-${{ steps.profile.outputs.tag_suffix }}
           tags: |
             type=semver,pattern=v{{version}}
             type=semver,pattern=v{{major}}.{{minor}}
@@ -656,8 +675,8 @@ jobs:
             type=ref,event=tag
             type=ref,event=pr
 
-      - name: Docker metadata (unsuffixed tags — default target only)
-        if: matrix.gpu_target == needs.changes.outputs.default-gpu-target
+      - name: Docker metadata (unsuffixed tags — default profile only)
+        if: matrix.image_profile == needs.changes.outputs.default-image-profile
         id: meta-default
         uses: docker/metadata-action@v5
         with:
@@ -698,11 +717,9 @@ jobs:
           tags: ${{ steps.tags.outputs.tags }}
           labels: ${{ steps.meta-suffixed.outputs.labels }}
           build-args: |
-            GPU_TARGET=${{ matrix.gpu_target }}
-            ROCM_SDK_TARGET=${{ steps.suffix.outputs.rocm_sdk }}
-            PYTORCH_WHL_TARGET=${{ steps.suffix.outputs.pytorch_whl }}
-          cache-from: type=gha,scope=base-gpu-${{ matrix.gpu_target }}
-          cache-to: type=gha,mode=max,scope=base-gpu-${{ matrix.gpu_target }}
+            AUP_IMAGE_PROFILE=${{ matrix.image_profile }}
+          cache-from: type=gha,scope=base-gpu-${{ steps.profile.outputs.tag_suffix }}
+          cache-to: type=gha,mode=max,scope=base-gpu-${{ steps.profile.outputs.tag_suffix }}
           provenance: false
 
       - name: Export first image tag for downstream jobs
@@ -720,10 +737,10 @@ jobs:
   # BASE_IMAGE build-arg overrides the default so course images
   # can track the latest GPU base image version from CI.
   #
-  # Each course is built for every configured GPU target (course × gpu_target matrix).
+  # Each course is built for every configured image profile.
   # ──────────────────────────────────────────────
   build-courses:
-    name: "Build Course: ${{ matrix.course }} (${{ matrix.gpu_target }})"
+    name: "Build Course: ${{ matrix.course }} (${{ matrix.image_profile }})"
     needs: [changes, build-base-gpu]
     if: |
       always() &&
@@ -731,7 +748,7 @@ jobs:
       (needs.build-base-gpu.result == 'success' || needs.build-base-gpu.result == 'skipped') &&
       (
         needs.changes.outputs.is-tag == 'true' ||
-        (github.event_name != 'workflow_dispatch' && needs.changes.outputs.courses == 'true') ||
+      (github.event_name != 'workflow_dispatch' && (needs.changes.outputs.courses == 'true' || needs.changes.outputs.base-gpu == 'true')) ||
         (github.event_name == 'workflow_dispatch' && (github.event.inputs.images == 'all' || github.event.inputs.images == 'courses' || github.event.inputs.images == 'base-gpu'))
       )
     runs-on: ubuntu-latest
@@ -739,13 +756,13 @@ jobs:
       fail-fast: false
       matrix:
         course: ${{ fromJSON(needs.changes.outputs.course-list) }}
-        gpu_target: ${{ fromJSON(needs.changes.outputs.gpu-targets) }}
+        image_profile: ${{ fromJSON(needs.changes.outputs.image-profiles) }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Free disk space
-        uses: jlumbroso/free-disk-space@main
+        uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be
         with:
           tool-cache: true
           android: true
@@ -768,6 +785,14 @@ jobs:
       - name: Prepare build context
         run: cp -r projects/${{ matrix.course }} dockerfiles/Courses/${{ matrix.course }}/course_data
 
+      - name: Resolve profile tag suffix
+        id: profile
+        env:
+          IMAGE_PROFILE: ${{ matrix.image_profile }}
+        run: |
+          python3 dockerfiles/Base/rocm-targets.py resolve-profile "$IMAGE_PROFILE" --format lines |
+            awk -F= '$1 == "TAG_SUFFIX" { print "tag_suffix=" $2 }' >> "$GITHUB_OUTPUT"
+
       - name: Derive image name and tag suffix
         id: meta-inputs
         env:
@@ -775,13 +800,12 @@ jobs:
         run: |
           COURSE_LC=$(echo '${{ matrix.course }}' | tr '[:upper:]' '[:lower:]')
           echo "image_name=auplc-${COURSE_LC}${NAME_SUFFIX}" >> "$GITHUB_OUTPUT"
-          echo "tag_suffix=${{ matrix.gpu_target }}" >> "$GITHUB_OUTPUT"
 
       - name: Determine base image tag
         if: github.event_name != 'pull_request'
         id: base
         run: |
-          SUFFIX="${{ steps.meta-inputs.outputs.tag_suffix }}"
+          SUFFIX="${{ steps.profile.outputs.tag_suffix }}"
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             BRANCH="${GITHUB_REF##*/}"
           elif [[ "$GITHUB_REF" == refs/heads/main ]]; then
@@ -794,13 +818,13 @@ jobs:
           # never fall back to upstream auplc-base.
           echo "image=${{ needs.changes.outputs.base-gpu-image }}:${BRANCH}-${SUFFIX}" >> "$GITHUB_OUTPUT"
 
-      - name: Docker metadata (target-suffixed tags)
+      - name: Docker metadata (profile-suffixed tags)
         id: meta-suffixed
         uses: docker/metadata-action@v5
         with:
           images: ${{ needs.changes.outputs.registry }}/${{ steps.meta-inputs.outputs.image_name }}
           flavor: |
-            suffix=-${{ steps.meta-inputs.outputs.tag_suffix }}
+            suffix=-${{ steps.profile.outputs.tag_suffix }}
           tags: |
             type=semver,pattern=v{{version}}
             type=semver,pattern=v{{major}}.{{minor}}
@@ -812,8 +836,8 @@ jobs:
             type=ref,event=tag
             type=ref,event=pr
 
-      - name: Docker metadata (unsuffixed tags — default target only)
-        if: matrix.gpu_target == needs.changes.outputs.default-gpu-target
+      - name: Docker metadata (unsuffixed tags — default profile only)
+        if: matrix.image_profile == needs.changes.outputs.default-image-profile
         id: meta-default
         uses: docker/metadata-action@v5
         with:
@@ -845,7 +869,7 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Build and push ${{ matrix.course }} (${{ matrix.gpu_target }}) image
+      - name: Build and push ${{ matrix.course }} (${{ matrix.image_profile }}) image
         uses: docker/build-push-action@v6
         with:
           context: dockerfiles/Courses/${{ matrix.course }}
@@ -855,8 +879,8 @@ jobs:
           labels: ${{ steps.meta-suffixed.outputs.labels }}
           build-args: |
             ${{ steps.base.outputs.image && format('BASE_IMAGE={0}', steps.base.outputs.image) || '' }}
-          cache-from: type=gha,scope=course-${{ matrix.course }}-${{ matrix.gpu_target }}
-          cache-to: type=gha,mode=max,scope=course-${{ matrix.course }}-${{ matrix.gpu_target }}
+          cache-from: type=gha,scope=course-${{ matrix.course }}-${{ steps.profile.outputs.tag_suffix }}
+          cache-to: type=gha,mode=max,scope=course-${{ matrix.course }}-${{ steps.profile.outputs.tag_suffix }}
           provenance: false
 
       - name: Clean course build context

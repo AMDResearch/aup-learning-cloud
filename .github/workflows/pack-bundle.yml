@@ -30,15 +30,17 @@ on:
   workflow_dispatch:
     inputs:
       gpu_type:
-        description: 'GPU type (determines target architecture and HSA config)'
+        description: 'GPU hardware (determines the image profile)'
         required: true
         default: 'strix-halo'
         type: choice
         options:
           - strix-halo   # gfx1151 — Ryzen AI Max+ 395 / Max 390
-          - phx          # gfx110x — Ryzen AI 300 (Phoenix)
-          - strix        # gfx1150 — Ryzen AI 300 (Strix Point)
-          - rdna4        # gfx120x — Radeon RX 9000 series
+          - '9060'       # gfx1200 — Radeon RX 9060
+          - 9060xt       # gfx1200 — Radeon RX 9060 XT
+          - '9070'       # gfx1201 — Radeon RX 9070
+          - 9070xt       # gfx1201 — Radeon RX 9070 XT
+          - r9700        # gfx1201 — Radeon AI PRO R9700
       image_tag:
         description: 'Image tag prefix (default: current branch/tag name)'
         required: false
@@ -54,22 +56,30 @@ permissions:
   packages: read
 
 jobs:
-  # ── Automatic release: one job per GPU target, triggered by workflow_run ──
+  # ── Automatic release: one job per image profile, triggered by workflow_run ──
   pack-release:
-    name: "Pack Bundle (${{ matrix.gpu_type }}) — Release"
+    name: "Pack Bundle (${{ matrix.image_profile }}) — Release"
     if: |
       github.event_name == 'workflow_run' &&
       github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
       startsWith(github.event.workflow_run.head_branch, 'v')
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        gpu_type: [strix-halo, phx, strix, rdna4]
+        include:
+          - image_profile: gfx1151
+            gpu_type: strix-halo
+          - image_profile: gfx1200
+            gpu_type: 9060xt
+          - image_profile: gfx1201
+            gpu_type: 9070xt
 
     steps:
       - name: Free disk space
-        uses: jlumbroso/free-disk-space@main
+        uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be
         with:
           tool-cache: true
           android: true
@@ -110,13 +120,13 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${{ steps.tag.outputs.value }}"
-          GPU="${{ matrix.gpu_type }}"
-          if gh release view "${TAG}" &>/dev/null; then
-            # Check if a bundle for this GPU type is already attached
-            if gh release view "${TAG}" --json assets --jq '.assets[].name' 2>/dev/null \
-                | grep -q "auplc-bundle.*${GPU}"; then
-              echo "skip=true" >> "$GITHUB_OUTPUT"
-              echo "Bundle for ${GPU} already exists in release ${TAG}, skipping."
+           PROFILE="${{ matrix.image_profile }}"
+           if gh release view "${TAG}" &>/dev/null; then
+             # Check if a bundle for this image profile is already attached
+             if gh release view "${TAG}" --json assets --jq '.assets[].name' 2>/dev/null \
+                 | grep -q "auplc-bundle-${PROFILE}-"; then
+               echo "skip=true" >> "$GITHUB_OUTPUT"
+               echo "Bundle for ${PROFILE} already exists in release ${TAG}, skipping."
             else
               echo "skip=false" >> "$GITHUB_OUTPUT"
             fi
@@ -143,7 +153,7 @@ jobs:
         if: steps.check.outputs.skip != 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: auplc-bundle-${{ matrix.gpu_type }}
+          name: auplc-bundle-${{ matrix.image_profile }}
           path: auplc-bundle-*.tar.gz
           retention-days: 30
           compression-level: 0  # already compressed
@@ -174,7 +184,7 @@ jobs:
 
     steps:
       - name: Free disk space
-        uses: jlumbroso/free-disk-space@main
+        uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be
         with:
           tool-cache: true
           android: true
@@ -199,12 +209,16 @@ jobs:
 
       - name: Resolve image tag
         id: tag
+        env:
+          RAW_IMAGE_TAG: ${{ inputs.image_tag || github.ref_name }}
         run: |
-          # Use explicit input if provided; otherwise derive from branch/tag name.
-          # Sanitize: Docker tags cannot contain '/' — replace with '-'.
-          RAW="${{ inputs.image_tag || github.ref_name }}"
-          echo "value=${RAW//\//-}" >> "$GITHUB_OUTPUT"
-          echo "Resolved IMAGE_TAG: ${RAW//\//-}"
+          TAG="${RAW_IMAGE_TAG//\//-}"
+          if [[ ! "$TAG" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+            echo "image_tag must be a single-line Docker tag" >&2
+            exit 1
+          fi
+          echo "value=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "Resolved IMAGE_TAG: ${TAG}"
 
       - name: Run pack command
         env:
