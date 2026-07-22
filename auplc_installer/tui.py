@@ -507,13 +507,12 @@ def _stdlib_checkbox(
 
 GPU_CHOICES: tuple[Choice, ...] = (
     Choice("", "Auto-detect (rocminfo / KFD topology)"),
-    Choice("phx", "phx        - Phoenix Point iGPU (gfx1100..1103)"),
-    Choice("strix", "strix      - Strix Point iGPU (gfx1150)"),
     Choice("strix-halo", "strix-halo - Strix Halo iGPU (gfx1151)"),
+    Choice("9060", "9060       - Radeon RX 9060 (gfx1200)"),
+    Choice("9060xt", "9060xt     - Radeon RX 9060 XT (gfx1200)"),
+    Choice("9070", "9070       - Radeon RX 9070 (gfx1201)"),
     Choice("9070xt", "9070xt     - Radeon RX 9070 XT (gfx1201)"),
     Choice("r9700", "r9700      - Radeon AI PRO R9700 (gfx1201)"),
-    Choice("9600gre", "9600gre    - Radeon RX 9600 GRE (gfx1200)"),
-    Choice("dgpu", "dgpu       - Generic RDNA4 fallback"),
 )
 
 

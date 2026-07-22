@@ -19,75 +19,51 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import NamedTuple
 
+from auplc_installer.rocm_profiles import CatalogError, load_catalog, resolve_profile
 from auplc_installer.util import InstallerError, command_exists, log, run_capture
 
+
 # ---------------------------------------------------------------------------
-# Curated SKU table  — keep accel_key in sync with runtime/values.yaml
-# custom.accelerators.*. Rows that are NOT in values.yaml use display_name
-# when the installer injects a minimal stanza in the overlay.
-#
-# Tuple layout: (accel_key, gpu_target, accel_env, quota_rate, display_name)
+# Curated SKU table — keep accelerator keys in sync with runtime/values.yaml.
 # ---------------------------------------------------------------------------
-SkuRow = tuple[str, str, str, int, str]
+class SkuRow(NamedTuple):
+    """Curated accelerator selection and its canonical image profile."""
+
+    accelerator_key: str
+    image_profile: str
+    accelerator_env: str
+    quota_rate: int
+    display_name: str
+
 
 PRODUCT_NAME_TO_SKU: dict[str, SkuRow] = {
-    "AMD_Radeon_780M_Graphics": ("phx", "gfx110x", "11.0.0", 2, "AMD Radeon 780M (Phoenix Point iGPU)"),
-    "AMD_Radeon_890M_Graphics": ("strix", "gfx1150", "", 2, "AMD Radeon 890M (Strix Point iGPU)"),
-    "AMD_Radeon_8060S_Graphics": ("strix-halo", "gfx1151", "", 3, "AMD Radeon 8060S (Strix Halo iGPU)"),
-    "AMD_Radeon_9070XT": ("9070xt", "gfx120x", "", 4, "AMD Radeon RX 9070 XT"),
-    "AMD_Radeon_RX_9070_XT": ("9070xt", "gfx120x", "", 4, "AMD Radeon RX 9070 XT"),
-    "AMD_Radeon_RX_9070XT": ("9070xt", "gfx120x", "", 4, "AMD Radeon RX 9070 XT"),
-    "AMD_Radeon_AI_PRO_R9700": ("r9700", "gfx120x", "", 4, "AMD Radeon AI PRO R9700"),
-    "AMD_Radeon_RX_9600_GRE": ("9600gre", "gfx120x", "", 4, "AMD Radeon RX 9600 GRE"),
-    "AMD_Radeon_9600_GRE": ("9600gre", "gfx120x", "", 4, "AMD Radeon RX 9600 GRE"),
-    "AMD_Radeon_RX_9600GRE": ("9600gre", "gfx120x", "", 4, "AMD Radeon RX 9600 GRE"),
+    "AMD_Radeon_8060S_Graphics": SkuRow("strix-halo", "gfx1151", "", 3, "AMD Radeon 8060S (Strix Halo iGPU)"),
+    "AMD_Radeon_RX_9060": SkuRow("9060", "gfx1200", "", 4, "AMD Radeon RX 9060"),
+    "AMD_Radeon_RX_9060_XT": SkuRow("9060xt", "gfx1200", "", 4, "AMD Radeon RX 9060 XT"),
+    "AMD_Radeon_RX_9070": SkuRow("9070", "gfx1201", "", 4, "AMD Radeon RX 9070"),
+    "AMD_Radeon_RX_9070_XT": SkuRow("9070xt", "gfx1201", "", 4, "AMD Radeon RX 9070 XT"),
+    "AMD_Radeon_AI_PRO_R9700": SkuRow("r9700", "gfx1201", "", 4, "AMD Radeon AI PRO R9700"),
 }
 
 
-# Accelerator keys defined in runtime/values.yaml custom.accelerators. When
-# the resolved accel_key is not in this list, ``overlay.py`` injects a full
-# minimal accelerator stanza so helm install succeeds without values.yaml
-# edits (useful for ad-hoc SKUs not yet promoted to the default values).
-GPU_CURATED_SKU_KEYS = ("phx", "strix", "strix-halo", "9070xt", "r9700", "9600gre")
+ACCELERATOR_CONFIGS: dict[str, SkuRow] = {row.accelerator_key: row for row in PRODUCT_NAME_TO_SKU.values()}
+CURATED_ACCELERATOR_KEYS = tuple(ACCELERATOR_CONFIGS)
 
 
-def is_curated_sku(key: str) -> bool:
-    return key in GPU_CURATED_SKU_KEYS
+def is_curated_accelerator(key: str) -> bool:
+    """Return whether an accelerator is defined by the curated product policy."""
+    return key in ACCELERATOR_CONFIGS
 
 
 # ---------------------------------------------------------------------------
-# gfx-family fallback table (used when product-name detection fails)
+# Accelerator and raw-gfx resolution
 # ---------------------------------------------------------------------------
-
-# Quota rates here MUST stay in sync with PRODUCT_NAME_TO_SKU above (and with
-# runtime/values.yaml custom.accelerators.<key>.quotaRate) so that whether the
-# user lands on the curated path (rocminfo / sysfs found a known marketing
-# name) or the gfx-family fallback path (only kernel reports a gfx target),
-# the resulting overlay is identical for the same physical GPU.
-_GFX_FALLBACK: dict[str, SkuRow] = {
-    # phx covers gfx1100..gfx1103
-    "phx": ("phx", "gfx110x", "11.0.0", 2, ""),
-    "gfx1100": ("phx", "gfx110x", "11.0.0", 2, ""),
-    "gfx1101": ("phx", "gfx110x", "11.0.0", 2, ""),
-    "gfx1102": ("phx", "gfx110x", "11.0.0", 2, ""),
-    "gfx1103": ("phx", "gfx110x", "11.0.0", 2, ""),
-    "strix": ("strix", "gfx1150", "", 2, ""),
-    "gfx1150": ("strix", "gfx1150", "", 2, ""),
-    "strix-halo": ("strix-halo", "gfx1151", "", 3, ""),
-    "gfx1151": ("strix-halo", "gfx1151", "", 3, ""),
-    "rdna4": ("r9700", "gfx120x", "", 4, ""),
-    "dgpu": ("r9700", "gfx120x", "", 4, ""),
-    "gfx1200": ("r9700", "gfx120x", "", 4, ""),
-    "gfx1201": ("r9700", "gfx120x", "", 4, ""),
-    "9070xt": ("9070xt", "gfx120x", "", 4, ""),
-    "r9700": ("r9700", "gfx120x", "", 4, ""),
-    "9600gre": ("9600gre", "gfx120x", "", 4, ""),
-}
 
 
 def normalise_gpu_type_key(input_key: str) -> str:
-    """Normalise CLI/detected GPU type aliases to fallback-table keys."""
+    """Normalise CLI accelerator keys and raw detected gfx target values."""
     key = input_key.strip().lower().replace("_", "-")
     m = re.fullmatch(r"gfx-?([0-9]+)", key)
     if m:
@@ -95,20 +71,39 @@ def normalise_gpu_type_key(input_key: str) -> str:
     return key
 
 
-def resolve_gpu_config(input_key: str) -> SkuRow:
-    """Map a user-supplied GPU type or detected gfx family to a SKU row.
+def _validated_row(row: SkuRow) -> SkuRow:
+    """Validate and canonicalize a configured profile through the catalog."""
+    try:
+        plan = resolve_profile(row.image_profile)
+    except CatalogError as error:
+        raise InstallerError(str(error)) from error
+    return row._replace(image_profile=plan.profile)
 
-    Raises :class:`InstallerError` for unsupported inputs.
-    """
+
+def resolve_gpu_config(input_key: str) -> SkuRow:
+    """Resolve an accelerator key or an unambiguous raw gfx target to a SKU row."""
     key = normalise_gpu_type_key(input_key)
-    row = _GFX_FALLBACK.get(key)
-    if row is None:
+    row = ACCELERATOR_CONFIGS.get(key)
+    if row is not None:
+        return _validated_row(row)
+
+    try:
+        profile = resolve_profile(key).profile
+    except CatalogError as error:
+        supported = ", ".join(CURATED_ACCELERATOR_KEYS)
         raise InstallerError(
-            f"Unsupported GPU type: {input_key}\n"
-            "  Supported: phx (gfx1100-1103), strix (gfx1150), strix-halo (gfx1151), "
-            "RDNA4 SKUs (9070xt | r9700 | 9600gre | dgpu fallback)"
-        )
-    return row
+            f"Unsupported accelerator or image profile: {input_key}\n  Supported accelerators: {supported}"
+        ) from error
+
+    matches = [row for row in ACCELERATOR_CONFIGS.values() if row.image_profile == profile]
+    if len(matches) == 1:
+        return _validated_row(matches[0])
+    accelerators = ", ".join(row.accelerator_key for row in matches)
+    raise InstallerError(
+        f"Detected gfx target '{input_key}' resolves to image profile '{profile}', "
+        f"which matches multiple accelerators: {accelerators}.\n"
+        "  Re-run with --gpu=<accelerator> to select one explicitly."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -232,8 +227,8 @@ def detect_gpu_product_names() -> list[str]:
     return out
 
 
-def detect_gpu_gfx_family() -> str | None:
-    """Best-effort gfx target detection. Used as fallback only.
+def detect_gpu_gfx_target() -> str | None:
+    """Best-effort concrete gfx target detection. Used as fallback only.
 
     Returns a gfx family string (e.g. ``gfx1151``) or None when nothing
     can be determined.
@@ -288,10 +283,10 @@ def detect_gpu_gfx_family() -> str | None:
 class SkuEntry:
     """One detected SKU.  Multiple entries cohabit on multi-GPU hosts."""
 
-    accel_key: str
-    product_name: str  # labeller-normalised, may be empty for gfx-family fallback
-    gpu_target: str
-    accel_env: str
+    accelerator_key: str
+    product_name: str  # labeller-normalised, may be empty for raw-gfx fallback
+    image_profile: str
+    accelerator_env: str
     quota_rate: int
     display_name: str  # may be empty for curated rows
 
@@ -305,36 +300,45 @@ class GpuConfig:
     """
 
     skus: list[SkuEntry] = field(default_factory=list)
-    accel_key: str = ""
-    gpu_target: str = ""
-    accel_env: str = ""
+    accelerator_key: str = ""
+    image_profile: str = ""
+    accelerator_env: str = ""
     gpu_product_name: str = ""
+    fallback_accelerator_key: str = ""
+    pinned_image_profile: str = ""
+    fallback_accelerator_env: str = ""
+    offline_pin_validated: bool = False
 
     def reset(self) -> None:
         self.skus = []
-        self.accel_key = ""
-        self.gpu_target = ""
-        self.accel_env = ""
+        self.accelerator_key = ""
+        self.image_profile = ""
+        self.accelerator_env = ""
         self.gpu_product_name = ""
 
     def append(self, entry: SkuEntry) -> None:
         for existing in self.skus:
-            if existing.accel_key == entry.accel_key:
+            if existing.accelerator_key == entry.accelerator_key:
                 return
         self.skus.append(entry)
-        if not self.accel_key:
+        if not self.accelerator_key:
             # First entry drives the primary scalars.
-            self.accel_key = entry.accel_key
-            self.gpu_target = entry.gpu_target
-            self.accel_env = entry.accel_env
+            self.accelerator_key = entry.accelerator_key
+            self.image_profile = entry.image_profile
+            self.accelerator_env = entry.accelerator_env
             self.gpu_product_name = entry.product_name
 
     @property
-    def homogeneous_target(self) -> bool:
-        """True when every detected SKU shares the primary gfx target."""
+    def homogeneous_profile(self) -> bool:
+        """True when every detected SKU shares the primary image profile."""
         if not self.skus:
             return True
-        return all(s.gpu_target == self.gpu_target for s in self.skus)
+        return all(s.image_profile == self.image_profile for s in self.skus)
+
+    @property
+    def has_offline_pin(self) -> bool:
+        """Whether this configuration has an offline bundle profile contract."""
+        return bool(self.pinned_image_profile)
 
 
 # ---------------------------------------------------------------------------
@@ -342,55 +346,41 @@ class GpuConfig:
 # ---------------------------------------------------------------------------
 
 
-def _synthesise_uncurated_row(product: str) -> SkuRow:
-    """Default stanza for products that are not in PRODUCT_NAME_TO_SKU.
-
-    Safe defaults: gfx120x image target, no HSA override, quotaRate 4.
-    Users hitting this path should add their SKU to PRODUCT_NAME_TO_SKU
-    (and ideally to runtime/values.yaml) for a first-class experience.
-    """
-    display = product.replace("_", " ") or "AMD GPU"
-    key = re.sub(r"[^a-z0-9-]", "-", product.lower())
-    key = re.sub(r"-{2,}", "-", key).strip("-") or "amd-gpu"
-    return (key, "gfx120x", "", 4, display)
-
-
 def sku_for_product_name(product: str) -> SkuRow:
-    """Return curated row, falling back to a synthesised one when unknown."""
-    return PRODUCT_NAME_TO_SKU.get(product) or _synthesise_uncurated_row(product)
+    """Resolve a supported labeller product name to its canonical profile."""
+    try:
+        row = PRODUCT_NAME_TO_SKU[product]
+    except KeyError as error:
+        supported = ", ".join(PRODUCT_NAME_TO_SKU)
+        raise InstallerError(
+            f"Unsupported AMD GPU product '{product}'.\n  Supported ROCm labeller products: {supported}"
+        ) from error
+    return _validated_row(row)
 
 
-def sku_for_detected_product(product: str, gfx_family: str = "") -> SkuRow:
-    """Resolve a detected product, using gfx family before generic fallback.
-
-    Some ROCm/sysfs stacks report a generic marketing name for Strix-class
-    APUs. When a precise gfx family is available, prefer it over the generic
-    future-GPU fallback so single-node local builds keep the correct image tag.
-    """
-    row = PRODUCT_NAME_TO_SKU.get(product)
-    if row is not None:
-        return row
-    if gfx_family:
-        try:
-            return resolve_gpu_config(gfx_family)
-        except InstallerError:
-            pass
-    return _synthesise_uncurated_row(product)
+def sku_for_detected_product(product: str, detected_gfx_target: str = "") -> SkuRow:
+    """Resolve a detected product without treating raw gfx data as a product alias."""
+    try:
+        return sku_for_product_name(product)
+    except InstallerError as error:
+        if detected_gfx_target:
+            raise InstallerError(f"{error}\n  Detected gfx target: {detected_gfx_target}") from error
+        raise
 
 
-def append_product(cfg: GpuConfig, product: str, gfx_family: str = "") -> None:
+def append_product(cfg: GpuConfig, product: str, detected_gfx_target: str = "") -> None:
     """Resolve a product name and append it as an SKU entry."""
     if not product:
         return
-    accel_key, gpu_target, env, rate, display = sku_for_detected_product(product, gfx_family)
+    row = sku_for_detected_product(product, detected_gfx_target)
     cfg.append(
         SkuEntry(
-            accel_key=accel_key,
+            accelerator_key=row.accelerator_key,
             product_name=product,
-            gpu_target=gpu_target,
-            accel_env=env,
-            quota_rate=rate,
-            display_name=display,
+            image_profile=row.image_profile,
+            accelerator_env=row.accelerator_env,
+            quota_rate=row.quota_rate,
+            display_name=row.display_name,
         )
     )
 
@@ -403,76 +393,111 @@ def append_product(cfg: GpuConfig, product: str, gfx_family: str = "") -> None:
 def detect_and_configure_gpu(cfg: GpuConfig, gpu_type_override: str = "") -> None:
     """Populate ``cfg`` from host detection.
 
-    Re-entrant: when ``cfg.skus`` is non-empty (e.g. seeded by an offline
-    bundle's manifest.json) this is a no-op, preserving the bundle's pinned
-    primary scalars.
+    Re-entrant: a previously detected configuration is left unchanged. Offline
+    manifest pins are recorded separately, so they never suppress initial host
+    detection.
     """
     if cfg.skus:
         return
 
-    # Honour pinned scalars (e.g. from offline-bundle manifest). They get
-    # restored at the end if host detection produced different values for
-    # the primary entry, since the bundle was packed for a specific gfx
-    # family and image tag and we must not silently drift.
-    pinned_key = cfg.accel_key
-    pinned_target = cfg.gpu_target
-    pinned_env = cfg.accel_env
-    cfg.accel_key = ""
-    cfg.gpu_target = ""
-    cfg.accel_env = ""
+    pinned_profile = cfg.pinned_image_profile
+    fallback_key = cfg.fallback_accelerator_key
+    cfg.accelerator_key = ""
+    cfg.image_profile = ""
+    cfg.accelerator_env = ""
     cfg.gpu_product_name = ""
 
     names = detect_gpu_product_names()
-    detected_gfx = ""
+    detected_gfx_target = ""
     if len(names) == 1 and names[0] not in PRODUCT_NAME_TO_SKU:
-        detected_gfx = detect_gpu_gfx_family() or ""
+        detected_gfx_target = detect_gpu_gfx_target() or ""
     if names:
         log("Detected GPU product name(s) from host:")
         for name in names:
             log(f"  - {name}")
-            append_product(cfg, name, detected_gfx)
+            append_product(cfg, name, detected_gfx_target)
 
+    host_facts_available = bool(names)
     if not cfg.skus:
         if gpu_type_override:
             log(f"Using GPU type override: {gpu_type_override}")
             input_key = gpu_type_override
         else:
-            gfx = detected_gfx or detect_gpu_gfx_family()
-            if gfx:
-                log(f"Detected GPU: {gfx}")
-                input_key = gfx
+            raw_gfx_target = detected_gfx_target or detect_gpu_gfx_target()
+            if raw_gfx_target:
+                log(f"Detected GPU gfx target: {raw_gfx_target}")
+                if cfg.has_offline_pin:
+                    pinned_targets = load_catalog().profiles[pinned_profile].targets
+                    target = normalise_gpu_type_key(raw_gfx_target)
+                    if target not in pinned_targets:
+                        raise InstallerError(
+                            f"Offline bundle profile pin {pinned_profile} is incompatible with "
+                            f"detected GPU gfx target {raw_gfx_target}."
+                        )
+                    row = resolve_gpu_config(fallback_key)
+                    cfg.append(
+                        SkuEntry(
+                            accelerator_key=row.accelerator_key,
+                            product_name="",
+                            image_profile=row.image_profile,
+                            accelerator_env=cfg.fallback_accelerator_env,
+                            quota_rate=row.quota_rate,
+                            display_name=row.display_name,
+                        )
+                    )
+                    host_facts_available = True
+                    input_key = ""
+                else:
+                    input_key = raw_gfx_target
+                    host_facts_available = True
+            elif cfg.has_offline_pin:
+                row = resolve_gpu_config(fallback_key)
+                cfg.append(
+                    SkuEntry(
+                        accelerator_key=row.accelerator_key,
+                        product_name="",
+                        image_profile=row.image_profile,
+                        accelerator_env=cfg.fallback_accelerator_env,
+                        quota_rate=row.quota_rate,
+                        display_name=row.display_name,
+                    )
+                )
+                log(
+                    "GPU host facts unavailable; using offline manifest fallback accelerator provisionally "
+                    f"({fallback_key}/{pinned_profile})."
+                )
+                host_facts_available = False
+                input_key = ""
             else:
                 input_key = "strix-halo"
                 log("GPU not detected, defaulting to strix-halo (gfx1151)")
-        accel_key, gpu_target, env, rate, display = resolve_gpu_config(input_key)
-        cfg.append(
-            SkuEntry(
-                accel_key=accel_key,
-                product_name="",
-                gpu_target=gpu_target,
-                accel_env=env,
-                quota_rate=rate,
-                display_name=display,
+        if input_key:
+            row = resolve_gpu_config(input_key)
+            cfg.append(
+                SkuEntry(
+                    accelerator_key=row.accelerator_key,
+                    product_name="",
+                    image_profile=row.image_profile,
+                    accelerator_env=row.accelerator_env,
+                    quota_rate=row.quota_rate,
+                    display_name=row.display_name,
+                )
             )
-        )
 
-    # Restore manifest-pinned primary if it diverged from host detection.
-    if pinned_target and pinned_target != cfg.gpu_target:
-        log(
-            f"Note: offline bundle was packed for {pinned_key}/{pinned_target}; "
-            f"host detected primary={cfg.accel_key}/{cfg.gpu_target}."
+    if cfg.has_offline_pin and any(sku.image_profile != pinned_profile for sku in cfg.skus):
+        raise InstallerError(
+            f"Offline bundle profile pin {pinned_profile} is incompatible with "
+            f"detected accelerator {cfg.accelerator_key}/{cfg.image_profile}."
         )
-        log(f"      Keeping bundle image tag ({pinned_target}); acceleratorKeys reflect host SKUs.")
-        cfg.accel_key = pinned_key
-        cfg.gpu_target = pinned_target
-        cfg.accel_env = pinned_env
+    if cfg.has_offline_pin and host_facts_available:
+        cfg.offline_pin_validated = True
 
     log(
-        f"  primary accelerator={cfg.accel_key}, GPU_TARGET={cfg.gpu_target}"
-        + (f", HSA_OVERRIDE={cfg.accel_env}" if cfg.accel_env else "")
+        f"  primary accelerator={cfg.accelerator_key}, image_profile={cfg.image_profile}"
+        + (f", HSA_OVERRIDE={cfg.accelerator_env}" if cfg.accelerator_env else "")
     )
     if len(cfg.skus) > 1:
-        extras = " ".join(s.accel_key for s in cfg.skus[1:])
+        extras = " ".join(s.accelerator_key for s in cfg.skus[1:])
         log(f"  additional SKUs: {extras}")
 
 
@@ -539,31 +564,46 @@ def _read_gpu_product_names_from_node_labels() -> list[str]:
 def refine_gpu_config_from_node_labels(cfg: GpuConfig) -> None:
     """Replace the SKU list with the labeller's authoritative version.
 
-    Safe to call from any code path holding a working ``kubectl``; no-op
-    when kubectl is missing or labels are unavailable.
+    Safe to call from any code path holding a working ``kubectl``. An offline
+    manifest pin that lacks host validation requires labeller labels before
+    installation can proceed.
     """
     names = _read_gpu_product_names_from_node_labels()
     if not names:
+        if cfg.has_offline_pin and not cfg.offline_pin_validated:
+            raise InstallerError(
+                "Offline bundle pin could not be validated: GPU host facts and ROCm labeller labels are unavailable."
+            )
         return
 
-    prev_keys = " ".join(s.accel_key for s in cfg.skus)
-    pinned_target = cfg.gpu_target
-    pinned_env = cfg.accel_env
+    prev_keys = " ".join(s.accelerator_key for s in cfg.skus)
 
-    cfg.reset()
+    refreshed = GpuConfig()
     for n in names:
-        append_product(cfg, n, pinned_target)
+        append_product(refreshed, n)
+
+    if cfg.has_offline_pin and any(sku.image_profile != cfg.pinned_image_profile for sku in refreshed.skus):
+        profiles = ", ".join(sorted({sku.image_profile for sku in refreshed.skus}))
+        raise InstallerError(
+            f"Offline bundle profile pin {cfg.pinned_image_profile} "
+            f"is incompatible with ROCm labeller profile(s): {profiles}."
+        )
+
+    cfg.skus = refreshed.skus
+    cfg.accelerator_key = refreshed.accelerator_key
+    cfg.image_profile = refreshed.image_profile
+    cfg.accelerator_env = refreshed.accelerator_env
+    cfg.gpu_product_name = refreshed.gpu_product_name
 
     log("Refreshed GPU SKUs from node labels (ROCm labeller is authoritative):")
     log("  product names    : " + ", ".join(names))
-    log("  resolved SKU keys: " + " ".join(s.accel_key for s in cfg.skus))
+    log("  resolved accelerator keys: " + " ".join(s.accelerator_key for s in cfg.skus))
 
-    if pinned_target and pinned_target != cfg.gpu_target:
-        log(f"  note: image target was {pinned_target}, labeller-refined primary is {cfg.gpu_target}")
-    # Preserve HSA override if labeller refinement erased it (e.g. phx with no rocminfo).
-    if not cfg.accel_env and pinned_env:
-        cfg.accel_env = pinned_env
+    if cfg.has_offline_pin:
+        cfg.offline_pin_validated = True
+        if not cfg.accelerator_env and cfg.fallback_accelerator_env:
+            cfg.accelerator_env = cfg.fallback_accelerator_env
 
-    new_keys = " ".join(s.accel_key for s in cfg.skus)
+    new_keys = " ".join(s.accelerator_key for s in cfg.skus)
     if prev_keys != new_keys:
         log(f"  SKU list changed: [{prev_keys}] → [{new_keys}]")
