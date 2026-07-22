@@ -35,6 +35,8 @@ on:
         default: 'strix-halo'
         type: choice
         options:
+          - phx          # gfx1103 — Radeon 780M / Phoenix
+          - strix        # gfx1150 — Radeon 890M / Strix
           - strix-halo   # gfx1151 — Ryzen AI Max+ 395 / Max 390
           - '9060'       # gfx1200 — Radeon RX 9060
           - 9060xt       # gfx1200 — Radeon RX 9060 XT
@@ -70,6 +72,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - image_profile: gfx1103
+            gpu_type: phx
+          - image_profile: gfx1150
+            gpu_type: strix
           - image_profile: gfx1151
             gpu_type: strix-halo
           - image_profile: gfx1200
