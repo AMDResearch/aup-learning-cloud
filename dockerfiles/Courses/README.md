@@ -33,7 +33,7 @@ Course images remain notebook and course focused. Browser coding environments ar
 Use the existing course target for course notebook images:
 
 ```bash
-make -C dockerfiles courses GPU_TARGET=gfx1151
+make -C dockerfiles courses AUP_IMAGE_PROFILE=gfx1151
 ```
 
 Course resources should land on their course content. Set each official course
@@ -55,6 +55,6 @@ Use the code targets only for generic code-server environments:
 
 ```bash
 make -C dockerfiles code-cpu
-make -C dockerfiles code-gpu GPU_TARGET=gfx1151
+make -C dockerfiles code-gpu AUP_IMAGE_PROFILE=gfx1151
 make -C dockerfiles code
 ```

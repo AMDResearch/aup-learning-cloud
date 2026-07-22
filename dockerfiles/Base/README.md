@@ -23,61 +23,50 @@ SOFTWARE.
 
 ## GPU Base Image (`Dockerfile.rocm`)
 
-Multi-target ROCm GPU base image. Set `GPU_TARGET` to build for any supported architecture.
-`Dockerfile.rocm` tracks the current course-image baseline: ROCm 7.13.0 Core SDK
-from AMD's Ubuntu 24.04 apt repository, plus ROCm-enabled PyTorch wheels.
+Multi-profile ROCm GPU base image. `Dockerfile.rocm` is standalone when built
+from the repository root: pass an optional `AUP_IMAGE_PROFILE` directly to
+`docker build`, or omit it to use the canonical catalog default (`gfx1151`). It
+tracks ROCm 7.14.0 TheRock Core SDK packages from AMD's multi-architecture
+Ubuntu 24.04 repository and matching ROCm-enabled PyTorch wheels.
 
-### Supported Targets
+### Profiles and Targets
 
-| GPU_TARGET    | Arch     | GPUs                            | Pip wheel path (derived) |
-|---------------|----------|---------------------------------|--------------------------|
-| gfx110x       | RDNA 3   | gfx1100/1101/1102/1103 (dGPU)   | gfx110X-all              |
-| gfx1150       | RDNA 3.5 | Strix (Radeon 890M)             | gfx1150                  |
-| gfx1151       | RDNA 3.5 | Strix Halo (Radeon 8060S)       | gfx1151                  |
-| gfx1152       | RDNA 3.5 | Ryzen AI 300-series iGPU        | gfx1152                  |
-| gfx120x       | RDNA 4   | gfx1201 (dGPU: RX 9070 XT, R9700, RX 9600 GRE, …) | gfx120X-all |
+An **image profile** is the user-facing build and image-tag selection. A
+**target** is the concrete GPU architecture selected by that profile. The
+catalog currently defines one target per profile, but consumers must pass a
+profile and let the resolver select artifacts and tag suffixes.
 
-The `GPU_TARGET` value selects the PyTorch wheel bucket and becomes the
-image-tag suffix. The ROCm SDK is installed from the matching arch-specific
-`amdrocm-core-sdk7.13-<ROCM_SDK_TARGET>` apt package to avoid pulling every
-supported architecture into each image. Generic image buckets use the matching
-generic SDK target, for example `gfx110x` and `gfx120x`.
+| AUP_IMAGE_PROFILE | Current resolved target | Image tag suffix |
+|-------------------|-------------------------|------------------|
+| gfx1151 | gfx1151 | gfx1151 |
+| gfx1200 | gfx1200 | gfx1200 |
+| gfx1201 | gfx1201 | gfx1201 |
 
-The pip wheel index at <https://repo.amd.com/rocm/whl/> uses the "long"
-`gfxNNNX-all` path for the generic RDNA 3 / RDNA 4 buckets; `Dockerfile.rocm`
-maps short → long automatically. CI passes `PYTORCH_WHL_TARGET` and
-`ROCM_SDK_TARGET` explicitly (see `.github/build-config.json`).
-
-The baseline PyTorch stack follows AMD's ROCm 7.13.0 wheel set while keeping
-the existing course-facing framework versions: `torch==2.9.1+rocm7.13.0`,
-`torchvision==0.24.0+rocm7.13.0`, and `torchaudio==2.9.0+rocm7.13.0`.
+`auplc_installer/data/rocm-7.14-profiles.json` is the canonical catalog.
+`dockerfiles/Base/rocm-targets.py` resolves a profile to its complete
+BuildPlan: the APT signing key and source, Core SDK package, wheel index, exact
+Torch and TorchVision requirements, and TorchAudio requirement. The Dockerfile
+copies the catalog, resolver module, and CLI into the image build context, so
+raw repository-root Docker builds remain self-resolving. Do not construct
+package names or wheel extras in Docker, Make, or CI.
 
 ### Build
 
 ```bash
-# Default target (gfx1151 = Strix Halo)
-docker build -t ghcr.io/amdresearch/auplc-base:latest --file Dockerfile.rocm .
+# From the repository root: default image profile (gfx1151)
+docker build -f dockerfiles/Base/Dockerfile.rocm \
+  -t ghcr.io/amdresearch/auplc-base:latest .
 
-# Specific target
-docker build --build-arg GPU_TARGET=gfx120x \
-  --build-arg ROCM_SDK_TARGET=gfx1201 \
-  -t ghcr.io/amdresearch/auplc-base:latest-gfx120x --file Dockerfile.rocm .
+# Specific image profile
+docker build -f dockerfiles/Base/Dockerfile.rocm \
+  --build-arg AUP_IMAGE_PROFILE=gfx1200 \
+  -t ghcr.io/amdresearch/auplc-base:latest-gfx1200 .
 
 # Using make (from dockerfiles/ directory)
-make base-rocm                         # default target
-make base-rocm GPU_TARGET=gfx120x      # RDNA 4 desktop GPUs
-make base-rocm GPU_TARGET=gfx110x      # RDNA 3 desktop GPUs
-make base-rocm GPU_TARGET=gfx1152      # Ryzen AI 300-series iGPU
-```
-
-### Override PyTorch Wheel URL
-
-For edge cases, override the derived PyTorch wheel URL directly:
-
-```bash
-docker build \
-  --build-arg PYTORCH_INDEX_URL=https://custom.url/whl/ \
-  --file Dockerfile.rocm .
+make base-rocm                                      # catalog default
+make base-rocm AUP_IMAGE_PROFILE=gfx1200
+make code-gpu AUP_IMAGE_PROFILE=gfx1201
+make courses AUP_IMAGE_PROFILE=gfx1200
 ```
 
 ## CPU Base Image (`Dockerfile.cpu`)
@@ -119,7 +108,7 @@ The base images remain the foundation for notebook and coding environments. Gene
 ```bash
 # From the repository root
 make -C dockerfiles code-cpu
-make -C dockerfiles code-gpu GPU_TARGET=gfx1151
+make -C dockerfiles code-gpu AUP_IMAGE_PROFILE=gfx1151
 make -C dockerfiles code
 ```
 
