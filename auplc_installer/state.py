@@ -17,10 +17,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from auplc_installer.catalog import CourseSelection
-from auplc_installer.gpu import GpuConfig
+from auplc_installer.gpu import GpuConfig, resolve_gpu_config
 from auplc_installer.helm import RuntimePaths
 from auplc_installer.k3s import K3S_IMAGES_DIR
 from auplc_installer.manifest import detect_offline_bundle
+from auplc_installer.util import InstallerError
 
 DEFAULT_IMAGE_REGISTRY = "ghcr.io/amdresearch"
 DEFAULT_IMAGE_TAG = "latest"
@@ -98,8 +99,9 @@ class InstallerState:
             state.courses = parse_selection_spec(spec)
 
         # Offline bundle detection. When a bundle is present, the bundle's
-        # manifest pins the primary GPU/image-tag/registry that the bundle
-        # was built for; we honour those over environment defaults.
+        # manifest pins the image profile/image-tag/registry that the bundle
+        # was built for; the accelerator remains a provisional fallback until
+        # the ROCm labeller provides the authoritative product name.
         m = detect_offline_bundle(script_dir)
         if m is not None:
             state.offline_mode = True
@@ -111,13 +113,20 @@ class InstallerState:
                 state.image_registry = m.image_registry
             if m.image_tag:
                 state.image_tag = m.image_tag
-            if m.gpu_target:
-                state.gpu.gpu_target = m.gpu_target
-                state.gpu.accel_key = m.accel_key
-                state.gpu.accel_env = m.accel_env
-                msg = f"  GPU config: accelerator={state.gpu.accel_key}, GPU_TARGET={state.gpu.gpu_target}"
-                if state.gpu.accel_env:
-                    msg += f", HSA_OVERRIDE={state.gpu.accel_env}"
+            if m.image_profile:
+                row = resolve_gpu_config(m.accelerator_key)
+                if row.accelerator_key != m.accelerator_key:
+                    raise InstallerError("Offline manifest accelerator_key must be a canonical accelerator key.")
+                if row.image_profile != m.image_profile or row.accelerator_env != m.accelerator_env:
+                    raise InstallerError(
+                        "Offline manifest accelerator configuration does not match its pinned image profile."
+                    )
+                state.gpu.fallback_accelerator_key = row.accelerator_key
+                state.gpu.pinned_image_profile = m.image_profile
+                state.gpu.fallback_accelerator_env = m.accelerator_env
+                msg = f"  GPU profile pin: image_profile={m.image_profile}, fallback accelerator={row.accelerator_key}"
+                if m.accelerator_env:
+                    msg += f", HSA_OVERRIDE={m.accelerator_env}"
                 print(msg, flush=True)
 
         return state
