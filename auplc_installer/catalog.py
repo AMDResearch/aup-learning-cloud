@@ -29,7 +29,7 @@ class Course:
     pull_custom_images / pack_save_custom_images_*.
 
     ``gpu_required`` decides image-tag style:
-      * 1 → tagged ``:<IMAGE_TAG>-<gpu_target>`` (gfx-specific build)
+      * 1 → tagged ``:<IMAGE_TAG>-<image_profile>`` (profile-specific build)
       * 0 → tagged ``:<IMAGE_TAG>`` (plain build)
 
     ``make_target`` is the target name in dockerfiles/Makefile.

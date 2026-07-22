@@ -140,7 +140,7 @@ def local_image_build(
 
     cmd = [
         "make",
-        f"GPU_TARGET={cfg.gpu_target}",
+        f"AUP_IMAGE_PROFILE={cfg.image_profile}",
         f"SAVE_IMAGES={save_images_for_make}",
         f"K3S_IMAGES_DIR={images_dir_for_make}",
         f"MIRROR_PREFIX={mirror_prefix}",
@@ -170,10 +170,10 @@ def pull_custom_images(
     """Mirrors bash ``pull_custom_images``."""
     require_command("docker")
 
-    tag = f"{image_tag}-{cfg.gpu_target}"
+    tag = f"{image_tag}-{cfg.image_profile}"
     log_section(
         "Pulling pre-built custom images from registry...\n"
-        f"  GPU_TARGET={cfg.gpu_target}, tag={tag}\n"
+        f"  AUP_IMAGE_PROFILE={cfg.image_profile}, tag={tag}\n"
         f"  Courses: {courses.description()}"
     )
 
