@@ -33,7 +33,7 @@ AUP Learning Cloud is a tailored JupyterHub deployment designed to provide an in
 The simplest way to deploy AUP Learning Cloud on a single machine in a development or demo environment.
 
 ### Prerequisites
-- **Hardware**: Supported **Ryzen AI 300 series and above** APUs and **Radeon 9000 series** PCIe GPUs.
+- **Hardware**: Supported products are **AMD Radeon 8060S (Strix Halo, gfx1151)**; **Radeon RX 9060 and RX 9060 XT (gfx1200)**; and **Radeon RX 9070, Radeon RX 9070 XT, and Radeon AI PRO R9700 (gfx1201)**.
 - **Memory**: 32GB+ RAM (64GB recommended)
 - **Storage**: 500GB+ SSD
 - **OS**: Ubuntu 24.04.4 LTS
@@ -60,7 +60,7 @@ sudo apt install build-essential
 sudo apt install python3-questionary python3-prompt-toolkit
 ```
 
-> **Kernel note** (Ryzen AI APU only): The OEM kernel package follows AMD ROCm's Ryzen APU installation guidance for Ubuntu 24.04. See the [ROCm 7.13.0 preview installation guide for Ryzen APUs](https://rocm.docs.amd.com/en/7.13.0-preview/install/rocm.html?fam=ryzen&w=compute&os=ubuntu&ubuntu-ver=24.04&i=pkgman&gpu=max-pro-395&gfx=gfx1151) for details. Radeon dGPU systems typically use the stock Ubuntu kernel—check ROCm docs for your GPU.
+> **Kernel note** (Radeon 8060S / Strix Halo APU only): The OEM kernel package above provides the host-kernel support required by ROCm on Ubuntu 24.04; AUP Learning Cloud images provide ROCm userspace separately. See the [ROCm 7.14.0 package-manager installation guide for Ryzen APUs](https://rocm.docs.amd.com/en/docs-7.14.0/install/rocm.html?fam=ryzen&w=compute&os=ubuntu&i=pkgman&gpu=max-pro-390&gfx=gfx1151&ubuntu-ver=24.04) for details. Radeon dGPU systems typically use the stock Ubuntu kernel—check ROCm compatibility and installation guidance for your GPU.
 >
 > **Docker note**: See [Docker Post-installation Steps](https://docs.docker.com/engine/install/linux-postinstall/) and [Install Docker Engine on Ubuntu](https://docs.docker.com/engine/install/ubuntu/) for details.
 >
@@ -185,7 +185,7 @@ The `auplc-default`, `auplc-base`, and `Course-*` images remain notebook and cou
 Build the images:
 
 ```bash
-./auplc-installer img build base-rocm --gpu=strix
+./auplc-installer img build base-rocm --gpu=strix-halo
 ```
 
 The code-server container starts on port `8888` with `code-server --auth none`. This is safe only when the user pod is reachable exclusively through JupyterHub and the JupyterHub proxy authentication boundary. Do not expose the code-server pod port directly through a NodePort, LoadBalancer, ingress, or other unauthenticated route.
