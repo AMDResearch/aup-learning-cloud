@@ -16,16 +16,17 @@ MIRROR_PREFIX ?=
 MIRROR_PIP ?=
 MIRROR_NPM ?=
 
-# GPU target architecture (short AMD apt-repo name; e.g. gfx110x, gfx1150,
-# gfx1151, gfx1152, gfx120x). Dockerfile.rocm maps this to the corresponding pip
-# wheel path (gfx110X-all / gfx120X-all for the RDNA 3 / RDNA 4 buckets).
-GPU_TARGET ?= gfx1151
-
-ROCM_SDK_TARGET ?= $(GPU_TARGET)
+# Image profiles and their tag suffixes come from the canonical ROCm catalog.
+ROCM_PROFILE_RESOLVER := Base/rocm-targets.py
+DEFAULT_AUP_IMAGE_PROFILE := $(shell python3 $(ROCM_PROFILE_RESOLVER) resolve-profile --format lines | awk -F= '$$1 == "PROFILE" { print $$2 }')
+ifeq ($(strip $(AUP_IMAGE_PROFILE)),)
+override AUP_IMAGE_PROFILE := $(DEFAULT_AUP_IMAGE_PROFILE)
+endif
+PROFILE_TAG_SUFFIX := $(shell python3 $(ROCM_PROFILE_RESOLVER) resolve-profile "$(AUP_IMAGE_PROFILE)" --format lines | awk -F= '$$1 == "TAG_SUFFIX" { print $$2 }')
 
 # GPU base image used by course Dockerfiles (override to track a specific version)
-GPU_BASE_IMAGE ?= ghcr.io/amdresearch/auplc-base:latest
-CODE_GPU_BASE_IMAGE ?= ghcr.io/amdresearch/auplc-base:latest-$(GPU_TARGET)
+GPU_BASE_IMAGE ?= ghcr.io/amdresearch/auplc-base:latest-$(PROFILE_TAG_SUFFIX)
+CODE_GPU_BASE_IMAGE ?= ghcr.io/amdresearch/auplc-base:latest-$(PROFILE_TAG_SUFFIX)
 
 # Build args for docker build (constructed from mirror settings)
 BUILD_ARGS :=
@@ -40,7 +41,7 @@ ifneq ($(MIRROR_NPM),)
   BUILD_ARGS += --build-arg NPM_REGISTRY=$(MIRROR_NPM)
 endif
 
-.PHONY: all base base-cpu base-rocm base-gfx1151 hub code code-cpu code-gpu courses cv dl llm physim verify-resource-contracts
+.PHONY: all base base-cpu base-rocm hub code code-cpu code-gpu courses cv dl llm physim verify-resource-contracts
 
 # Build all images
 all: base hub code courses
@@ -63,18 +64,17 @@ base-cpu:
 
 base-rocm:
 	@echo "-------------------------------------------"; \
-	 	echo "Building Base Image (rocm, GPU_TARGET=$(GPU_TARGET))..."; \
+		echo "Building Base Image (rocm, AUP_IMAGE_PROFILE=$(AUP_IMAGE_PROFILE))..."; \
 		echo "-------------------------------------------";
 
 	docker build $(BUILD_ARGS) \
-		--build-arg GPU_TARGET=$(GPU_TARGET) \
-		--build-arg ROCM_SDK_TARGET=$(ROCM_SDK_TARGET) \
+		--build-arg AUP_IMAGE_PROFILE="$(AUP_IMAGE_PROFILE)" \
 		$(if $(MIRROR_PREFIX),--build-arg BASE_IMAGE=$(MIRROR_PREFIX)/docker.io/library/ubuntu:24.04,) \
-		-t ghcr.io/amdresearch/auplc-base:latest --file Base/Dockerfile.rocm ..
-	docker tag ghcr.io/amdresearch/auplc-base:latest ghcr.io/amdresearch/auplc-base:latest-$(GPU_TARGET)
-
-# Deprecated alias — use base-rocm instead
-base-gfx1151: base-rocm
+		-t ghcr.io/amdresearch/auplc-base:latest-$(PROFILE_TAG_SUFFIX) --file Base/Dockerfile.rocm ..
+	if [ "$(AUP_IMAGE_PROFILE)" = "$(DEFAULT_AUP_IMAGE_PROFILE)" ]; then \
+		docker tag ghcr.io/amdresearch/auplc-base:latest-$(PROFILE_TAG_SUFFIX) ghcr.io/amdresearch/auplc-base:latest; \
+	fi
+	$(MAKE) save-image IMAGE=ghcr.io/amdresearch/auplc-base:latest-$(PROFILE_TAG_SUFFIX)
 
 # --- Hub Image ---
 hub:
@@ -106,16 +106,17 @@ code-cpu:
 
 code-gpu:
 	@echo "-------------------------------------------"; \
-		echo "Building Code GPU Image (GPU_TARGET=$(GPU_TARGET))..."; \
+		echo "Building Code GPU Image (AUP_IMAGE_PROFILE=$(AUP_IMAGE_PROFILE))..."; \
 		echo "-------------------------------------------";
 
 	cd Code && IMAGE_FLAVOR=gpu \
-		BASE_IMAGE=$(CODE_GPU_BASE_IMAGE) \
+		BASE_IMAGE="$(CODE_GPU_BASE_IMAGE)" \
 		NODE_IMAGE="$(if $(MIRROR_PREFIX),$(MIRROR_PREFIX)/docker.io/library/node:22-bookworm-slim,)" \
 		NPM_REGISTRY="$(MIRROR_NPM)" \
 		bash ./build.sh
-	docker tag ghcr.io/amdresearch/auplc-code-gpu:latest ghcr.io/amdresearch/auplc-code-gpu:latest-$(GPU_TARGET)
-	$(MAKE) save-image IMAGE=ghcr.io/amdresearch/auplc-code-gpu:latest
+	docker tag ghcr.io/amdresearch/auplc-code-gpu:latest ghcr.io/amdresearch/auplc-code-gpu:latest-$(PROFILE_TAG_SUFFIX)
+	if [ "$(AUP_IMAGE_PROFILE)" != "$(DEFAULT_AUP_IMAGE_PROFILE)" ]; then docker image rm ghcr.io/amdresearch/auplc-code-gpu:latest; fi
+	$(MAKE) save-image IMAGE=ghcr.io/amdresearch/auplc-code-gpu:latest-$(PROFILE_TAG_SUFFIX)
 
 # --- Course Images ---
 courses: cv dl llm physim
@@ -125,36 +126,40 @@ cv:
 		echo "Building CV Course Image..."; \
 		echo "-------------------------------------------";
 
-	cd Courses/CV && BASE_IMAGE=$(GPU_BASE_IMAGE) bash ./build.sh
-	docker tag ghcr.io/amdresearch/auplc-cv:latest ghcr.io/amdresearch/auplc-cv:latest-$(GPU_TARGET)
-	$(MAKE) save-image IMAGE=ghcr.io/amdresearch/auplc-cv:latest
+	cd Courses/CV && BASE_IMAGE="$(GPU_BASE_IMAGE)" bash ./build.sh
+	docker tag ghcr.io/amdresearch/auplc-cv:latest ghcr.io/amdresearch/auplc-cv:latest-$(PROFILE_TAG_SUFFIX)
+	if [ "$(AUP_IMAGE_PROFILE)" != "$(DEFAULT_AUP_IMAGE_PROFILE)" ]; then docker image rm ghcr.io/amdresearch/auplc-cv:latest; fi
+	$(MAKE) save-image IMAGE=ghcr.io/amdresearch/auplc-cv:latest-$(PROFILE_TAG_SUFFIX)
 
 dl:
 	@echo "-------------------------------------------"; \
 		echo "Building DL Course Image..."; \
 		echo "-------------------------------------------";
 
-	cd Courses/DL && BASE_IMAGE=$(GPU_BASE_IMAGE) bash ./build.sh
-	docker tag ghcr.io/amdresearch/auplc-dl:latest ghcr.io/amdresearch/auplc-dl:latest-$(GPU_TARGET)
-	$(MAKE) save-image IMAGE=ghcr.io/amdresearch/auplc-dl:latest
+	cd Courses/DL && BASE_IMAGE="$(GPU_BASE_IMAGE)" bash ./build.sh
+	docker tag ghcr.io/amdresearch/auplc-dl:latest ghcr.io/amdresearch/auplc-dl:latest-$(PROFILE_TAG_SUFFIX)
+	if [ "$(AUP_IMAGE_PROFILE)" != "$(DEFAULT_AUP_IMAGE_PROFILE)" ]; then docker image rm ghcr.io/amdresearch/auplc-dl:latest; fi
+	$(MAKE) save-image IMAGE=ghcr.io/amdresearch/auplc-dl:latest-$(PROFILE_TAG_SUFFIX)
 
 llm:
 	@echo "-------------------------------------------"; \
 		echo "Building LLM Course Image..."; \
 		echo "-------------------------------------------";
 
-	cd Courses/LLM && BASE_IMAGE=$(GPU_BASE_IMAGE) bash ./build.sh
-	docker tag ghcr.io/amdresearch/auplc-llm:latest ghcr.io/amdresearch/auplc-llm:latest-$(GPU_TARGET)
-	$(MAKE) save-image IMAGE=ghcr.io/amdresearch/auplc-llm:latest
+	cd Courses/LLM && BASE_IMAGE="$(GPU_BASE_IMAGE)" bash ./build.sh
+	docker tag ghcr.io/amdresearch/auplc-llm:latest ghcr.io/amdresearch/auplc-llm:latest-$(PROFILE_TAG_SUFFIX)
+	if [ "$(AUP_IMAGE_PROFILE)" != "$(DEFAULT_AUP_IMAGE_PROFILE)" ]; then docker image rm ghcr.io/amdresearch/auplc-llm:latest; fi
+	$(MAKE) save-image IMAGE=ghcr.io/amdresearch/auplc-llm:latest-$(PROFILE_TAG_SUFFIX)
 
 physim:
 	@echo "-------------------------------------------"; \
 		echo "Building PhySim Course Image..."; \
 		echo "-------------------------------------------";
 
-	cd Courses/PhySim && BASE_IMAGE=$(GPU_BASE_IMAGE) bash ./build.sh
-	docker tag ghcr.io/amdresearch/auplc-physim:latest ghcr.io/amdresearch/auplc-physim:latest-$(GPU_TARGET)
-	$(MAKE) save-image IMAGE=ghcr.io/amdresearch/auplc-physim:latest
+	cd Courses/PhySim && BASE_IMAGE="$(GPU_BASE_IMAGE)" bash ./build.sh
+	docker tag ghcr.io/amdresearch/auplc-physim:latest ghcr.io/amdresearch/auplc-physim:latest-$(PROFILE_TAG_SUFFIX)
+	if [ "$(AUP_IMAGE_PROFILE)" != "$(DEFAULT_AUP_IMAGE_PROFILE)" ]; then docker image rm ghcr.io/amdresearch/auplc-physim:latest; fi
+	$(MAKE) save-image IMAGE=ghcr.io/amdresearch/auplc-physim:latest-$(PROFILE_TAG_SUFFIX)
 
 # --- Export Images ---
 save-image:
