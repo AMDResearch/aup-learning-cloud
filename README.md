@@ -33,7 +33,7 @@ AUP Learning Cloud is a tailored JupyterHub deployment designed to provide an in
 The simplest way to deploy AUP Learning Cloud on a single machine in a development or demo environment.
 
 ### Prerequisites
-- **Hardware**: Supported products are **AMD Radeon 8060S (Strix Halo, gfx1151)**; **Radeon RX 9060 and RX 9060 XT (gfx1200)**; and **Radeon RX 9070, Radeon RX 9070 XT, and Radeon AI PRO R9700 (gfx1201)**.
+- **Hardware**: Supported runtime products are **AMD Radeon 780M (Phoenix, gfx1103)**; **AMD Radeon 890M (Strix, gfx1150)**; **AMD Radeon 8060S (Strix Halo, gfx1151)**; **Radeon RX 9060 and RX 9060 XT (gfx1200)**; and **Radeon RX 9070, Radeon RX 9070 XT, and Radeon AI PRO R9700 (gfx1201)**. The `gfx1152` profile is build-only and has no runtime accelerator mapping.
 - **Memory**: 32GB+ RAM (64GB recommended)
 - **Storage**: 500GB+ SSD
 - **OS**: Ubuntu 24.04.4 LTS
@@ -185,8 +185,13 @@ The `auplc-default`, `auplc-base`, and `Course-*` images remain notebook and cou
 Build the images:
 
 ```bash
+# Runtime accelerator selections: phx, strix, strix-halo, 9060, 9060xt, 9070, 9070xt, r9700
 ./auplc-installer img build base-rocm --gpu=strix-halo
 ```
+
+The ROCm catalog builds the concrete profiles `gfx1103`, `gfx1150`, `gfx1151`,
+`gfx1152`, `gfx1200`, and `gfx1201`; `gfx1151` is the default. `gfx1152` is
+build-only and is not an installer accelerator or offline bundle target.
 
 The code-server container starts on port `8888` with `code-server --auth none`. This is safe only when the user pod is reachable exclusively through JupyterHub and the JupyterHub proxy authentication boundary. Do not expose the code-server pod port directly through a NodePort, LoadBalancer, ingress, or other unauthenticated route.
 

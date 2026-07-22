@@ -18,6 +18,8 @@ ROOT = Path(__file__).resolve().parents[2]
 DOCKERFILE = ROOT / "dockerfiles" / "Base" / "Dockerfile.rocm"
 MAKEFILE_DIRECTORY = ROOT / "dockerfiles"
 README = ROOT / "dockerfiles" / "Base" / "README.md"
+CODE_README = ROOT / "dockerfiles" / "Code" / "README.md"
+ROOT_README = ROOT / "README.md"
 RESOLVER = ROOT / "dockerfiles" / "Base" / "rocm-targets.py"
 WORKFLOW = ROOT / ".github" / "workflows" / "docker-build.yml"
 
@@ -137,3 +139,12 @@ def test_base_readme_describes_profiles_without_aggregate_target_aliases() -> No
         assert profile in readme
     for obsolete_name in ("GPU_TARGET", "gfx120x", "gfx110x", "ROCM_SDK_TARGET", "PYTORCH_WHL_TARGET"):
         assert obsolete_name not in readme
+
+
+def test_user_facing_readmes_distinguish_build_profiles_from_runtime_accelerators() -> None:
+    for readme in (ROOT_README, README, CODE_README):
+        text = readme.read_text(encoding="utf-8")
+        for profile in list_profiles():
+            assert profile in text
+        assert "gfx1152" in text
+        assert "build-only" in text

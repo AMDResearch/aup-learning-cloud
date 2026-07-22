@@ -50,7 +50,12 @@ make -C dockerfiles code-gpu AUP_IMAGE_PROFILE=gfx1151
 make -C dockerfiles code
 ```
 
-`code-cpu` builds `ghcr.io/amdresearch/auplc-code-cpu:latest`. `code-gpu` builds `ghcr.io/amdresearch/auplc-code-gpu:latest` and tags the selected image profile (`gfx1151`, `gfx1200`, or `gfx1201`), for example `ghcr.io/amdresearch/auplc-code-gpu:latest-gfx1151`. The aggregate `code` target builds both.
+`code-cpu` builds `ghcr.io/amdresearch/auplc-code-cpu:latest`. `code-gpu` builds
+`ghcr.io/amdresearch/auplc-code-gpu:latest` and tags the selected image profile
+(`gfx1103`, `gfx1150`, `gfx1151`, `gfx1152`, `gfx1200`, or `gfx1201`), for
+example `ghcr.io/amdresearch/auplc-code-gpu:latest-gfx1151`. The aggregate
+`code` target builds both. `gfx1152` is build-only and is not exposed as a
+runtime accelerator or offline bundle target.
 
 The Dockerfile pins code-server to version `4.96.4` so builds use a known editor runtime instead of silently changing when a new upstream release appears.
 
