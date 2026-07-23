@@ -1,10 +1,12 @@
-# Optional dependencies that improve the auplc-installer TUI experience.
-# Without these the installer falls back to a stdlib-only numbered menu.
+# Runtime and optional dependencies for auplc-installer.
+# PyYAML loads the canonical ROCm catalog; without the TUI packages the installer
+# falls back to a stdlib-only numbered menu.
 #
 # Install with:
 #   pip install -r requirements-installer.txt
 # Or, equivalently, via pyproject.toml's optional-dependencies group:
 #   pip install -e .[installer]
 
+PyYAML==6.0.3
 questionary>=2.0.1
 prompt_toolkit>=3.0.43

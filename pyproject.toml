@@ -22,6 +22,9 @@ name = "aup-learning-cloud"
 version = "0.1.0"
 description = "AUP Learning Cloud - JupyterHub deployment for AI education"
 requires-python = ">=3.10"
+dependencies = [
+    "PyYAML==6.0.3",
+]
 
 [project.optional-dependencies]
 # Optional packages for the TUI installer (auplc-installer tui).
@@ -32,7 +35,6 @@ installer = [
 ]
 test = [
     "pytest>=8.0",
-    "pyyaml>=6.0",
 ]
 
 [tool.pytest.ini_options]
