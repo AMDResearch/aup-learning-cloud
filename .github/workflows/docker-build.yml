@@ -30,8 +30,10 @@ on:
       - 'runtime/shared/**'
       - 'runtime/code-server/**'
       - 'projects/**'
-      - 'auplc_installer/data/rocm-7.14-profiles.json'
+      - 'auplc_installer/data/rocm-profiles.yaml'
       - 'auplc_installer/rocm_profiles.py'
+      - 'requirements-installer.txt'
+      - 'pyproject.toml'
       - 'dockerfiles/Base/rocm-targets.py'
       - '.github/workflows/docker-build.yml'
   pull_request:
@@ -43,8 +45,10 @@ on:
       - 'runtime/shared/**'
       - 'runtime/code-server/**'
       - 'projects/**'
-      - 'auplc_installer/data/rocm-7.14-profiles.json'
+      - 'auplc_installer/data/rocm-profiles.yaml'
       - 'auplc_installer/rocm_profiles.py'
+      - 'requirements-installer.txt'
+      - 'pyproject.toml'
       - 'dockerfiles/Base/rocm-targets.py'
       - '.github/workflows/docker-build.yml'
   workflow_dispatch:
@@ -110,6 +114,9 @@ jobs:
       base-gpu-image: ${{ steps.names.outputs.base-gpu }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install signed PyYAML package for ROCm catalog resolver
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends python3-yaml
 
       - name: Set registry prefix
         id: registry
@@ -189,8 +196,10 @@ jobs:
               - 'runtime/hub/frontend/tsconfig.base.json'
             base-gpu:
               - 'dockerfiles/Base/Dockerfile.rocm'
-              - 'auplc_installer/data/rocm-7.14-profiles.json'
+              - 'auplc_installer/data/rocm-profiles.yaml'
               - 'auplc_installer/rocm_profiles.py'
+              - 'requirements-installer.txt'
+              - 'pyproject.toml'
               - 'dockerfiles/Base/rocm-targets.py'
               - 'runtime/notebook/**'
               - 'runtime/shared/**'
@@ -465,6 +474,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Install signed PyYAML package for ROCm catalog resolver
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends python3-yaml
+
       - name: Free disk space
         uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be
         with:
@@ -627,6 +639,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Install signed PyYAML package for ROCm catalog resolver
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends python3-yaml
+
       - name: Free disk space
         uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be
         with:
@@ -760,6 +775,9 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Install signed PyYAML package for ROCm catalog resolver
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends python3-yaml
 
       - name: Free disk space
         uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be
