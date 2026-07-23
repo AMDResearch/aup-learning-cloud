@@ -49,7 +49,10 @@ All six profiles are buildable through the catalog. `gfx1152` is build-only:
 it has no runtime accelerator or ROCm labeller product mapping. Runtime bundles
 are produced for `gfx1103`, `gfx1150`, `gfx1151`, `gfx1200`, and `gfx1201`.
 
-`auplc_installer/data/rocm-7.14-profiles.json` is the canonical catalog.
+`auplc_installer/data/rocm-profiles.yaml` is the stable canonical catalog for
+one active rolling TheRock/ROCm baseline. Replace it atomically after
+qualification with its artifact facts and provenance evidence; it is not a
+runtime ROCm version selector.
 `dockerfiles/Base/rocm-targets.py` resolves a profile to its complete
 BuildPlan: the APT signing key and source, Core SDK package, wheel index, exact
 Torch and TorchVision requirements, and TorchAudio requirement. The Dockerfile

@@ -38,7 +38,8 @@ The simplest way to deploy AUP Learning Cloud on a single machine in a developme
 - **Storage**: 500GB+ SSD
 - **OS**: Ubuntu 24.04.4 LTS
 - **Docker**: Install Docker and configure for non-root access
-- **TUI deps**: `python3-questionary` and `python3-prompt-toolkit` (apt) for the recommended interactive installer; conda/venv users use `pip install questionary prompt_toolkit`
+- **Installer dependency**: `python3-yaml` (apt) is required for source-checkout installer use.
+- **Optional TUI enhancements**: `python3-questionary` and `python3-prompt-toolkit` (apt) improve the interactive installer; conda/venv users use `pip install questionary prompt_toolkit`
 
 ```bash
 # Ryzen AI APU only: OEM kernel for ROCm on Ubuntu 24.04 (reboot required)
@@ -53,10 +54,10 @@ sudo usermod -aG docker $USER
 # Apply group changes without logout (or logout/login instead)
 newgrp docker
 
-# Install Build Tools
-sudo apt install build-essential
+# Install build tools and the required YAML parser for source-checkout installer use
+sudo apt install build-essential python3-yaml
 
-# TUI dependencies (required for the recommended interactive install)
+# Optional TUI enhancements for the interactive installer
 sudo apt install python3-questionary python3-prompt-toolkit
 ```
 
@@ -64,7 +65,11 @@ sudo apt install python3-questionary python3-prompt-toolkit
 >
 > **Docker note**: See [Docker Post-installation Steps](https://docs.docker.com/engine/install/linux-postinstall/) and [Install Docker Engine on Ubuntu](https://docs.docker.com/engine/install/ubuntu/) for details.
 >
-> **TUI note**: **System Python (apt):** install `python3-questionary` and `python3-prompt-toolkit` as shown above. **Conda or virtualenv users:** use `pip install questionary prompt_toolkit` inside your active environment instead of the apt packages. These are required for the interactive TUI; non-interactive `./auplc-installer install` does not need them.
+> **Installer dependency note**: `python3-yaml` is required for source-checkout installer use because it loads the canonical ROCm catalog.
+>
+> **Offline bundle note**: Generated offline bundles vendor the pure-Python YAML runtime, so their target hosts do not need network or package installation.
+>
+> **TUI note**: **System Python (apt):** install `python3-questionary` and `python3-prompt-toolkit` as shown above. **Conda or virtualenv users:** use `pip install questionary prompt_toolkit` inside the active environment instead of the apt packages. These are optional TUI enhancements; without them, the installer uses its stdlib numbered-menu fallback.
 
 ### Installation
 
@@ -192,6 +197,10 @@ Build the images:
 The ROCm catalog builds the concrete profiles `gfx1103`, `gfx1150`, `gfx1151`,
 `gfx1152`, `gfx1200`, and `gfx1201`; `gfx1151` is the default. `gfx1152` is
 build-only and is not an installer accelerator or offline bundle target.
+`auplc_installer/data/rocm-profiles.yaml` is the stable canonical path for one
+active rolling TheRock/ROCm baseline. Qualified updates replace that catalog
+atomically with its artifact facts and provenance evidence; it is not a runtime
+ROCm version selector.
 
 The code-server container starts on port `8888` with `code-server --auth none`. This is safe only when the user pod is reachable exclusively through JupyterHub and the JupyterHub proxy authentication boundary. Do not expose the code-server pod port directly through a NodePort, LoadBalancer, ingress, or other unauthenticated route.
 
