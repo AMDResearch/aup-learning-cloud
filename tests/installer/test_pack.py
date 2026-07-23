@@ -2,11 +2,24 @@
 
 from __future__ import annotations
 
+import os
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 
+import pytest
+
+import auplc_installer.pack as pack
 from auplc_installer.catalog import CourseSelection
 from auplc_installer.gpu import GpuConfig, append_product
-from auplc_installer.pack import pack_save_custom_images_local, pack_save_custom_images_pull
+from auplc_installer.pack import (
+    _copy_installer_payload,
+    pack_save_custom_images_local,
+    pack_save_custom_images_pull,
+)
+
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def _gfx1200_config() -> GpuConfig:
@@ -181,3 +194,119 @@ def test_pull_pack_saves_only_profile_specific_gpu_tags(monkeypatch, tmp_path: P
     assert "ghcr.io/example/auplc-code-gpu:v1-gfx1200" in references
     assert "ghcr.io/example/auplc-base:latest" not in references
     assert "ghcr.io/example/auplc-code-gpu:latest" not in references
+
+
+def test_offline_payload_includes_the_yaml_catalog_and_installer_requirements(tmp_path: Path) -> None:
+    staging = tmp_path / "bundle"
+    staging.mkdir()
+
+    _copy_installer_payload(staging, source_root=ROOT)
+
+    assert (staging / "auplc_installer" / "data" / "rocm-profiles.yaml").is_file()
+    assert "PyYAML==6.0.3" in (staging / "requirements-installer.txt").read_text(encoding="utf-8")
+
+
+def test_offline_payload_vendors_pure_python_pyyaml_for_an_isolated_launcher(tmp_path: Path) -> None:
+    staging = tmp_path / "bundle"
+    staging.mkdir()
+
+    _copy_installer_payload(staging, source_root=ROOT)
+
+    vendor = staging / "_vendor"
+    assert (vendor / "yaml" / "__init__.py").is_file()
+    assert not list((vendor / "yaml").glob("_yaml.*"))
+    assert (staging / "third_party_licenses" / "PyYAML-LICENSE").is_file()
+    environment = {key: value for key, value in os.environ.items() if key not in {"PYTHONHOME", "PYTHONPATH"}}
+    environment["PYTHONNOUSERSITE"] = "1"
+    result = subprocess.run(
+        [sys.executable, "-S", str(staging / "auplc-installer"), "help"],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "Usage:" in result.stdout
+
+
+def test_offline_payload_requires_the_installer_requirements_file(tmp_path: Path) -> None:
+    source_root = tmp_path / "source"
+    source_root.mkdir()
+    shutil.copy2(ROOT / "auplc-installer", source_root / "auplc-installer")
+    shutil.copytree(ROOT / "auplc_installer", source_root / "auplc_installer")
+    staging = tmp_path / "bundle"
+    staging.mkdir()
+
+    with pytest.raises(pack.InstallerError, match="requirements-installer.txt"):
+        _copy_installer_payload(staging, source_root=source_root)
+
+
+def test_pyyaml_license_path_prefers_distribution_metadata(monkeypatch, tmp_path: Path) -> None:
+    metadata_license = tmp_path / "metadata-license"
+    metadata_license.write_text("metadata", encoding="utf-8")
+    fallback_license = tmp_path / "debian-copyright"
+    fallback_license.write_text("fallback", encoding="utf-8")
+
+    class Distribution:
+        files = (Path("pyyaml-6.0.3.dist-info/licenses/LICENSE"),)
+
+        @staticmethod
+        def locate_file(_file: Path) -> Path:
+            return metadata_license
+
+    monkeypatch.setattr(pack.metadata, "distribution", lambda _name: Distribution())
+    monkeypatch.setattr(pack, "PY_YAML_SYSTEM_LICENSE_CANDIDATES", (fallback_license,), raising=False)
+
+    assert pack._pyyaml_license_path() == metadata_license
+
+
+def test_pyyaml_license_path_uses_debian_fallback_when_distribution_metadata_is_missing(
+    monkeypatch, tmp_path: Path
+) -> None:
+    fallback_license = tmp_path / "copyright"
+    fallback_license.write_text("debian", encoding="utf-8")
+
+    def missing_distribution(_name: str):
+        raise pack.metadata.PackageNotFoundError
+
+    monkeypatch.setattr(pack.metadata, "distribution", missing_distribution)
+    monkeypatch.setattr(pack, "PY_YAML_SYSTEM_LICENSE_CANDIDATES", (fallback_license,), raising=False)
+
+    assert pack._pyyaml_license_path() == fallback_license
+
+
+def test_pyyaml_license_path_returns_none_when_metadata_and_explicit_fallback_are_unavailable(
+    monkeypatch, tmp_path: Path
+) -> None:
+    def missing_distribution(_name: str):
+        raise pack.metadata.PackageNotFoundError
+
+    monkeypatch.setattr(pack.metadata, "distribution", missing_distribution)
+    monkeypatch.setattr(
+        pack,
+        "PY_YAML_SYSTEM_LICENSE_CANDIDATES",
+        (tmp_path / "does-not-exist",),
+        raising=False,
+    )
+
+    assert pack._pyyaml_license_path() is None
+
+
+@pytest.mark.parametrize(
+    ("attribute", "message"),
+    [
+        ("_pyyaml_package_path", "PyYAML package"),
+        ("_pyyaml_license_path", "PyYAML license"),
+    ],
+)
+def test_offline_payload_requires_pyyaml_package_and_license(
+    monkeypatch, tmp_path: Path, attribute: str, message: str
+) -> None:
+    monkeypatch.setattr(pack, attribute, lambda: None, raising=False)
+    staging = tmp_path / "bundle"
+    staging.mkdir()
+
+    with pytest.raises(pack.InstallerError, match=message):
+        _copy_installer_payload(staging, source_root=ROOT)

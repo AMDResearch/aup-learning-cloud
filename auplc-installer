@@ -34,9 +34,10 @@ The actual implementation lives in the ``auplc_installer`` Python package
 sitting alongside this script (in the same directory). This launcher just
 makes that directory importable and dispatches to ``auplc_installer.cli``.
 
-When packed into an offline bundle (``./auplc-installer pack``), both this
-launcher and the ``auplc_installer/`` package directory are copied into
-the bundle root, so the air-gapped installer is fully self-contained.
+When packed into an offline bundle (``./auplc-installer pack``), this launcher,
+the ``auplc_installer/`` package directory, and required pure-Python runtime
+dependencies are copied into the bundle root, so the air-gapped installer is
+fully self-contained.
 """
 
 from __future__ import annotations
@@ -48,6 +49,9 @@ from pathlib import Path
 # (e.g. ``./auplc-installer install``) as opposed to ``python3 -m
 # auplc_installer install`` which sets up sys.path automatically.
 _HERE = Path(__file__).resolve().parent
+_VENDOR = _HERE / "_vendor"
+if _VENDOR.is_dir() and str(_VENDOR) not in sys.path:
+    sys.path.insert(0, str(_VENDOR))
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 

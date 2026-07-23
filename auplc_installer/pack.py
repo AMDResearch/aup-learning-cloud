@@ -15,6 +15,7 @@ import os
 import re
 import shutil
 import urllib.parse
+from importlib import metadata
 from pathlib import Path
 
 from auplc_installer.catalog import HUB_IMAGE_NAME, CourseSelection
@@ -48,6 +49,9 @@ from auplc_installer.util import (
 )
 
 MAKE_IMAGE_REGISTRY = "ghcr.io/amdresearch"
+PY_YAML_DISTRIBUTION = "PyYAML"
+PY_YAML_LICENSE_DESTINATION = Path("third_party_licenses") / "PyYAML-LICENSE"
+PY_YAML_SYSTEM_LICENSE_CANDIDATES = (Path("/usr/share/doc/python3-yaml/copyright"),)
 
 # ---------------------------------------------------------------------------
 # Stage population
@@ -387,15 +391,69 @@ def pack_write_manifest(
     ).write(staging / "manifest.json")
 
 
+def _pyyaml_package_path() -> Path | None:
+    try:
+        import yaml
+    except ModuleNotFoundError:
+        return None
+    package_path = Path(yaml.__file__).resolve().parent
+    return package_path if (package_path / "__init__.py").is_file() else None
+
+
+def _pyyaml_license_path() -> Path | None:
+    try:
+        distribution = metadata.distribution(PY_YAML_DISTRIBUTION)
+    except metadata.PackageNotFoundError:
+        distribution = None
+    if distribution is not None:
+        for file in distribution.files or ():
+            if file.name == "LICENSE" and "licenses" in file.parts:
+                license_path = Path(distribution.locate_file(file))
+                if license_path.is_file():
+                    return license_path
+    for license_path in PY_YAML_SYSTEM_LICENSE_CANDIDATES:
+        if license_path.is_file():
+            return license_path
+    return None
+
+
+def _copy_pure_python_pyyaml(staging: Path) -> None:
+    package_path = _pyyaml_package_path()
+    if package_path is None:
+        raise InstallerError("Mandatory PyYAML package could not be located for the offline bundle.")
+    license_path = _pyyaml_license_path()
+    if license_path is None:
+        raise InstallerError("Mandatory PyYAML license could not be located for the offline bundle.")
+
+    vendor_package = staging / "_vendor" / "yaml"
+    for source in package_path.rglob("*"):
+        relative = source.relative_to(package_path)
+        if "__pycache__" in relative.parts or source.name.startswith("_yaml."):
+            continue
+        destination = vendor_package / relative
+        if source.is_dir():
+            destination.mkdir(parents=True, exist_ok=True)
+        elif source.is_file():
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, destination)
+    license_destination = staging / PY_YAML_LICENSE_DESTINATION
+    license_destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(license_path, license_destination)
+
+
 def _copy_installer_payload(staging: Path, *, source_root: Path) -> None:
     """Copy the launcher script and the auplc_installer/ package into the bundle.
 
-    Also ships ``requirements-installer.txt`` (the optional ``questionary`` /
-    ``prompt_toolkit`` deps that power the nicer TUI). Air-gapped users with
-    a private PyPI mirror can then ``pip install -r requirements-installer.txt``
-    on the target host and get the polished UI; without those packages the
-    installer falls back to its stdlib numbered-menu mode.
+    The payload includes pure-Python PyYAML and its third-party license so the
+    extracted installer runs without network or package installation. It also
+    ships ``requirements-installer.txt`` for source and venv installs; optional
+    ``questionary`` / ``prompt_toolkit`` are not vendored, so their absence uses
+    the stdlib numbered-menu TUI fallback.
     """
+    reqs_src = source_root / "requirements-installer.txt"
+    if not reqs_src.is_file():
+        raise InstallerError(f"Mandatory installer requirements file not found at {reqs_src}.")
+
     launcher_src = source_root / "auplc-installer"
     launcher_dst = staging / "auplc-installer"
     if not launcher_src.is_file():
@@ -414,12 +472,8 @@ def _copy_installer_payload(staging: Path, *, source_root: Path) -> None:
         shutil.rmtree(pkg_dst)
     # Skip __pycache__ when copying so the bundle stays small.
     shutil.copytree(pkg_src, pkg_dst, ignore=shutil.ignore_patterns("__pycache__"))
-
-    # Optional TUI dependency manifest (~250 bytes; harmless when absent so
-    # callers running pack from a partial checkout don't fail).
-    reqs_src = source_root / "requirements-installer.txt"
-    if reqs_src.is_file():
-        shutil.copy2(reqs_src, staging / "requirements-installer.txt")
+    shutil.copy2(reqs_src, staging / "requirements-installer.txt")
+    _copy_pure_python_pyyaml(staging)
 
 
 # ---------------------------------------------------------------------------
@@ -515,5 +569,6 @@ def pack_bundle(
     log(f"  tar xzf {archive}")
     log(f"  cd {bundle_name}")
     log("  sudo ./auplc-installer install")
+    log("  (The bundle includes PyYAML; no network or package installation is required.)")
     log("===========================================")
     return archive
