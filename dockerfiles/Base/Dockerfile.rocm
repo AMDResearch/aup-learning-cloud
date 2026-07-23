@@ -99,6 +99,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   build-essential \
   python3-dev \
   python3-pip \
+  python3-yaml \
   libnuma-dev \
   libelf1 \
   kmod \
@@ -115,7 +116,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy the resolver and catalog under one root so the CLI can discover the
 # package when it runs in this otherwise isolated build context.
 COPY auplc_installer/__init__.py auplc_installer/rocm_profiles.py /opt/auplc/auplc_installer/
-COPY auplc_installer/data/rocm-7.14-profiles.json /opt/auplc/auplc_installer/data/
+COPY auplc_installer/data/rocm-profiles.yaml /opt/auplc/auplc_installer/data/
 COPY dockerfiles/Base/rocm-targets.py /opt/auplc/dockerfiles/Base/
 
 # Resolve the selected profile once and persist its complete BuildPlan. Later

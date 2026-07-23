@@ -25,7 +25,9 @@ def _import_resolver() -> tuple[Any, Any, Any, Path]:
             resolve_profile,
         )
     except ModuleNotFoundError as error:
-        raise RuntimeError("cannot locate auplc_installer.rocm_profiles") from error
+        if error.name in {"auplc_installer", "auplc_installer.rocm_profiles"}:
+            raise RuntimeError("cannot locate auplc_installer.rocm_profiles") from error
+        raise RuntimeError(f"missing required dependency '{error.name}' for auplc_installer.rocm_profiles") from error
     return CatalogError, list_profiles, resolve_profile, DEFAULT_CATALOG_PATH
 
 
