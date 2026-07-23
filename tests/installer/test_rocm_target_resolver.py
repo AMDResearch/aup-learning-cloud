@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from collections.abc import Callable
@@ -10,12 +11,13 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
-from auplc_installer.rocm_profiles import CatalogError, load_catalog, resolve_profile
+from auplc_installer.rocm_profiles import DEFAULT_CATALOG_PATH, CatalogError, load_catalog, resolve_profile
 
 ROOT = Path(__file__).resolve().parents[2]
 CLI = ROOT / "dockerfiles" / "Base" / "rocm-targets.py"
-CATALOG = ROOT / "auplc_installer" / "data" / "rocm-7.14-profiles.json"
+CATALOG = ROOT / "auplc_installer" / "data" / "rocm-profiles.yaml"
 
 
 def run_cli(*args: str) -> subprocess.CompletedProcess[str]:
@@ -45,8 +47,13 @@ def test_catalog_separates_concrete_targets_from_one_to_one_profiles() -> None:
     ]
 
 
-def test_catalog_json_keeps_artifacts_out_of_profiles() -> None:
-    raw = json.loads(CATALOG.read_text(encoding="utf-8"))
+def test_default_catalog_path_is_stable_and_non_versioned() -> None:
+    assert DEFAULT_CATALOG_PATH == CATALOG
+    assert DEFAULT_CATALOG_PATH.name == "rocm-profiles.yaml"
+
+
+def test_catalog_yaml_keeps_artifacts_out_of_profiles() -> None:
+    raw = yaml.safe_load(CATALOG.read_text(encoding="utf-8"))
 
     assert set(raw["profiles"]["gfx1151"]) == {"tag_suffix", "targets"}
     assert raw["targets"]["gfx1151"]["rocm_package"] == "amdrocm-core-sdk7.14-gfx1151"
@@ -126,7 +133,7 @@ def test_resolution_uses_exact_catalog_artifacts(profile: str, package: str, tor
 
 
 def test_wheel_metadata_authority_does_not_claim_unknown_artifact_identity() -> None:
-    raw = json.loads(CATALOG.read_text(encoding="utf-8"))
+    raw = yaml.safe_load(CATALOG.read_text(encoding="utf-8"))
 
     for authority in raw["wheel_metadata_authorities"].values():
         assert authority["source"] == "selected wheel METADATA"
@@ -135,7 +142,7 @@ def test_wheel_metadata_authority_does_not_claim_unknown_artifact_identity() -> 
 
 
 def test_wheel_metadata_authorities_list_every_concrete_profile_extra() -> None:
-    raw = json.loads(CATALOG.read_text(encoding="utf-8"))
+    raw = yaml.safe_load(CATALOG.read_text(encoding="utf-8"))
 
     expected_extras = [
         "device-gfx1103",
@@ -160,11 +167,73 @@ def test_unsupported_profiles_fail_explicitly(profile: str) -> None:
         resolve_profile(profile)
 
 
-def test_duplicate_json_keys_are_rejected(tmp_path: Path) -> None:
-    path = tmp_path / "duplicate.json"
-    path.write_text('{"schema_version":1,"schema_version":1}', encoding="utf-8")
+@pytest.mark.parametrize(
+    ("content", "key"),
+    [
+        ("schema_version: 1\nschema_version: 1\n", "schema_version"),
+        ("profiles:\n  gfx1151:\n    tag_suffix: gfx1151\n    tag_suffix: gfx1151\n", "tag_suffix"),
+        ("base: &base\n  schema_version: 1\n<<: *base\nschema_version: 1\n", "schema_version"),
+    ],
+)
+def test_duplicate_yaml_keys_are_rejected_at_every_mapping_depth(tmp_path: Path, content: str, key: str) -> None:
+    path = tmp_path / "duplicate.yaml"
+    path.write_text(content, encoding="utf-8")
 
-    with pytest.raises(CatalogError, match="duplicate JSON key"):
+    with pytest.raises(CatalogError, match=rf"duplicate YAML key '{key}'"):
+        load_catalog(path)
+
+
+def test_duplicate_yaml_merge_keys_are_rejected_before_merge_flattening(tmp_path: Path) -> None:
+    path = tmp_path / "duplicate-merge.yaml"
+    path.write_text(
+        "base_one: &base_one\n  first: value\nbase_two: &base_two\n  second: value\n<<: *base_one\n<<: *base_two\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(CatalogError, match="duplicate YAML key '<<'"):
+        load_catalog(path)
+
+
+def test_non_conflicting_yaml_merge_is_supported(tmp_path: Path) -> None:
+    catalog_path = tmp_path / "merged-catalog.yaml"
+    catalog_path.write_text(
+        CATALOG.read_text(encoding="utf-8").replace(
+            "  gfx1151:\n    tag_suffix: gfx1151\n    targets: [gfx1151]\n",
+            "  gfx1151:\n    <<: &gfx1151_profile\n      tag_suffix: gfx1151\n    targets: [gfx1151]\n",
+        ),
+        encoding="utf-8",
+    )
+
+    catalog = load_catalog(catalog_path)
+
+    assert catalog.profiles["gfx1151"].tag_suffix == "gfx1151"
+
+
+def test_malformed_yaml_is_wrapped_in_catalog_error(tmp_path: Path) -> None:
+    path = tmp_path / "malformed.yaml"
+    path.write_text("schema_version: [\n", encoding="utf-8")
+
+    with pytest.raises(CatalogError, match="invalid YAML") as error:
+        load_catalog(path)
+
+    assert isinstance(error.value.__cause__, yaml.YAMLError)
+
+
+def test_unsafe_yaml_tag_is_wrapped_in_catalog_error(tmp_path: Path) -> None:
+    path = tmp_path / "unsafe-tag.yaml"
+    path.write_text("schema_version: !unsafe 1\n", encoding="utf-8")
+
+    with pytest.raises(CatalogError, match="invalid YAML") as error:
+        load_catalog(path)
+
+    assert isinstance(error.value.__cause__, yaml.YAMLError)
+
+
+def test_yaml_catalog_rejects_non_string_mapping_keys(tmp_path: Path) -> None:
+    path = tmp_path / "non-string-key.yaml"
+    path.write_text("1: catalog\n", encoding="utf-8")
+
+    with pytest.raises(CatalogError, match="YAML mapping keys must be strings"):
         load_catalog(path)
 
 
@@ -199,20 +268,20 @@ def test_schema_and_reference_errors_are_rejected(
     mutation: Callable[[dict[str, Any]], Any],
     message: str,
 ) -> None:
-    data = json.loads(CATALOG.read_text(encoding="utf-8"))
+    data = yaml.safe_load(CATALOG.read_text(encoding="utf-8"))
     mutation(data)
-    path = tmp_path / "invalid.json"
-    path.write_text(json.dumps(data), encoding="utf-8")
+    path = tmp_path / "invalid.yaml"
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
 
     with pytest.raises(CatalogError, match=message):
         load_catalog(path)
 
 
 def test_concrete_target_can_be_reused_by_future_explicit_profile(tmp_path: Path) -> None:
-    data = json.loads(CATALOG.read_text(encoding="utf-8"))
+    data = yaml.safe_load(CATALOG.read_text(encoding="utf-8"))
     data["profiles"]["gfx1202"] = {"tag_suffix": "gfx1202", "targets": ["gfx1151"]}
-    path = tmp_path / "future-profile.json"
-    path.write_text(json.dumps(data), encoding="utf-8")
+    path = tmp_path / "future-profile.yaml"
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
 
     catalog = load_catalog(path)
     plan = resolve_profile("gfx1202", path)
@@ -244,6 +313,18 @@ def test_public_cli_validates_lists_and_emits_complete_plans() -> None:
     assert "WHEEL_METADATA_2_PROVIDES_EXTRAS=\n" in resolved.stdout
 
 
+def test_public_cli_uses_an_explicit_yaml_catalog(tmp_path: Path) -> None:
+    data = yaml.safe_load(CATALOG.read_text(encoding="utf-8"))
+    data["default_profile"] = "gfx1200"
+    catalog_path = tmp_path / "catalog.yaml"
+    catalog_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+    result = run_cli("--catalog", str(catalog_path), "resolve-profile")
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["profile"] == "gfx1200"
+
+
 def test_public_cli_rejects_unsupported_profile() -> None:
     result = run_cli("resolve-profile", "gfx120x")
 
@@ -251,4 +332,22 @@ def test_public_cli_rejects_unsupported_profile() -> None:
         2,
         "",
         "error: unsupported ROCm profile 'gfx120x'\n",
+    )
+
+
+def test_public_cli_reports_a_missing_resolver_dependency_actionably() -> None:
+    environment = {key: value for key, value in os.environ.items() if key not in {"PYTHONHOME", "PYTHONPATH"}}
+    result = subprocess.run(
+        [sys.executable, "-S", str(CLI), "validate"],
+        cwd=ROOT,
+        capture_output=True,
+        check=False,
+        env=environment,
+        text=True,
+    )
+
+    assert (result.returncode, result.stdout, result.stderr) == (
+        2,
+        "",
+        "error: missing required dependency 'yaml' for auplc_installer.rocm_profiles\n",
     )

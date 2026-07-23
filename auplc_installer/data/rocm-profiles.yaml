@@ -1,0 +1,141 @@
+# Canonical build catalog for AUP Learning Cloud's active ROCm image baseline.
+# This is one active rolling TheRock/ROCm baseline, not a multi-version catalog or runtime selector.
+# Replace the entire catalog atomically only after qualifying the next baseline; update artifacts and evidence together.
+# provenance records the required source evidence, including selected wheel METADATA, for every catalog update.
+# targets contain concrete architecture artifacts; profiles are public build and tag selections that resolve targets.
+# Every profile is buildable; only product-mapped profiles are runtime installer and bundle targets (gfx1152 is build-only).
+copyright: Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+schema_version: 1
+default_profile: gfx1151
+# Version facts own the active baseline and move atomically with its artifacts.
+versions:
+  rocm: "7.14.0"
+  torch: "2.12.0+rocm7.14.0"
+  torchvision: "0.27.0+rocm7.14.0"
+  torchaudio: "2.11.0+rocm7.14.0"
+# Repository endpoints are baseline-owned facts; update only with the atomic qualification set.
+repositories:
+  apt_key_url: https://repo.amd.com/rocm/packages-multi-arch/gpg/rocm.gpg
+  apt_source: deb [arch=amd64 signed-by=/etc/apt/keyrings/amdrocm.gpg] https://repo.amd.com/rocm/packages-multi-arch/ubuntu2404 stable main
+  wheel_index_url: https://repo.amd.com/rocm/whl-multi-arch/
+# Provenance is required evidence for an atomic rolling update and stays tied to every artifact fact.
+provenance:
+  rocm_matrix_url: https://rocm.docs.amd.com/en/docs-7.14.0/compatibility/compatibility-matrix.html
+  packages_stream: packages-multi-arch
+  packages_stream_url: https://repo.amd.com/rocm/packages-multi-arch/
+  therock_commit: 418cd5f63abb7a604bad5874cd7b2e29334e640f
+  therock_url: https://github.com/ROCm/TheRock/tree/418cd5f63abb7a604bad5874cd7b2e29334e640f
+# Selected wheel METADATA authorizes requirements and must match the same atomic baseline.
+wheel_metadata_authorities:
+  torch-2.12.0-rocm7.14.0:
+    source: selected wheel METADATA
+    distribution: torch
+    version: "2.12.0+rocm7.14.0"
+    index_url: https://repo.amd.com/rocm/whl-multi-arch/
+    provides_extras:
+      - device-gfx1103
+      - device-gfx1150
+      - device-gfx1151
+      - device-gfx1152
+      - device-gfx1200
+      - device-gfx1201
+  torchvision-0.27.0-rocm7.14.0:
+    source: selected wheel METADATA
+    distribution: torchvision
+    version: "0.27.0+rocm7.14.0"
+    index_url: https://repo.amd.com/rocm/whl-multi-arch/
+    provides_extras:
+      - device-gfx1103
+      - device-gfx1150
+      - device-gfx1151
+      - device-gfx1152
+      - device-gfx1200
+      - device-gfx1201
+  torchaudio-2.11.0-rocm7.14.0:
+    source: selected wheel METADATA
+    distribution: torchaudio
+    version: "2.11.0+rocm7.14.0"
+    index_url: https://repo.amd.com/rocm/whl-multi-arch/
+    provides_extras: []
+# Targets own exact architecture artifacts; replace their facts atomically and never infer them.
+targets:
+  gfx1103:
+    rocm_package: amdrocm-core-sdk7.14-gfx1103
+    torch_extra: device-gfx1103
+    torchvision_extra: device-gfx1103
+    torch_requirement: "torch[device-gfx1103]==2.12.0+rocm7.14.0"
+    torchvision_requirement: "torchvision[device-gfx1103]==0.27.0+rocm7.14.0"
+    torchaudio_requirement: "torchaudio==2.11.0+rocm7.14.0"
+    torch_metadata: torch-2.12.0-rocm7.14.0
+    torchvision_metadata: torchvision-0.27.0-rocm7.14.0
+    torchaudio_metadata: torchaudio-2.11.0-rocm7.14.0
+  gfx1150:
+    rocm_package: amdrocm-core-sdk7.14-gfx1150
+    torch_extra: device-gfx1150
+    torchvision_extra: device-gfx1150
+    torch_requirement: "torch[device-gfx1150]==2.12.0+rocm7.14.0"
+    torchvision_requirement: "torchvision[device-gfx1150]==0.27.0+rocm7.14.0"
+    torchaudio_requirement: "torchaudio==2.11.0+rocm7.14.0"
+    torch_metadata: torch-2.12.0-rocm7.14.0
+    torchvision_metadata: torchvision-0.27.0-rocm7.14.0
+    torchaudio_metadata: torchaudio-2.11.0-rocm7.14.0
+  gfx1151:
+    rocm_package: amdrocm-core-sdk7.14-gfx1151
+    torch_extra: device-gfx1151
+    torchvision_extra: device-gfx1151
+    torch_requirement: "torch[device-gfx1151]==2.12.0+rocm7.14.0"
+    torchvision_requirement: "torchvision[device-gfx1151]==0.27.0+rocm7.14.0"
+    torchaudio_requirement: "torchaudio==2.11.0+rocm7.14.0"
+    torch_metadata: torch-2.12.0-rocm7.14.0
+    torchvision_metadata: torchvision-0.27.0-rocm7.14.0
+    torchaudio_metadata: torchaudio-2.11.0-rocm7.14.0
+  gfx1152:
+    rocm_package: amdrocm-core-sdk7.14-gfx1152
+    torch_extra: device-gfx1152
+    torchvision_extra: device-gfx1152
+    torch_requirement: "torch[device-gfx1152]==2.12.0+rocm7.14.0"
+    torchvision_requirement: "torchvision[device-gfx1152]==0.27.0+rocm7.14.0"
+    torchaudio_requirement: "torchaudio==2.11.0+rocm7.14.0"
+    torch_metadata: torch-2.12.0-rocm7.14.0
+    torchvision_metadata: torchvision-0.27.0-rocm7.14.0
+    torchaudio_metadata: torchaudio-2.11.0-rocm7.14.0
+  gfx1200:
+    rocm_package: amdrocm-core-sdk7.14-gfx1200
+    torch_extra: device-gfx1200
+    torchvision_extra: device-gfx1200
+    torch_requirement: "torch[device-gfx1200]==2.12.0+rocm7.14.0"
+    torchvision_requirement: "torchvision[device-gfx1200]==0.27.0+rocm7.14.0"
+    torchaudio_requirement: "torchaudio==2.11.0+rocm7.14.0"
+    torch_metadata: torch-2.12.0-rocm7.14.0
+    torchvision_metadata: torchvision-0.27.0-rocm7.14.0
+    torchaudio_metadata: torchaudio-2.11.0-rocm7.14.0
+  gfx1201:
+    rocm_package: amdrocm-core-sdk7.14-gfx1201
+    torch_extra: device-gfx1201
+    torchvision_extra: device-gfx1201
+    torch_requirement: "torch[device-gfx1201]==2.12.0+rocm7.14.0"
+    torchvision_requirement: "torchvision[device-gfx1201]==0.27.0+rocm7.14.0"
+    torchaudio_requirement: "torchaudio==2.11.0+rocm7.14.0"
+    torch_metadata: torch-2.12.0-rocm7.14.0
+    torchvision_metadata: torchvision-0.27.0-rocm7.14.0
+    torchaudio_metadata: torchaudio-2.11.0-rocm7.14.0
+# Profiles own public build and tag choices; runtime support lives in installer/runtime policy, and gfx1152 remains build-only.
+profiles:
+  gfx1103:
+    tag_suffix: gfx1103
+    targets: [gfx1103]
+  gfx1150:
+    tag_suffix: gfx1150
+    targets: [gfx1150]
+  gfx1151:
+    tag_suffix: gfx1151
+    targets: [gfx1151]
+  gfx1152:
+    tag_suffix: gfx1152
+    targets: [gfx1152]
+  gfx1200:
+    tag_suffix: gfx1200
+    targets: [gfx1200]
+  gfx1201:
+    tag_suffix: gfx1201
+    targets: [gfx1201]

@@ -1,21 +1,23 @@
 # Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
 
-"""Load and resolve the canonical ROCm 7.14 build profile catalog."""
+"""Load and resolve the canonical ROCm build profile catalog."""
 
 from __future__ import annotations
 
-import json
 import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-DEFAULT_CATALOG_PATH = Path(__file__).with_name("data") / "rocm-7.14-profiles.json"
+import yaml
+
+DEFAULT_CATALOG_PATH = Path(__file__).with_name("data") / "rocm-profiles.yaml"
 PROFILE_NAME_PATTERN = re.compile(r"gfx[0-9]+\Z")
 COMMIT_PATTERN = re.compile(r"[0-9a-f]{40}\Z")
 PACKAGE_PATTERN = re.compile(r"[a-z0-9][a-z0-9+.-]*\Z")
 EXTRA_PATTERN = re.compile(r"[a-z0-9][a-z0-9._-]*\Z")
 WHEEL_METADATA_SOURCE = "selected wheel METADATA"
+MERGE_KEY_TAG = "tag:yaml.org,2002:merge"
 
 
 class CatalogError(ValueError):
@@ -111,13 +113,51 @@ class BuildPlan:
         return asdict(self)
 
 
-def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+class _CatalogSafeLoader(yaml.SafeLoader):
+    """Safe YAML loader scoped to the ROCm catalog parser."""
+
+
+def _mapping_key(loader: _CatalogSafeLoader, key_node: Any) -> str:
+    if key_node.tag == MERGE_KEY_TAG:
+        return "<<"
+    key = loader.construct_object(key_node, deep=False)
+    if not isinstance(key, str):
+        raise CatalogError("YAML mapping keys must be strings")
+    return key
+
+
+def _validate_raw_yaml_node(loader: _CatalogSafeLoader, node: Any, visited: set[int]) -> None:
+    """Reject duplicate and non-string map keys before YAML merge processing mutates nodes."""
+    if id(node) in visited:
+        return
+    visited.add(id(node))
+    if node.id == "mapping":
+        keys: set[str] = set()
+        for key_node, value_node in node.value:
+            key = _mapping_key(loader, key_node)
+            if key in keys:
+                raise CatalogError(f"duplicate YAML key '{key}'")
+            keys.add(key)
+            _validate_raw_yaml_node(loader, value_node, visited)
+    elif node.id == "sequence":
+        for value_node in node.value:
+            _validate_raw_yaml_node(loader, value_node, visited)
+
+
+def _construct_catalog_mapping(loader: _CatalogSafeLoader, node: Any, deep: bool = False) -> dict[str, Any]:
+    """Construct maps while preserving safe YAML merges and rejecting duplicate keys."""
+    _validate_raw_yaml_node(loader, node, set())
+    loader.flatten_mapping(node)
     result: dict[str, Any] = {}
-    for key, value in pairs:
+    for key_node, value_node in node.value:
+        key = _mapping_key(loader, key_node)
         if key in result:
-            raise CatalogError(f"duplicate JSON key '{key}'")
-        result[key] = value
+            raise CatalogError(f"duplicate YAML key '{key}'")
+        result[key] = loader.construct_object(value_node, deep=deep)
     return result
+
+
+_CatalogSafeLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _construct_catalog_mapping)
 
 
 def _object(value: Any, location: str) -> dict[str, Any]:
@@ -163,12 +203,17 @@ def _load_wheel_metadata(raw: Any, wheel_index_url: str) -> dict[str, WheelMetad
         raise CatalogError("wheel_metadata_authorities must not be empty")
     result: dict[str, WheelMetadataAuthority] = {}
     expected = {"source", "distribution", "version", "index_url", "provides_extras"}
-    for authority, raw_record in records.items():
+    for raw_authority, raw_record in records.items():
+        authority = _token(raw_authority, f"wheel_metadata_authorities.{raw_authority}", PACKAGE_PATTERN)
         record = _object(raw_record, f"wheel_metadata_authorities.{authority}")
         _exact_keys(record, expected, f"wheel_metadata_authorities.{authority}")
         extras = record["provides_extras"]
         if not isinstance(extras, list) or any(not isinstance(extra, str) or not extra for extra in extras):
             raise CatalogError(f"wheel_metadata_authorities.{authority}.provides_extras must be a string list")
+        validated_extras = tuple(
+            _token(extra, f"wheel_metadata_authorities.{authority}.provides_extras[{index}]", EXTRA_PATTERN)
+            for index, extra in enumerate(extras)
+        )
         if len(extras) != len(set(extras)):
             raise CatalogError(f"wheel_metadata_authorities.{authority}.provides_extras contains duplicates")
         index_url = _https_url(record["index_url"], f"wheel_metadata_authorities.{authority}.index_url")
@@ -183,7 +228,7 @@ def _load_wheel_metadata(raw: Any, wheel_index_url: str) -> dict[str, WheelMetad
             distribution=_string(record["distribution"], f"wheel_metadata_authorities.{authority}.distribution"),
             version=_string(record["version"], f"wheel_metadata_authorities.{authority}.version"),
             index_url=index_url,
-            provides_extras=tuple(extras),
+            provides_extras=validated_extras,
         )
     return result
 
@@ -305,11 +350,11 @@ def _load_profiles(raw: Any, targets: dict[str, Target]) -> dict[str, Profile]:
 def load_catalog(path: Path = DEFAULT_CATALOG_PATH) -> Catalog:
     """Load and fully validate a ROCm profile catalog."""
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=_reject_duplicate_keys)
+        raw = yaml.load(path.read_text(encoding="utf-8"), Loader=_CatalogSafeLoader)
     except OSError as error:
         raise CatalogError(f"cannot read catalog '{path}': {error}") from error
-    except json.JSONDecodeError as error:
-        raise CatalogError(f"invalid JSON in catalog '{path}': {error.msg}") from error
+    except yaml.YAMLError as error:
+        raise CatalogError(f"invalid YAML in catalog '{path}': {error}") from error
 
     root = _object(raw, "catalog")
     _exact_keys(
