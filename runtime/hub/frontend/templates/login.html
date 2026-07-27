@@ -42,6 +42,7 @@ SOFTWARE.
 {% set announcement = announcement_login %}
 {% endif %}
 {% set github_helper_text = login_github_helper_text|default("", true)|trim %}
+{% set auth_mode = authenticator_mode|default('multi') %}
 
 {% block login_widget %}
 {% endblock login_widget %}
@@ -105,7 +106,7 @@ SOFTWARE.
             </svg>
             <h2 class="text-3xl md:text-4xl font-bold text-white mb-4">{{ platform_name or 'AUP Learning Cloud' }}</h2>
             <p class="text-blue-100 mb-8">Experience the next generation of AI acceleration with AMD ROCm™.</p>
-            {% if login_service and not authenticator_mode.startswith('multi') %}
+            {% if login_service and auth_mode != 'multi' %}
             <a role="button"
                 class='inline-block bg-white hover:bg-gray-100 text-black font-medium py-2 px-4 rounded transition duration-300'
                 href='{{ authenticator_login_url | safe }}'>
