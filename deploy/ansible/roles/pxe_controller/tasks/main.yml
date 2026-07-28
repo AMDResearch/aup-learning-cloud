@@ -82,6 +82,86 @@
 # 2. Build NFS rootfs with debootstrap
 # ==========================================================
 
+- name: Validate PXE rootfs path syntax before lifecycle changes
+  ansible.builtin.assert:
+    that:
+      - pxe_nfs_root is string
+      - pxe_nfs_root is match('^/')
+      - pxe_nfs_root != '/'
+      - "'..' not in pxe_nfs_root.split('/')"
+      - pxe_nfs_allowed_root is string
+      - pxe_nfs_allowed_root is match('^/')
+    fail_msg: pxe_nfs_root and pxe_nfs_allowed_root must be absolute non-root paths without traversal.
+
+- name: Canonicalize PXE rootfs before lifecycle changes
+  ansible.builtin.command:
+    argv: [realpath, --canonicalize-missing, "{{ pxe_nfs_root }}"]
+  register: _pxe_canonical_nfs_root_result
+  changed_when: false
+
+- name: Canonicalize trusted PXE rootfs parent before lifecycle changes
+  ansible.builtin.command:
+    argv: [realpath, --canonicalize-existing, "{{ pxe_nfs_allowed_root }}"]
+  register: _pxe_canonical_nfs_allowed_root
+  changed_when: false
+
+- name: Inspect PXE rootfs path before canonical lifecycle changes
+  ansible.builtin.stat:
+    path: "{{ pxe_nfs_root }}"
+    follow: false
+  register: _pxe_rootfs_lstat
+
+- name: Constrain canonical PXE rootfs before lifecycle changes
+  ansible.builtin.assert:
+    that:
+      - not _pxe_rootfs_lstat.stat.exists or not _pxe_rootfs_lstat.stat.islnk
+      - _pxe_canonical_nfs_root_result.stdout != '/'
+      - _pxe_canonical_nfs_root_result.stdout == pxe_nfs_root
+      - _pxe_canonical_nfs_root_result.stdout.startswith(_pxe_canonical_nfs_allowed_root.stdout + '/')
+    fail_msg: pxe_nfs_root must be a non-symlink descendant of pxe_nfs_allowed_root.
+
+- name: Record canonical PXE rootfs for lifecycle operations
+  ansible.builtin.set_fact:
+    _pxe_canonical_nfs_root: "{{ _pxe_canonical_nfs_root_result.stdout }}"
+    pxe_nfs_root: "{{ _pxe_canonical_nfs_root_result.stdout }}"
+
+- name: Require existing PXE rootfs is a directory
+  ansible.builtin.assert:
+    that:
+      - not _pxe_rootfs_lstat.stat.exists or _pxe_rootfs_lstat.stat.isdir
+    fail_msg: "pxe_nfs_root must be a directory when it already exists: {{ pxe_nfs_root }}"
+
+- name: Inspect PXE rootfs readiness before lifecycle changes
+  ansible.builtin.stat:
+    path: "{{ pxe_nfs_root }}/bin/bash"
+    follow: false
+  register: _pxe_rootfs_start
+
+- name: Record PXE rootfs state before lifecycle changes
+  ansible.builtin.set_fact:
+    _pxe_rootfs_existed_at_start: "{{ _pxe_rootfs_lstat.stat.exists | bool }}"
+    _pxe_rootfs_rebuilt_this_run: >-
+      {{ (pxe_rootfs_force_rebuild | bool) or not (_pxe_rootfs_lstat.stat.exists | bool) }}
+
+- name: Require incomplete PXE rootfs force rebuild
+  ansible.builtin.assert:
+    that:
+      - >-
+        not (_pxe_rootfs_lstat.stat.exists | bool) or
+        (_pxe_rootfs_start.stat.exists | bool) or
+        (pxe_rootfs_force_rebuild | bool)
+    fail_msg: >-
+      Existing PXE rootfs is incomplete and must be rebuilt with
+      pxe_rootfs_force_rebuild=true; debootstrap will not modify it in place.
+
+- name: Admit retained PXE GPU rootfs read-only before lifecycle changes
+  ansible.builtin.include_tasks: gpu_access.yml
+  vars:
+    pxe_gpu_admission_phase: retained-read-only
+  when:
+    - pxe_gpu_access_enabled | bool
+    - not (_pxe_rootfs_rebuilt_this_run | bool)
+
 - name: Stop NFS before rootfs rebuild
   when: pxe_rootfs_force_rebuild | bool
   ansible.builtin.systemd:
@@ -228,6 +308,13 @@
   ansible.builtin.file:
     path: "{{ pxe_nfs_root }}/tmp/chroot-setup.sh"
     state: absent
+
+- name: Re-preflight PXE GPU rootfs before TFTP
+  ansible.builtin.include_tasks: gpu_access.yml
+  vars:
+    pxe_gpu_admission_phase: final
+  when:
+    - pxe_gpu_access_enabled | bool
 
 # ==========================================================
 # 6. Copy kernel and initrd to TFTP
