@@ -41,8 +41,8 @@ Then collect and confirm:
 
 1. Courses and notebook resources.
 2. Controller hostname, static IP, subnet, gateway, and DNS.
-3. For SSH, every managed hostname and IP. Don't ask for a GPU host list or a
-   shared GPU group ID. Generation discovers both over SSH.
+3. For SSH, every managed hostname and IP. Don't ask for a GPU host list;
+   generation discovers GPU hosts over SSH.
 4. For PXE, the controller NIC, web port, rootfs SSH public key, and whether
    diskless agents have AMD GPUs. This explicit yes or no is the sole PXE GPU
    policy input because agent hardware can't be inferred from the controller.
@@ -57,16 +57,16 @@ Create a fresh schema and fill only its current fields. Run the generator rather
 than writing inventory or GPU policy by hand.
 
 For SSH, generation performs read-only discovery on every managed host and
-publishes canonical artifacts only after GPU evidence and group IDs agree.
+publishes canonical artifacts after GPU evidence is consistent.
 
-For PXE with GPU agents, initial generation creates private bootstrap inventory
-and vars. Run the PXE controller playbook with those private files. A successful
-rootfs build finalizes generation automatically and publishes the canonical
-inventory, PXE vars, runtime overlay, and GPU resolution report.
+For PXE, generation writes the canonical inventory, PXE vars, runtime overlay,
+and GPU resolution report directly as desired deployment inputs. Their existence
+does not prove rootfs provisioning succeeded. Review, install, and validate those
+files, then run the controller playbook with the canonical inventory and PXE
+vars; the playbook must complete successfully before proceeding.
 
 Follow the exact generation, installation, and playbook commands in
-[deploy/README.md](../../deploy/README.md). Don't invent a separate completion
-step.
+[deploy/README.md](../../deploy/README.md).
 
 ## Phase 3: Validate and execute
 
@@ -82,7 +82,19 @@ then run the validator with the arguments shown in the deployment guide:
 
 Stop on validation failure. After a clean result, follow the topology's Ansible,
 storage, device plugin, and Helm sequence in
-[deploy/README.md](../../deploy/README.md).
+[deploy/README.md](../../deploy/README.md). Treat the AMD device plugin and ROCm
+node labeller as infrastructure prerequisites owned outside AUPLC. Verify both
+existing DaemonSets and advertised GPU capacity before Helm; do not install
+these privileged components as part of the AUPLC procedure.
+
+Keep the GPU contract distinct from storage configuration. GPU hosts use
+`root:render 0666` for `/dev/kfd` and AMD `renderD*`, and `root:video 0666` for
+AMD `card*`, so every injected GPU device node has mode `0666`. Device-plugin
+allocation is the visibility boundary and only `amd.com/gpu` requests receive
+GPU nodes. Container group membership does not participate in GPU permissions;
+host provisioning owns device-node discretionary access control. AUPLC Hub adds
+no GPU supplemental group, and the plugin does not change Unix inode permissions.
+`singleuser.fsGid: 100` is for shared storage only.
 
 ## Phase 4: Verify
 

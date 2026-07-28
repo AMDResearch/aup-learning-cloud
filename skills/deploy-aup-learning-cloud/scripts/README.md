@@ -8,17 +8,20 @@ sequence and argument paths.
 | --- | --- |
 | `detect_hardware.sh` | Reports controller network details and local AMD PCI devices as JSON. |
 | `detect_cluster.sh` | Reports Kubernetes nodes, AMD GPU labels, storage classes, and GPU DaemonSet state as JSON. |
-| `gen_configs.py` | Prints the current spec schema, discovers SSH GPU state, and generates topology-specific deployment artifacts. PXE GPU bootstrap files remain private until the controller playbook finalizes them automatically. |
+| `gen_configs.py` | Prints the current spec schema, discovers live GPU state, and directly publishes canonical topology-specific deployment artifacts. |
 | `validate.py` | Checks the selected topology against canonical inventory, GPU resolution, values overlays, and PXE vars when applicable. |
 
 ## Generator contract
 
-The SSH topology discovers GPU hosts and their shared `render` group ID. Users
-don't provide either value. The PXE topology has one GPU policy input:
+The SSH topology discovers GPU hosts from managed-host evidence. Users don't
+provide a GPU host list. The PXE topology has one GPU policy input:
 `pxe.diskless_agents_have_amd_gpus`.
 
-Generate specs from fresh `--print-schema` output. Don't hand-edit generated GPU
-policy or add a separate PXE completion step.
+Generate specs from fresh `--print-schema` output. Both topologies write their
+canonical artifacts immediately. For PXE, review and validate those files, then
+run the controller playbook with the generated `inventory.yml` and
+`pb-pxe-controller.vars.yml`. The files express desired inputs; their existence
+does not prove the PXE rootfs was provisioned successfully.
 
 ## Validator contract
 
