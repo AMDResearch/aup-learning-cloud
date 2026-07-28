@@ -10,75 +10,17 @@
     that: pxe_gpu_admission_phase in ['retained-read-only', 'final']
     fail_msg: PXE GPU admission phase is invalid.
 
-- name: Inspect retained PXE canonical GPU access parents
-  ansible.builtin.stat:
-    path: "{{ pxe_nfs_root }}{{ item }}"
-    follow: false
-  loop:
-    - /etc
-    - /etc/udev
-    - /etc/udev/rules.d
-  register: _pxe_retained_canonical_gpu_parent_stats
-  when: pxe_gpu_access_enabled | bool and _pxe_rootfs_disposition == 'retained'
-
-- name: Require retained PXE canonical GPU access parents
-  ansible.builtin.assert:
-    that:
-      - item.stat.exists
-      - item.stat.isdir
-      - not item.stat.islnk
-    fail_msg: "Retained PXE rootfs has an unsafe canonical GPU access parent: {{ item.item }}"
-  loop: "{{ _pxe_retained_canonical_gpu_parent_stats.results }}"
-  when: pxe_gpu_access_enabled | bool and _pxe_rootfs_disposition == 'retained'
-
-- name: Inspect retained PXE GPU policy paths
-  ansible.builtin.stat:
-    path: "{{ pxe_nfs_root }}{{ item }}"
-    follow: false
-  loop:
-    - /etc/udev/rules.d/70-kfd.rules
-    - /etc/udev/rules.d/70-amdgpu.rules
-    - /etc/udev/rules.d/70-rocm-devices.rules
-    - /etc/udev/rules.d/70-auplc-gpu-access.rules
-  register: _pxe_retained_gpu_policy_stats
-  when: pxe_gpu_access_enabled | bool and _pxe_rootfs_disposition == 'retained'
-
-- name: Require retained PXE legacy GPU rules absent
-  ansible.builtin.assert:
-    that: not item.stat.exists
-    fail_msg: "Retained PXE rootfs has a legacy GPU rule requiring a separate migration: {{ item.item }}"
-  loop: "{{ _pxe_retained_gpu_policy_stats.results[:3] }}"
-  when: pxe_gpu_access_enabled | bool and _pxe_rootfs_disposition == 'retained'
-
-- name: Require retained PXE canonical GPU rule destination
-  ansible.builtin.assert:
-    that:
-      - _pxe_retained_gpu_policy_stats.results[3].stat.exists
-      - _pxe_retained_gpu_policy_stats.results[3].stat.isreg
-      - not _pxe_retained_gpu_policy_stats.results[3].stat.islnk
-    fail_msg: Retained PXE rootfs requires an exact canonical GPU access rule.
-  when: pxe_gpu_access_enabled | bool and _pxe_rootfs_disposition == 'retained'
-
-- name: Read retained PXE canonical GPU rule
-  ansible.builtin.slurp:
-    src: "{{ _pxe_retained_gpu_policy_stats.results[3].item }}"
-  register: _pxe_retained_canonical_gpu_rule
-  when: pxe_gpu_access_enabled | bool and _pxe_rootfs_disposition == 'retained'
-
-- name: Define retained PXE canonical GPU rules
-  ansible.builtin.set_fact:
-    _pxe_retained_canonical_rule: |
-      # Managed by auplc-installer: AMD GPU device access.
-      KERNEL=="kfd", OWNER="root", GROUP="render", MODE="0666"
-      SUBSYSTEM=="drm", KERNEL=="renderD*", DRIVERS=="amdgpu", OWNER="root", GROUP="render", MODE="0666"
-      SUBSYSTEM=="drm", KERNEL=="card*", DRIVERS=="amdgpu", OWNER="root", GROUP="video", MODE="0666"
-  when: pxe_gpu_access_enabled | bool and _pxe_rootfs_disposition == 'retained'
-
-- name: Require retained PXE canonical GPU rule
-  ansible.builtin.assert:
-    that: (_pxe_retained_canonical_gpu_rule.content | b64decode) == _pxe_retained_canonical_rule
-    fail_msg: Retained PXE rootfs has a non-canonical GPU access rule.
-  when: pxe_gpu_access_enabled | bool and _pxe_rootfs_disposition == 'retained'
+- name: Verify retained PXE AMD udev package before lifecycle changes
+  ansible.builtin.include_role:
+    name: gpu_access
+    tasks_from: verify
+  vars:
+    auplc_rootfs_path: "{{ pxe_nfs_root }}"
+    auplc_rootfs_allowed_root: "{{ pxe_nfs_allowed_root }}"
+    auplc_reject_legacy_gpu_rules: true
+  when:
+    - pxe_gpu_access_enabled | bool
+    - _pxe_rootfs_disposition == 'retained'
 
 - name: Preflight GPU access after final PXE re-preflight
   ansible.builtin.include_role:

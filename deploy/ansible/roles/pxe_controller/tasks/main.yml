@@ -172,9 +172,16 @@
 - name: Remove existing rootfs (force rebuild)
   when: pxe_rootfs_force_rebuild | bool
   ansible.builtin.shell: |
-    mountpoint -q {{ pxe_nfs_root }}/dev  && umount {{ pxe_nfs_root }}/dev  || true
-    mountpoint -q {{ pxe_nfs_root }}/sys  && umount {{ pxe_nfs_root }}/sys  || true
-    mountpoint -q {{ pxe_nfs_root }}/proc && umount {{ pxe_nfs_root }}/proc || true
+    set -e
+    if mountpoint -q {{ pxe_nfs_root }}/dev; then
+      umount {{ pxe_nfs_root }}/dev
+    fi
+    if mountpoint -q {{ pxe_nfs_root }}/sys; then
+      umount {{ pxe_nfs_root }}/sys
+    fi
+    if mountpoint -q {{ pxe_nfs_root }}/proc; then
+      umount {{ pxe_nfs_root }}/proc
+    fi
     rm -rf {{ pxe_nfs_root }}
   changed_when: true
 
@@ -299,9 +306,16 @@
   always:
     - name: Unmount virtual filesystems from chroot
       ansible.builtin.shell: |
-        mountpoint -q {{ pxe_nfs_root }}/dev  && umount {{ pxe_nfs_root }}/dev  || true
-        mountpoint -q {{ pxe_nfs_root }}/sys  && umount {{ pxe_nfs_root }}/sys  || true
-        mountpoint -q {{ pxe_nfs_root }}/proc && umount {{ pxe_nfs_root }}/proc || true
+        set -e
+        if mountpoint -q {{ pxe_nfs_root }}/dev; then
+          umount {{ pxe_nfs_root }}/dev
+        fi
+        if mountpoint -q {{ pxe_nfs_root }}/sys; then
+          umount {{ pxe_nfs_root }}/sys
+        fi
+        if mountpoint -q {{ pxe_nfs_root }}/proc; then
+          umount {{ pxe_nfs_root }}/proc
+        fi
       changed_when: true
 
 - name: Remove chroot setup script
