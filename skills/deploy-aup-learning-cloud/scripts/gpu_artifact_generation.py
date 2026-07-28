@@ -25,6 +25,7 @@ from gpu_access_resolution import (
     resolution_manifest,
     resolve_fleet,
 )
+from gpu_resolution_manifest import build_pxe_resolution_manifest
 
 DISCOVERY_TIMEOUT_BASE_SECONDS = 30
 DISCOVERY_TIMEOUT_PER_TARGET_SECONDS = 15
@@ -213,6 +214,14 @@ def read_regular_file(path: Path) -> str:
         raise DiscoveryFailure("GPU discovery evidence could not be read") from error
 
 
-def manifest_content(result: DiscoveryResult) -> str:
-    document = resolution_manifest(result.resolution)
+def manifest_content(result: DiscoveryResult, pxe_gpu_access_enabled: bool | None = None) -> str:
+    base = resolution_manifest(result.resolution)
+    document = (
+        base
+        if pxe_gpu_access_enabled is None
+        else build_pxe_resolution_manifest(
+            base,
+            gpu_access_enabled=pxe_gpu_access_enabled,
+        )
+    )
     return json.dumps(document, indent=2, sort_keys=True) + "\n"

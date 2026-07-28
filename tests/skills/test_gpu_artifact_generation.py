@@ -16,42 +16,13 @@ ROOT = Path(__file__).resolve().parents[2]
 GEN_CONFIGS = ROOT / "skills" / "deploy-aup-learning-cloud" / "scripts" / "gen_configs.py"
 
 
-def evidence_host(name: str, *, gpu: bool = False, gid: int = 993, reachable: bool = True) -> dict:
+def evidence_host(name: str, *, gpu: bool = False, reachable: bool = True) -> dict:
     bdf = "0000:03:00.0" if gpu else ""
     return {
         "host": name,
         "reachable": reachable,
         "lspci": {"rc": 0, "stdout": bdf},
         "sysfs": {"rc": 0, "stdout": bdf},
-        "render_group": {"rc": 0, "stdout": f"render:x:{gid}:\n"},
-        "groups": {"rc": 0, "stdout": f"render:x:{gid}:\n"},
-        "state": {
-            "stat_success": True,
-            "content_success": True,
-            "exists": False,
-            "regular": False,
-            "symlink": False,
-            "content": "",
-        },
-        "rule": {
-            "stat_success": True,
-            "content_success": True,
-            "exists": False,
-            "regular": False,
-            "symlink": False,
-            "content": "",
-        },
-        "legacy_rules": {
-            key: {
-                "stat_success": True,
-                "content_success": True,
-                "exists": False,
-                "regular": False,
-                "symlink": False,
-                "content": "",
-            }
-            for key in ("kfd", "amdgpu", "rocm_devices")
-        },
     }
 
 
@@ -96,11 +67,26 @@ Path(output).write_text(os.environ["FAKE_ANSIBLE_EVIDENCE"], encoding="utf-8")
     return record
 
 
+def run_generator(spec_path: Path, out_dir: Path, *extra: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, str(GEN_CONFIGS), "--spec", str(spec_path), "--out-dir", str(out_dir), *extra],
+        capture_output=True,
+        check=False,
+        text=True,
+        timeout=30,
+    )
+
+
+def write_json(path: Path, document: dict) -> Path:
+    path.write_text(json.dumps(document), encoding="utf-8")
+    return path
+
+
 def test_generator_forces_repository_host_key_checking_over_disabled_environment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     write_fake_ansible(
-        tmp_path, monkeypatch, {"version": 2, "hosts": [evidence_host("server"), evidence_host("agent")]}
+        tmp_path, monkeypatch, {"version": 1, "hosts": [evidence_host("server"), evidence_host("agent")]}
     )
     environment_record = tmp_path / "ansible-environment.json"
     monkeypatch.setenv("FAKE_ANSIBLE_ENV_RECORD", str(environment_record))
@@ -113,9 +99,8 @@ def test_generator_forces_repository_host_key_checking_over_disabled_environment
     monkeypatch.setenv("ANSIBLE_SCP_IF_SSH", "True")
     monkeypatch.setenv("ANSIBLE_SCP_EXTRA_ARGS", "-o UserKnownHostsFile=/dev/null")
     monkeypatch.setenv("ANSIBLE_SFTP_EXTRA_ARGS", "-o StrictHostKeyChecking=no")
-    spec_path = write_json(tmp_path / "spec.json", ssh_spec())
 
-    result = run_generator(spec_path, tmp_path / "generated")
+    result = run_generator(write_json(tmp_path / "spec.json", ssh_spec()), tmp_path / "generated")
 
     assert result.returncode == 0, result.stderr
     assert json.loads(environment_record.read_text(encoding="utf-8")) == {
@@ -143,9 +128,8 @@ def test_generator_surfaces_redacted_bounded_ansible_failure_diagnostics(
     )
     fake_ansible.chmod(0o755)
     monkeypatch.setenv("PATH", f"{fake_bin}:{os.environ['PATH']}")
-    spec_path = write_json(tmp_path / "spec.json", ssh_spec())
 
-    result = run_generator(spec_path, tmp_path / "generated")
+    result = run_generator(write_json(tmp_path / "spec.json", ssh_spec()), tmp_path / "generated")
 
     assert result.returncode == 1
     assert "exit code 2" in result.stderr
@@ -154,44 +138,27 @@ def test_generator_surfaces_redacted_bounded_ansible_failure_diagnostics(
     assert "token=<redacted>" in result.stderr
 
 
-def run_generator(spec_path: Path, out_dir: Path, *extra: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        [sys.executable, str(GEN_CONFIGS), "--spec", str(spec_path), "--out-dir", str(out_dir), *extra],
-        capture_output=True,
-        check=False,
-        text=True,
-        timeout=30,
-    )
-
-
-def write_json(path: Path, document: dict) -> Path:
-    path.write_text(json.dumps(document), encoding="utf-8")
-    return path
-
-
 def test_generator_discovers_mixed_ssh_targets_and_publishes_resolved_artifacts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     record = write_fake_ansible(
         tmp_path,
         monkeypatch,
-        {"version": 2, "hosts": [evidence_host("server", gpu=True), evidence_host("agent")]},
+        {"version": 1, "hosts": [evidence_host("server", gpu=True), evidence_host("agent")]},
     )
-    spec_path = write_json(tmp_path / "spec.json", ssh_spec())
     out_dir = tmp_path / "generated"
 
-    result = run_generator(spec_path, out_dir)
+    result = run_generator(write_json(tmp_path / "spec.json", ssh_spec()), out_dir)
 
     assert result.returncode == 0, result.stderr
     inventory = (out_dir / "inventory.yml").read_text(encoding="utf-8")
-    assert "auplc_render_gid: 993" in inventory
     assert inventory.count("auplc_gpu_access_enabled: true") == 1
     assert inventory.count("auplc_gpu_access_enabled: false") == 1
-    assert "renderGid: 993" in (out_dir / "values-basic-example.yaml").read_text(encoding="utf-8")
+    assert "auplc_render_gid" not in inventory
+    assert "gpuAccess" not in (out_dir / "values-basic-example.yaml").read_text(encoding="utf-8")
     assert json.loads((out_dir / "gpu-access-resolution.json").read_text(encoding="utf-8")) == {
         "version": 1,
         "status": "gpu_resolved",
-        "render_gid": 993,
         "hosts": {"agent": False, "server": True},
     }
     discovery_inventory = out_dir / ".gpu-access-discovery.inventory.yml"
@@ -207,29 +174,46 @@ def test_generator_discovers_mixed_ssh_targets_and_publishes_resolved_artifacts(
     ]
 
 
-def test_generator_publishes_null_render_gid_for_all_cpu_ssh_targets(
+def test_generator_allows_heterogeneous_gpu_hosts_and_publishes_boolean_only_artifacts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     write_fake_ansible(
         tmp_path,
         monkeypatch,
-        {"version": 2, "hosts": [evidence_host("server"), evidence_host("agent")]},
+        {"version": 1, "hosts": [evidence_host("server", gpu=True), evidence_host("agent", gpu=True)]},
     )
-    spec_path = write_json(tmp_path / "spec.json", ssh_spec())
     out_dir = tmp_path / "generated"
 
-    result = run_generator(spec_path, out_dir)
+    result = run_generator(write_json(tmp_path / "spec.json", ssh_spec()), out_dir)
 
     assert result.returncode == 0, result.stderr
     inventory = (out_dir / "inventory.yml").read_text(encoding="utf-8")
-    assert "auplc_render_gid: null" in inventory
-    assert inventory.count("auplc_gpu_access_enabled: false") == 2
-    assert "renderGid: null" in (out_dir / "values-basic-example.yaml").read_text(encoding="utf-8")
+    values = (out_dir / "values-basic-example.yaml").read_text(encoding="utf-8")
     manifest = json.loads((out_dir / "gpu-access-resolution.json").read_text(encoding="utf-8"))
-    assert manifest == {
+    assert inventory.count("auplc_gpu_access_enabled: true") == 2
+    assert "auplc_render_gid" not in inventory
+    assert "gpuAccess" not in values
+    assert manifest == {"version": 1, "status": "gpu_resolved", "hosts": {"agent": True, "server": True}}
+
+
+def test_generator_publishes_boolean_only_artifacts_for_all_cpu_ssh_targets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    write_fake_ansible(
+        tmp_path, monkeypatch, {"version": 1, "hosts": [evidence_host("server"), evidence_host("agent")]}
+    )
+    out_dir = tmp_path / "generated"
+
+    result = run_generator(write_json(tmp_path / "spec.json", ssh_spec()), out_dir)
+
+    assert result.returncode == 0, result.stderr
+    inventory = (out_dir / "inventory.yml").read_text(encoding="utf-8")
+    assert inventory.count("auplc_gpu_access_enabled: false") == 2
+    assert "auplc_render_gid" not in inventory
+    assert "gpuAccess" not in (out_dir / "values-basic-example.yaml").read_text(encoding="utf-8")
+    assert json.loads((out_dir / "gpu-access-resolution.json").read_text(encoding="utf-8")) == {
         "version": 1,
         "status": "cpu_only",
-        "render_gid": None,
         "hosts": {"agent": False, "server": False},
     }
 
@@ -238,7 +222,6 @@ def test_generator_publishes_null_render_gid_for_all_cpu_ssh_targets(
 def test_generator_does_not_publish_when_ansible_is_unavailable_or_fails(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
 ) -> None:
-    spec_path = write_json(tmp_path / "spec.json", ssh_spec())
     out_dir = tmp_path / "generated"
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
@@ -248,7 +231,7 @@ def test_generator_does_not_publish_when_ansible_is_unavailable_or_fails(
         fake_ansible.chmod(0o755)
     monkeypatch.setenv("PATH", str(fake_bin))
 
-    result = run_generator(spec_path, out_dir)
+    result = run_generator(write_json(tmp_path / "spec.json", ssh_spec()), out_dir)
 
     assert result.returncode == 1
     assert not (out_dir / "inventory.yml").exists()
@@ -256,22 +239,14 @@ def test_generator_does_not_publish_when_ansible_is_unavailable_or_fails(
     assert not (out_dir / "gpu-access-resolution.json").exists()
 
 
-@pytest.mark.parametrize(
-    "document",
-    [
-        {"version": 2, "hosts": [evidence_host("server", reachable=False), evidence_host("agent")]},
-        {
-            "version": 2,
-            "hosts": [evidence_host("server", gpu=True, gid=993), evidence_host("agent", gpu=True, gid=994)],
-        },
-    ],
-    ids=["unknown", "gid-disagreement"],
-)
 def test_generator_keeps_canonical_artifacts_unchanged_when_discovery_blocks(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, document: dict
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    write_fake_ansible(tmp_path, monkeypatch, document)
-    spec_path = write_json(tmp_path / "spec.json", ssh_spec())
+    write_fake_ansible(
+        tmp_path,
+        monkeypatch,
+        {"version": 1, "hosts": [evidence_host("server", reachable=False), evidence_host("agent")]},
+    )
     out_dir = tmp_path / "generated"
     out_dir.mkdir()
     inventory = out_dir / "inventory.yml"
@@ -281,28 +256,9 @@ def test_generator_keeps_canonical_artifacts_unchanged_when_discovery_blocks(
     values.write_text("previous values\n", encoding="utf-8")
     manifest.write_text("previous manifest\n", encoding="utf-8")
 
-    result = run_generator(spec_path, out_dir, "--force")
+    result = run_generator(write_json(tmp_path / "spec.json", ssh_spec()), out_dir, "--force")
 
     assert result.returncode == 1
     assert inventory.read_text(encoding="utf-8") == "previous inventory\n"
     assert values.read_text(encoding="utf-8") == "previous values\n"
     assert manifest.read_text(encoding="utf-8") == "previous manifest\n"
-
-
-@pytest.mark.parametrize(
-    "field",
-    ["render_gid", "gpu_access"],
-)
-def test_generator_rejects_removed_public_gpu_fields_before_running_discovery(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, field: str
-) -> None:
-    record = write_fake_ansible(tmp_path, monkeypatch, {"version": 2, "hosts": []})
-    spec = ssh_spec()
-    spec[field] = 993 if field == "render_gid" else {"hosts": []}
-    spec_path = write_json(tmp_path / "spec.json", spec)
-
-    result = run_generator(spec_path, tmp_path / "generated")
-
-    assert result.returncode == 1
-    assert f"spec.{field} is no longer accepted" in result.stderr
-    assert not record.exists()
