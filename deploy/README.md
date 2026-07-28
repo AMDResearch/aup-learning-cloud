@@ -60,8 +60,10 @@ agents' hardware is not inferred from the controller.
 
 The AMD device plugin and ROCm node labeller are cluster infrastructure
 prerequisites owned outside AUPLC. The infrastructure owner must deploy and
-maintain them according to AMD's official guidance. Before Helm, verify that the
-existing DaemonSets are ready and that GPU capacity is advertised.
+maintain them according to AMD's official guidance. If they are not installed,
+follow the pinned manual installation commands in the
+[Kubernetes components guide](k8s/README.md). Before Helm, verify that the
+DaemonSets are ready and that GPU capacity is advertised.
 
 #### SSH-preinstalled
 

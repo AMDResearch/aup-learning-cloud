@@ -48,5 +48,7 @@ provisioning owns device-node discretionary access control.
 - **SSH**: Root login with key-based auth to all nodes
 - **Hosts**: Consistent `/etc/hosts` entries across all nodes
 - **GPU integration**: The infrastructure owner must deploy and maintain the AMD
-  device plugin and ROCm node labeller outside AUPLC. Before Helm, run the
-  readiness and capacity checks in the [deployment guide](../README.md).
+  device plugin and ROCm node labeller outside AUPLC. Use the pinned manual
+  installation in the [Kubernetes components guide](../k8s/README.md) when the
+  cluster does not already provide them. Before Helm, run the readiness and
+  capacity checks in the [deployment guide](../README.md).

@@ -44,9 +44,18 @@ For multi-node deployments, the AMD device plugin and ROCm node labeller are
 cluster infrastructure prerequisites owned outside AUPLC. The infrastructure
 owner must select, deploy, and maintain them according to the
 [official AMD Kubernetes device plugin project](https://github.com/ROCm/k8s-device-plugin).
-AUPLC documentation does not install these privileged components.
 
-Before deploying the AUPLC Helm release, verify the existing infrastructure:
+To install the same pinned manifests used by `auplc-installer`:
+
+```bash
+ROCM_DEVICE_PLUGIN_COMMIT="dea1db13f05159e64d8114bca4c31f48c3cfcac6"
+kubectl apply -f \
+  "https://raw.githubusercontent.com/ROCm/k8s-device-plugin/$ROCM_DEVICE_PLUGIN_COMMIT/k8s-ds-amdgpu-dp.yaml"
+kubectl apply -f \
+  "https://raw.githubusercontent.com/ROCm/k8s-device-plugin/$ROCM_DEVICE_PLUGIN_COMMIT/k8s-ds-amdgpu-labeller.yaml"
+```
+
+Before deploying the AUPLC Helm release, verify the installation:
 
 ```bash
 kubectl rollout status -n kube-system daemonset/amdgpu-device-plugin-daemonset --timeout=5m
