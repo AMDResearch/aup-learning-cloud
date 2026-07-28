@@ -4,170 +4,11 @@
 - name: Record PXE GPU admission disposition
   ansible.builtin.set_fact:
     _pxe_rootfs_disposition: "{{ 'fresh' if _pxe_rootfs_rebuilt_this_run | bool else 'retained' }}"
-    _pxe_unanimous_live_render_gid: "{{ auplc_render_gid if auplc_render_gid is defined and auplc_render_gid is not none else none }}"
-    _pxe_resolved_render_gid: null
 
 - name: Assert PXE GPU admission phase
   ansible.builtin.assert:
     that: pxe_gpu_admission_phase in ['retained-read-only', 'final']
     fail_msg: PXE GPU admission phase is invalid.
-
-- name: Validate optional unanimous live render GID
-  ansible.builtin.assert:
-    that:
-      - _pxe_unanimous_live_render_gid is integer
-      - _pxe_unanimous_live_render_gid >= 1
-      - _pxe_unanimous_live_render_gid <= 4294967294
-    fail_msg: auplc_render_gid must be an integer between 1 and 4294967294 when supplied for a PXE GPU rootfs.
-  when:
-    - pxe_gpu_access_enabled | bool
-    - _pxe_unanimous_live_render_gid is not none
-
-- name: Inspect PXE rootfs render group for GPU admission
-  ansible.builtin.command:
-    argv: [chroot, "{{ pxe_nfs_root }}", getent, group, render]
-  register: _pxe_admission_render_group
-  changed_when: false
-  failed_when: false
-  when: pxe_gpu_access_enabled | bool
-
-- name: Require fresh PXE render group lookup outcome
-  ansible.builtin.assert:
-    that: _pxe_admission_render_group.rc in [0, 2]
-    fail_msg: Unable to determine whether the fresh PXE rootfs has a render group.
-  when: pxe_gpu_access_enabled | bool and _pxe_rootfs_disposition == 'fresh'
-
-- name: Require strict existing fresh PXE render group
-  ansible.builtin.assert:
-    that:
-      - _pxe_admission_render_group.stdout_lines | length == 1
-      - _pxe_admission_render_group.stdout.split(':') | length == 4
-      - _pxe_admission_render_group.stdout.split(':')[0] == 'render'
-      - _pxe_admission_render_group.stdout.split(':')[2] is match('^[1-9][0-9]*$')
-      - _pxe_admission_render_group.stdout.split(':')[2] | int <= 4294967294
-    fail_msg: Fresh PXE rootfs render group is malformed.
-  when: >-
-    pxe_gpu_access_enabled | bool and _pxe_rootfs_disposition == 'fresh' and
-    _pxe_admission_render_group.rc == 0
-
-- name: Require strict retained PXE render group
-  ansible.builtin.assert:
-    that:
-      - _pxe_admission_render_group.rc == 0
-      - _pxe_admission_render_group.stdout_lines | length == 1
-      - _pxe_admission_render_group.stdout.split(':') | length == 4
-      - _pxe_admission_render_group.stdout.split(':')[0] == 'render'
-      - _pxe_admission_render_group.stdout.split(':')[2] is match('^[1-9][0-9]*$')
-      - _pxe_admission_render_group.stdout.split(':')[2] | int <= 4294967294
-    fail_msg: Retained PXE rootfs must already have one valid render group.
-  when: pxe_gpu_access_enabled | bool and _pxe_rootfs_disposition == 'retained'
-
-- name: Record existing PXE render GID
-  ansible.builtin.set_fact:
-    _pxe_existing_render_gid: "{{ _pxe_admission_render_group.stdout.split(':')[2] | int }}"
-  when:
-    - pxe_gpu_access_enabled | bool
-    - _pxe_admission_render_group.rc == 0
-
-- name: List fresh PXE rootfs groups before render GID creation
-  ansible.builtin.command:
-    argv: [chroot, "{{ pxe_nfs_root }}", getent, group]
-  register: _pxe_fresh_groups
-  changed_when: false
-  failed_when: false
-  when:
-    - pxe_gpu_access_enabled | bool
-    - _pxe_rootfs_disposition == 'fresh'
-    - _pxe_existing_render_gid | default(none) is none
-    - _pxe_unanimous_live_render_gid is not none
-
-- name: Reject fresh PXE render GID collision
-  ansible.builtin.assert:
-    that:
-      - _pxe_fresh_groups.rc == 0
-      - >-
-        _pxe_fresh_groups.stdout_lines
-        | select('match', '^[^:]*:[^:]*:' ~ (_pxe_unanimous_live_render_gid | string) ~ ':')
-        | reject('match', '^render:') | list | length == 0
-    fail_msg: Fresh PXE rootfs render GID is already assigned to another group.
-  when:
-    - pxe_gpu_access_enabled | bool
-    - _pxe_rootfs_disposition == 'fresh'
-    - _pxe_existing_render_gid | default(none) is none
-    - _pxe_unanimous_live_render_gid is not none
-
-- name: Create missing fresh PXE render group
-  ansible.builtin.command:
-    argv: >-
-      {{ ['chroot', pxe_nfs_root, 'groupadd', '--system', '-g', (_pxe_unanimous_live_render_gid | string), 'render']
-         if _pxe_unanimous_live_render_gid is not none
-         else ['chroot', pxe_nfs_root, 'groupadd', '--system', 'render'] }}
-  changed_when: true
-  when:
-    - pxe_gpu_access_enabled | bool
-    - _pxe_rootfs_disposition == 'fresh'
-    - _pxe_existing_render_gid | default(none) is none
-
-- name: Read fresh PXE render group after creation
-  ansible.builtin.command:
-    argv: [chroot, "{{ pxe_nfs_root }}", getent, group, render]
-  register: _pxe_created_render_group
-  changed_when: false
-  when:
-    - pxe_gpu_access_enabled | bool
-    - _pxe_rootfs_disposition == 'fresh'
-    - _pxe_existing_render_gid | default(none) is none
-
-- name: Resolve newly created fresh PXE render GID
-  ansible.builtin.set_fact:
-    _pxe_resolved_render_gid: "{{ _pxe_created_render_group.stdout.split(':')[2] | int }}"
-  when:
-    - pxe_gpu_access_enabled | bool
-    - _pxe_rootfs_disposition == 'fresh'
-    - _pxe_existing_render_gid | default(none) is none
-
-- name: Resolve existing fresh PXE render GID
-  ansible.builtin.set_fact:
-    _pxe_resolved_render_gid: "{{ _pxe_existing_render_gid }}"
-  when:
-    - pxe_gpu_access_enabled | bool
-    - _pxe_rootfs_disposition == 'fresh'
-    - _pxe_existing_render_gid | default(none) is not none
-
-- name: Resolve retained PXE render GID
-  ansible.builtin.set_fact:
-    _pxe_resolved_render_gid: "{{ _pxe_existing_render_gid }}"
-  when:
-    - pxe_gpu_access_enabled | bool
-    - _pxe_rootfs_disposition == 'retained'
-
-- name: List retained PXE rootfs groups for render GID collision check
-  ansible.builtin.command:
-    argv: [chroot, "{{ pxe_nfs_root }}", getent, group]
-  register: _pxe_retained_groups
-  changed_when: false
-  failed_when: false
-  when: pxe_gpu_access_enabled | bool and _pxe_rootfs_disposition == 'retained'
-
-- name: Reject retained PXE render GID collision
-  ansible.builtin.assert:
-    that:
-      - _pxe_retained_groups.rc == 0
-      - >-
-        _pxe_retained_groups.stdout_lines
-        | select('match', '^[^:]*:[^:]*:' ~ (_pxe_resolved_render_gid | string) ~ ':')
-        | reject('match', '^render:') | list | length == 0
-    fail_msg: Retained PXE rootfs render GID is already assigned to another group.
-  when: pxe_gpu_access_enabled | bool and _pxe_rootfs_disposition == 'retained'
-
-- name: Require retained PXE render GID matches unanimous live GID
-  ansible.builtin.assert:
-    that: _pxe_resolved_render_gid == _pxe_unanimous_live_render_gid
-    fail_msg: Retained PXE rootfs render GID differs from the supplied unanimous live render GID; rebuild or migrate it separately.
-  when:
-    - pxe_gpu_access_enabled | bool
-    - _pxe_rootfs_disposition == 'retained'
-    - _pxe_unanimous_live_render_gid is not none
 
 - name: Inspect retained PXE canonical GPU access parents
   ansible.builtin.stat:
@@ -177,9 +18,6 @@
     - /etc
     - /etc/udev
     - /etc/udev/rules.d
-    - /var
-    - /var/lib
-    - /var/lib/auplc
   register: _pxe_retained_canonical_gpu_parent_stats
   when: pxe_gpu_access_enabled | bool and _pxe_rootfs_disposition == 'retained'
 
@@ -202,7 +40,6 @@
     - /etc/udev/rules.d/70-amdgpu.rules
     - /etc/udev/rules.d/70-rocm-devices.rules
     - /etc/udev/rules.d/70-auplc-gpu-access.rules
-    - /var/lib/auplc/gpu-access.json
   register: _pxe_retained_gpu_policy_stats
   when: pxe_gpu_access_enabled | bool and _pxe_rootfs_disposition == 'retained'
 
@@ -213,60 +50,34 @@
   loop: "{{ _pxe_retained_gpu_policy_stats.results[:3] }}"
   when: pxe_gpu_access_enabled | bool and _pxe_rootfs_disposition == 'retained'
 
-- name: Require retained PXE canonical GPU destinations
+- name: Require retained PXE canonical GPU rule destination
   ansible.builtin.assert:
     that:
-      - item.stat.exists
-      - item.stat.isreg
-      - not item.stat.islnk
-    fail_msg: "Retained PXE rootfs requires an exact canonical GPU access destination: {{ item.item }}"
-  loop: "{{ _pxe_retained_gpu_policy_stats.results[3:] }}"
+      - _pxe_retained_gpu_policy_stats.results[3].stat.exists
+      - _pxe_retained_gpu_policy_stats.results[3].stat.isreg
+      - not _pxe_retained_gpu_policy_stats.results[3].stat.islnk
+    fail_msg: Retained PXE rootfs requires an exact canonical GPU access rule.
   when: pxe_gpu_access_enabled | bool and _pxe_rootfs_disposition == 'retained'
 
-- name: Read retained PXE canonical GPU access destinations
+- name: Read retained PXE canonical GPU rule
   ansible.builtin.slurp:
-    src: "{{ item.item }}"
-  loop: "{{ _pxe_retained_gpu_policy_stats.results[3:] }}"
-  register: _pxe_retained_canonical_gpu_destinations
+    src: "{{ _pxe_retained_gpu_policy_stats.results[3].item }}"
+  register: _pxe_retained_canonical_gpu_rule
   when: pxe_gpu_access_enabled | bool and _pxe_rootfs_disposition == 'retained'
 
-- name: Define retained PXE canonical GPU rule
+- name: Define retained PXE canonical GPU rules
   ansible.builtin.set_fact:
     _pxe_retained_canonical_rule: |
       # Managed by auplc-installer: AMD GPU device access.
-      KERNEL=="kfd", OWNER="root", GROUP="render", MODE="0660"
-      SUBSYSTEM=="drm", KERNEL=="renderD*", DRIVERS=="amdgpu", OWNER="root", GROUP="render", MODE="0660"
+      KERNEL=="kfd", OWNER="root", GROUP="render", MODE="0666"
+      SUBSYSTEM=="drm", KERNEL=="renderD*", DRIVERS=="amdgpu", OWNER="root", GROUP="render", MODE="0666"
+      SUBSYSTEM=="drm", KERNEL=="card*", DRIVERS=="amdgpu", OWNER="root", GROUP="video", MODE="0666"
   when: pxe_gpu_access_enabled | bool and _pxe_rootfs_disposition == 'retained'
 
 - name: Require retained PXE canonical GPU rule
   ansible.builtin.assert:
-    that: (item.content | b64decode) == _pxe_retained_canonical_rule
-    fail_msg: "Retained PXE rootfs has a non-canonical GPU access rule: {{ item.item.item }}"
-  loop: "{{ _pxe_retained_canonical_gpu_destinations.results }}"
-  when:
-    - pxe_gpu_access_enabled | bool
-    - _pxe_rootfs_disposition == 'retained'
-    - item.item.item.endswith('70-auplc-gpu-access.rules')
-
-- name: Parse retained PXE canonical GPU state
-  ansible.builtin.set_fact:
-    _pxe_retained_canonical_state: "{{ item.content | b64decode | auplc_from_json_strict }}"
-  loop: "{{ _pxe_retained_canonical_gpu_destinations.results }}"
-  when:
-    - pxe_gpu_access_enabled | bool
-    - _pxe_rootfs_disposition == 'retained'
-    - item.item.item.endswith('gpu-access.json')
-
-- name: Require retained PXE canonical GPU state
-  ansible.builtin.assert:
-    that:
-      - _pxe_retained_canonical_state is mapping
-      - _pxe_retained_canonical_state.keys() | list | sort == ['renderGid', 'version']
-      - _pxe_retained_canonical_state.version is integer
-      - _pxe_retained_canonical_state.version == 1
-      - _pxe_retained_canonical_state.renderGid is integer
-      - _pxe_retained_canonical_state.renderGid == _pxe_resolved_render_gid
-    fail_msg: Retained PXE rootfs has a non-canonical GPU access state.
+    that: (_pxe_retained_canonical_gpu_rule.content | b64decode) == _pxe_retained_canonical_rule
+    fail_msg: Retained PXE rootfs has a non-canonical GPU access rule.
   when: pxe_gpu_access_enabled | bool and _pxe_rootfs_disposition == 'retained'
 
 - name: Preflight GPU access after final PXE re-preflight
@@ -276,8 +87,6 @@
   vars:
     auplc_rootfs_path: "{{ pxe_nfs_root }}"
     auplc_rootfs_allowed_root: "{{ pxe_nfs_allowed_root }}"
-    auplc_render_gid: "{{ _pxe_resolved_render_gid }}"
-    auplc_normalize_render_gid: "{{ _pxe_rootfs_disposition == 'fresh' }}"
   when:
     - pxe_gpu_access_enabled | bool
     - pxe_gpu_admission_phase == 'final'
@@ -289,8 +98,6 @@
   vars:
     auplc_rootfs_path: "{{ pxe_nfs_root }}"
     auplc_rootfs_allowed_root: "{{ pxe_nfs_allowed_root }}"
-    auplc_render_gid: "{{ _pxe_resolved_render_gid }}"
-    auplc_normalize_render_gid: "{{ _pxe_rootfs_disposition == 'fresh' }}"
   when:
     - pxe_gpu_access_enabled | bool
     - pxe_gpu_admission_phase == 'final'
