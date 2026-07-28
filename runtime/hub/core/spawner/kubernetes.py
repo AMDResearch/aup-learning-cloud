@@ -40,7 +40,6 @@ from jupyterhub.user import User as JupyterHubUser
 from kubespawner import KubeSpawner
 from tornado import web
 
-from core.config import MAX_RENDER_GID
 from core.metrics import (
     pod_failure_total,
     repo_clone_failed_total,
@@ -94,7 +93,6 @@ class RemoteLabKubeSpawner(KubeSpawner):
     auth_mode: str = "auto-login"
     single_node_mode: bool = False
     quota_enabled: bool | None = False
-    render_gid: int | None = None
 
     # Resource configuration (set from config)
     resource_images: dict[str, str] = {}
@@ -156,7 +154,6 @@ class RemoteLabKubeSpawner(KubeSpawner):
         cls.default_quota = config.quota.defaultQuota
         cls.minimum_quota_to_start = config.quota.minimumToStart
         cls.quota_enabled = config.quota.enabled
-        cls.render_gid = config.gpu_access.renderGid
 
         # Extract git clone settings (single source of truth: GitCloneSettings)
         git_config = config.git_clone
@@ -810,28 +807,6 @@ class RemoteLabKubeSpawner(KubeSpawner):
 
         self._has_git_init_container = False
 
-    def _add_gpu_render_gid(self) -> None:
-        """Add the configured host render group to a GPU resource's pod."""
-        if self.render_gid is None:
-            raise RuntimeError(
-                "GPU resource requires custom.gpuAccess.renderGid. "
-                "Set it to the numeric GID of the host render group before spawning GPU resources."
-            )
-        if (
-            isinstance(self.render_gid, bool)
-            or not isinstance(self.render_gid, int)
-            or not 1 <= self.render_gid <= MAX_RENDER_GID
-        ):
-            raise RuntimeError(
-                "GPU resource requires a valid custom.gpuAccess.renderGid. "
-                f"Set it to an integer between 1 and {MAX_RENDER_GID} before spawning GPU resources."
-            )
-
-        supplemental_gids = list(self.supplemental_gids or [])
-        if self.render_gid not in supplemental_gids:
-            supplemental_gids.append(self.render_gid)
-        self.supplemental_gids = supplemental_gids
-
     def _configure_spawner(self, resource_type: str, gpu_selection: str | None = None) -> None:
         """Configure the spawner based on the resource type and GPU selection."""
 
@@ -896,7 +871,6 @@ class RemoteLabKubeSpawner(KubeSpawner):
         if "amd.com/gpu" in requirements:
             self.extra_resource_guarantees = {"amd.com/gpu": str(requirements["amd.com/gpu"])}
             self.extra_resource_limits = {"amd.com/gpu": str(requirements["amd.com/gpu"])}
-            self._add_gpu_render_gid()
         elif "amd.com/npu" in requirements:
             self.log.debug("NPU DEVICE PLUGIN are removed, amd.com/npu is no more needed")
 

@@ -8,7 +8,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from pydantic import ValidationError
 
 ROOT = Path(__file__).resolve().parents[1]
 CORE = ROOT / "core"
@@ -86,7 +85,6 @@ def load_spawner_module():
         return load_module("gpu_access_test_spawner", CORE / "spawner" / "kubernetes.py")
 
 
-config = load_module("core.config", CORE / "config.py")
 kubernetes = load_spawner_module()
 RemoteLabKubeSpawner = kubernetes.RemoteLabKubeSpawner
 
@@ -110,10 +108,9 @@ class HubConfig:
         return ResourceMetadata()
 
 
-def make_spawner(render_gid: int | None, supplemental_gids: list[int] | None = None):
+def make_spawner(supplemental_gids: list[int] | None = None):
     spawner = object.__new__(RemoteLabKubeSpawner)
     spawner._hub_config = HubConfig()
-    spawner.render_gid = render_gid
     spawner.resource_images = {"cpu": "cpu-image", "gpu": "gpu-image"}
     spawner.resource_requirements = {
         "cpu": {"cpu": "1", "memory": "1Gi"},
@@ -139,42 +136,36 @@ def make_spawner(render_gid: int | None, supplemental_gids: list[int] | None = N
     return spawner
 
 
-def test_gpu_render_gid_is_injected_only_for_gpu_pods():
-    spawner = make_spawner(render_gid=993)
+def test_gpu_pod_requests_accelerator_without_changing_generic_supplemental_groups():
+    spawner = make_spawner(supplemental_gids=[1234])
 
     spawner._configure_spawner("gpu", "gpu-a")
     gpu_manifest = spawner.get_pod_manifest()
+
+    assert spawner.extra_resource_guarantees == {"amd.com/gpu": "1"}
+    assert spawner.extra_resource_limits == {"amd.com/gpu": "1"}
+    assert gpu_manifest["spec"]["securityContext"] == {"fsGroup": 100, "supplementalGroups": [1234]}
+
     spawner._configure_spawner("cpu")
     cpu_manifest = spawner.get_pod_manifest()
 
-    assert gpu_manifest["spec"]["securityContext"] == {"fsGroup": 100, "supplementalGroups": [993]}
-    assert cpu_manifest["spec"]["securityContext"] == {"fsGroup": 100}
+    assert spawner.extra_resource_guarantees == {}
+    assert spawner.extra_resource_limits == {}
+    assert cpu_manifest["spec"]["securityContext"] == {"fsGroup": 100, "supplementalGroups": [1234]}
 
 
-def test_gpu_render_gid_preserves_existing_supplemental_groups():
-    spawner = make_spawner(render_gid=993, supplemental_gids=[1234])
+def test_gpu_pod_without_generic_supplemental_groups_uses_storage_fs_group_only():
+    spawner = make_spawner()
 
     spawner._configure_spawner("gpu", "gpu-a")
 
-    assert spawner.supplemental_gids == [1234, 993]
-
-
-def test_gpu_spawn_requires_a_host_render_gid():
-    spawner = make_spawner(render_gid=None)
-
-    with pytest.raises(RuntimeError, match=r"custom\.gpuAccess\.renderGid"):
-        spawner._configure_spawner("gpu", "gpu-a")
-
-
-def test_gpu_access_config_validates_render_gid():
-    assert config.GpuAccessSettings(renderGid=993).renderGid == 993
-    assert config.ParsedConfig.from_dicts(gpu_access={"renderGid": 993}).gpuAccess.renderGid == 993
-    with pytest.raises(ValidationError, match="renderGid"):
-        config.GpuAccessSettings(renderGid=True)
+    assert spawner.extra_resource_guarantees == {"amd.com/gpu": "1"}
+    assert spawner.extra_resource_limits == {"amd.com/gpu": "1"}
+    assert spawner.get_pod_manifest()["spec"]["securityContext"] == {"fsGroup": 100}
 
 
 def test_unauthorized_gpu_selection_is_rejected_before_spawner_configuration():
-    spawner = make_spawner(render_gid=993)
+    spawner = make_spawner()
     spawner._resolve_user_resources = lambda: ["cpu"]
     spawner._configure_spawner = lambda *_args: pytest.fail("unauthorized resource configured the spawner")
 
