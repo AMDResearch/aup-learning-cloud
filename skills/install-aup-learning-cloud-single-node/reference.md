@@ -109,6 +109,10 @@ cd auplc-bundle-gfx1151-*
 sudo ./auplc-installer install
 ```
 
+The bundle includes the pinned
+`amdgpu-insecure-instinct-udev-rules_30.30.4.0-2341068.24.04_all.deb`; offline
+installation verifies and installs it from the bundle.
+
 ## Troubleshooting
 
 | Symptom | Likely cause | First checks |

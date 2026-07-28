@@ -87,14 +87,18 @@ node labeller as infrastructure prerequisites owned outside AUPLC. Verify both
 existing DaemonSets and advertised GPU capacity before Helm; do not install
 these privileged components as part of the AUPLC procedure.
 
-Keep the GPU contract distinct from storage configuration. GPU hosts use
-`root:render 0666` for `/dev/kfd` and AMD `renderD*`, and `root:video 0666` for
-AMD `card*`, so every injected GPU device node has mode `0666`. Device-plugin
-allocation is the visibility boundary and only `amd.com/gpu` requests receive
-GPU nodes. Container group membership does not participate in GPU permissions;
-host provisioning owns device-node discretionary access control. AUPLC Hub adds
-no GPU supplemental group, and the plugin does not change Unix inode permissions.
-`singleuser.fsGid: 100` is for shared storage only.
+Keep the GPU contract distinct from storage configuration. The installer,
+Ansible role, and PXE controller install AMD's
+`amdgpu-insecure-instinct-udev-rules` package at the pinned version
+`30.30.4.0-2341068.24.04`. Its rule sets mode `0666` only on `/dev/kfd` and DRM
+`renderD*` nodes. It does not change `card*`, which retains normal system policy,
+observed as `root:video 0660`.
+
+Device-plugin allocation is a separate visibility layer. Only `amd.com/gpu`
+requests receive allocated GPU devices, and the plugin does not change Unix
+inode permissions. AUPLC Hub adds no GPU supplemental group; none is required
+for the tested ROCm compute path. `singleuser.fsGid: 100` is for shared storage
+only.
 
 ## Phase 4: Verify
 

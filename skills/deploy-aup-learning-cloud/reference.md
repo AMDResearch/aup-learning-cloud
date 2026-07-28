@@ -30,16 +30,23 @@ Generation and validation must finish before Ansible or Helm changes are made.
 
 ## GPU permission contract
 
-- Host `/dev/kfd` and AMD `/dev/dri/renderD*` nodes are `root:render 0666`.
-- Host AMD `/dev/dri/card*` nodes are `root:video 0666`.
-- Every GPU device node injected into a Pod has mode `0666`.
-- Container group membership does not participate in GPU permissions; host
-  provisioning owns device-node discretionary access control.
-- AUPLC Hub adds no GPU supplemental group to user Pods.
+- Installer, Ansible, and PXE provisioning install AMD's
+  `amdgpu-insecure-instinct-udev-rules` package at version
+  `30.30.4.0-2341068.24.04`.
+- The package sets mode `0666` only on `/dev/kfd` and DRM
+  `/dev/dri/renderD*` nodes.
+- The package does not change `/dev/dri/card*`. Card nodes retain normal system
+  policy, observed as `root:video 0660`.
+- AUPLC Hub adds no GPU supplemental group. No GPU group is required for the
+  tested ROCm compute path.
 - AMD device-plugin allocation is the visibility boundary. Only Pods requesting
   `amd.com/gpu` receive GPU device nodes; the plugin does not change host inode
   ownership or mode.
 - `singleuser.fsGid: 100` controls shared storage ownership only.
+
+Operator evidence from SHC showed `rocminfo` reporting `gfx1151` and `gfx1200`
+on the two GPU nodes from UID `12345` Pods with only supplemental GID `100`.
+Their `card*` nodes remained inaccessible at mode `0660`.
 
 The infrastructure owner deploys and maintains the AMD device plugin and ROCm
 node labeller outside AUPLC. Before Helm, use the readiness and capacity checks
