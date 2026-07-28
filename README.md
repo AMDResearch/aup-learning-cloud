@@ -88,14 +88,15 @@ A successful install looks like this:
 
 ```text
 This operation needs root privileges. Requesting sudo password...
-  ✓ [1/8] Detecting GPU  (0.2s)
-  ✓ [2/8] Generating values overlay (initial)  (0.0s)
-  ✓ [3/8] Installing helm + k9s  (0.0s)
-  ✓ [4/8] Installing K3s (single-node)  (3.8s)
-  ✓ [5/8] Pulling custom + external images  (25.0s)
-  ✓ [6/8] Deploying ROCm GPU device plugin + node labeller  (0.2s)
-  ✓ [7/8] Refreshing values overlay from node labels  (0.2s)
-  ✓ [8/8] Deploying JupyterHub runtime (helm install + wait)  (9.2s)
+  ✓ [1/9] Detecting GPU  (0.2s)
+  ✓ [2/9] Provisioning GPU device access  (0.1s)
+  ✓ [3/9] Generating values overlay (initial)  (0.0s)
+  ✓ [4/9] Installing helm + k9s  (0.0s)
+  ✓ [5/9] Installing K3s (single-node)  (3.8s)
+  ✓ [6/9] Pulling custom + external images  (25.0s)
+  ✓ [7/9] Deploying ROCm GPU device plugin + node labeller  (0.2s)
+  ✓ [8/9] Refreshing values overlay from node labels  (0.2s)
+  ✓ [9/9] Deploying JupyterHub runtime (helm install + wait)  (9.2s)
 
    _    _   _ ____    _                          _                  ____ _                 _
   / \  | | | |  _ \  | |    ___  __ _ _ __ _ __ (_)_ __   __ _     / ___| | ___  _   _  __| |
