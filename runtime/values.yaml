@@ -61,10 +61,6 @@ custom:
   adminUser:
     enabled: false
 
-  # The installer overlay supplies the host render GID for GPU user pods.
-  gpuAccess:
-    renderGid: null
-
   # ============================================================================
   # Notifications
   # ============================================================================
@@ -672,7 +668,8 @@ monitoring:
     enabled: false
 
 singleuser:
-  # Preserve storage volume ownership without replacing KubeSpawner's security context.
+  # Storage ownership only. AUPLC runtime does not inject GPU groups.
+  # An amd.com/gpu request is the device-visibility boundary; injected nodes are 0666.
   fsGid: 100
 
   storage:
