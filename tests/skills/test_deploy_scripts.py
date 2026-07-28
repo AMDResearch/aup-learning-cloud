@@ -80,20 +80,12 @@ inventory = Path(arguments[arguments.index('-i') + 1])
 output = next(value.split('=', 1)[1] for value in arguments if value.startswith('gpu_access_discovery_output_path='))
 hosts = [line.strip()[:-1] for line in inventory.read_text(encoding='utf-8').splitlines() if line.startswith('        ') and line.rstrip().endswith(':')]
 evidence = {
-    'version': 2,
+        'version': 1,
     'hosts': [{
         'host': host,
         'reachable': True,
         'lspci': {'rc': 0, 'stdout': ''},
         'sysfs': {'rc': 0, 'stdout': ''},
-        'render_group': {'rc': 0, 'stdout': 'render:x:993:\\n'},
-        'groups': {'rc': 0, 'stdout': 'render:x:993:\\n'},
-        'state': {'stat_success': True, 'content_success': True, 'exists': False, 'regular': False, 'symlink': False, 'content': ''},
-        'rule': {'stat_success': True, 'content_success': True, 'exists': False, 'regular': False, 'symlink': False, 'content': ''},
-        'legacy_rules': {
-            key: {'stat_success': True, 'content_success': True, 'exists': False, 'regular': False, 'symlink': False, 'content': ''}
-            for key in ('kfd', 'amdgpu', 'rocm_devices')
-        },
     } for host in hosts],
 }
 Path(output).write_text(json.dumps(evidence), encoding='utf-8')
@@ -123,15 +115,11 @@ def write_resolved_gpu_artifacts(repo: Path) -> tuple[Path, Path, Path]:
         agent:
           ansible_host: 192.168.1.11
           auplc_gpu_access_enabled: false
-  vars:
-    auplc_render_gid: 993
 """,
     )
     values = write_file(
         repo / "generated/values-basic-example.yaml",
         """custom:
-  gpuAccess:
-    renderGid: 993
   resources:
     metadata: {}
 """,
@@ -142,7 +130,6 @@ def write_resolved_gpu_artifacts(repo: Path) -> tuple[Path, Path, Path]:
             {
                 "version": 1,
                 "status": "gpu_resolved",
-                "render_gid": 993,
                 "hosts": {"agent": False, "server": True},
             }
         ),
@@ -921,15 +908,11 @@ def test_validator_accepts_consistent_cpu_only_gpu_artifacts(tmp_path: Path) -> 
         agent:
           ansible_host: 192.168.1.11
           auplc_gpu_access_enabled: false
-  vars:
-    auplc_render_gid: null
 """,
     )
     values = write_file(
         repo / "generated/values-basic-example.yaml",
         """custom:
-  gpuAccess:
-    renderGid: null
   resources:
     metadata: {}
 """,
@@ -940,7 +923,6 @@ def test_validator_accepts_consistent_cpu_only_gpu_artifacts(tmp_path: Path) -> 
             {
                 "version": 1,
                 "status": "cpu_only",
-                "render_gid": None,
                 "hosts": {"agent": False, "server": False},
             }
         ),
@@ -991,15 +973,15 @@ def test_validator_accepts_consistent_gpu_resolved_artifacts(tmp_path: Path) -> 
     [
         ("not JSON", "GPU resolution manifest is malformed"),
         (
-            '{"version":1,"status":"pending","render_gid":993,"hosts":{"agent":false,"server":true}}',
+            '{"version":1,"status":"pending","hosts":{"agent":false,"server":true}}',
             "GPU resolution manifest status must be cpu_only or gpu_resolved",
         ),
         (
-            '{"version":1,"status":"gpu_resolved","render_gid":993,"hosts":{"server":true,"server":false}}',
+            '{"version":1,"status":"gpu_resolved","hosts":{"server":true,"server":false}}',
             "duplicate JSON key 'server'",
         ),
         (
-            '{"version":1,"status":"gpu_resolved","render_gid":993,"hosts":{"ser\\u0076er":true,"server":false}}',
+            '{"version":1,"status":"gpu_resolved","hosts":{"ser\\u0076er":true,"server":false}}',
             "duplicate JSON key 'server'",
         ),
     ],
@@ -1044,8 +1026,6 @@ def test_validator_rejects_malformed_pending_or_duplicate_gpu_resolution(
         agent:
           ansible_host: 192.168.1.11
           auplc_gpu_access_enabled: false
-  vars:
-    auplc_render_gid: 993
 """,
             "inventory host 'server' must define exactly one auplc_gpu_access_enabled",
         ),
@@ -1062,8 +1042,6 @@ def test_validator_rejects_malformed_pending_or_duplicate_gpu_resolution(
         agent:
           ansible_host: 192.168.1.11
           auplc_gpu_access_enabled: false
-  vars:
-    auplc_render_gid: 993
 """,
             "inventory host 'server' has malformed auplc_gpu_access_enabled",
         ),
@@ -1081,8 +1059,6 @@ def test_validator_rejects_malformed_pending_or_duplicate_gpu_resolution(
         agent:
           ansible_host: 192.168.1.11
           auplc_gpu_access_enabled: false
-  vars:
-    auplc_render_gid: 993
 """,
             "inventory host 'server' must define exactly one auplc_gpu_access_enabled",
         ),
@@ -1136,24 +1112,14 @@ def test_validator_rejects_missing_generated_gpu_resolution_artifact(tmp_path: P
     assert "GPU resolution manifest not found" in result.stdout
 
 
-def test_validator_rejects_mismatched_host_boolean_and_render_gid(tmp_path: Path) -> None:
+def test_validator_rejects_mismatched_host_boolean(tmp_path: Path) -> None:
     repo = tmp_path / "checkout"
     inventory, values, resolution = write_resolved_gpu_artifacts(repo)
-    values.write_text(
-        """custom:
-  gpuAccess:
-    renderGid: 994
-  resources:
-    metadata: {}
-""",
-        encoding="utf-8",
-    )
     resolution.write_text(
         json.dumps(
             {
                 "version": 1,
                 "status": "gpu_resolved",
-                "render_gid": 993,
                 "hosts": {"agent": True, "server": True},
             }
         ),
@@ -1176,10 +1142,9 @@ def test_validator_rejects_mismatched_host_boolean_and_render_gid(tmp_path: Path
 
     assert result.returncode == 1
     assert "inventory host 'agent' GPU access boolean disagrees" in result.stdout
-    assert "render GIDs disagree" in result.stdout
 
 
-def test_validator_rejects_pxe_rootfs_boolean_and_gid_mismatch(tmp_path: Path) -> None:
+def test_validator_rejects_pxe_rootfs_boolean_mismatch(tmp_path: Path) -> None:
     repo = tmp_path / "checkout"
     inventory = write_file(
         repo / "generated/inventory.yml",
@@ -1192,20 +1157,17 @@ def test_validator_rejects_pxe_rootfs_boolean_and_gid_mismatch(tmp_path: Path) -
           auplc_gpu_access_enabled: false
     agent:
       hosts: {}
-  vars:
-    auplc_render_gid: 993
 """,
     )
-    values = write_file(repo / "generated/values-basic-example.yaml", "custom:\n  gpuAccess:\n    renderGid: 993\n")
+    values = write_file(repo / "generated/values-basic-example.yaml", "custom:\n  resources:\n    metadata: {}\n")
     resolution = write_file(
         repo / "generated/gpu-access-resolution.json",
         json.dumps(
             {
                 "version": 1,
-                "status": "gpu_resolved",
-                "render_gid": 993,
+                "status": "cpu_only",
                 "hosts": {"server": False},
-                "pxe_rootfs": {"gpu_access_enabled": True, "render_gid": 993},
+                "pxe_rootfs": {"gpu_access_enabled": True},
             }
         ),
     )
@@ -1218,7 +1180,6 @@ pxe_dns_servers: 8.8.8.8
 pxe_k3s_server_ips: [192.168.1.10]
 pxe_rootfs_authorized_keys: [ssh-ed25519-AAA]
 pxe_k3s_version: v1.32.3+k3s1
-auplc_render_gid: 994
 pxe_gpu_access_enabled: false
 """,
     )
@@ -1241,7 +1202,6 @@ pxe_gpu_access_enabled: false
 
     assert result.returncode == 1
     assert "pxe_gpu_access_enabled disagrees" in result.stdout
-    assert "PXE auplc_render_gid disagrees" in result.stdout
 
 
 def test_generator_rejects_unknown_accelerator_keys_before_writing_artifacts(tmp_path: Path) -> None:
@@ -1611,20 +1571,6 @@ def test_generator_exposes_extracted_generation_and_artifact_modules() -> None:
     assert callable(artifacts.publish_artifacts)
 
 
-def test_generator_rejects_legacy_public_gpu_policy_fields_before_discovery(tmp_path: Path) -> None:
-    spec = generator_spec()
-    spec["render_gid"] = 1055
-    spec["gpu_access"] = {"hosts": [], "pxe_rootfs_enabled": False}
-    spec_path = write_file(tmp_path / "spec.json", json.dumps(spec))
-    out_dir = tmp_path / "generated"
-
-    result = run_script(GEN_CONFIGS, "--spec", str(spec_path), "--out-dir", str(out_dir))
-
-    assert result.returncode == 1
-    assert "spec.render_gid is no longer accepted" in result.stderr
-    assert not out_dir.exists()
-
-
 def test_generator_uses_fake_ansible_discovery_to_publish_resolved_ssh_policy(tmp_path: Path) -> None:
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
@@ -1640,13 +1586,8 @@ def host(name, bdf):
     return {
         'host': name, 'reachable': True,
         'lspci': {'rc': 0, 'stdout': bdf}, 'sysfs': {'rc': 0, 'stdout': bdf},
-        'render_group': {'rc': 0, 'stdout': 'render:x:993:\\n'},
-        'groups': {'rc': 0, 'stdout': 'render:x:993:\\n'},
-        'state': {'stat_success': True, 'content_success': True, 'exists': False, 'regular': False, 'symlink': False, 'content': ''},
-        'rule': {'stat_success': True, 'content_success': True, 'exists': False, 'regular': False, 'symlink': False, 'content': ''},
-        'legacy_rules': {key: {'stat_success': True, 'content_success': True, 'exists': False, 'regular': False, 'symlink': False, 'content': ''} for key in ('kfd', 'amdgpu', 'rocm_devices')},
     }
-pathlib.Path(output).write_text(json.dumps({'version': 2, 'hosts': [host('server', '0000:03:00.0'), host('agent', '')]}), encoding='utf-8')
+pathlib.Path(output).write_text(json.dumps({'version': 1, 'hosts': [host('server', '0000:03:00.0'), host('agent', '')]}), encoding='utf-8')
 """,
         encoding="utf-8",
     )
@@ -1665,9 +1606,9 @@ pathlib.Path(output).write_text(json.dumps({'version': 2, 'hosts': [host('server
 
     assert result.returncode == 0, result.stdout + result.stderr
     inventory = (out_dir / "inventory.yml").read_text(encoding="utf-8")
-    assert "auplc_render_gid: 993" in inventory
     assert inventory.count("auplc_gpu_access_enabled: true") == 1
     assert inventory.count("auplc_gpu_access_enabled: false") == 1
-    assert "renderGid: 993" in (out_dir / "values-basic-example.yaml").read_text(encoding="utf-8")
+    assert "auplc_render_gid" not in inventory
+    assert "gpuAccess" not in (out_dir / "values-basic-example.yaml").read_text(encoding="utf-8")
     manifest = json.loads((out_dir / "gpu-access-resolution.json").read_text(encoding="utf-8"))
     assert manifest["hosts"] == {"agent": False, "server": True}

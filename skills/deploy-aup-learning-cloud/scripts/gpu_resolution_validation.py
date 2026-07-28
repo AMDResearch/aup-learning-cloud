@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from gpu_resolution_parsing import (
-    collect_effective_gpu_gid,
     configured_path,
     parse_gpu_inventory,
     parse_gpu_resolution,
@@ -17,7 +16,6 @@ class GpuArtifactValidationRequest:
     repo: Path
     inventory_path: str
     resolution_path: str
-    values: list[str]
     topology: str
     pxe_vars_path: Path
     has_prior_errors: bool
@@ -85,8 +83,7 @@ def check_gpu_artifacts(request: GpuArtifactValidationRequest) -> GpuArtifactVal
         return GpuArtifactValidationResult([f"GPU resolution manifest not found: {resolution_file}"], [])
     inventory, inventory_errors = parse_gpu_inventory(inventory_file.read_text(encoding="utf-8"))
     resolution, resolution_errors = parse_gpu_resolution(resolution_file.read_text(encoding="utf-8"), request.topology)
-    helm_gid, helm_errors = collect_effective_gpu_gid(request.repo, request.values)
-    errors.extend([*inventory_errors, *resolution_errors, *helm_errors])
+    errors.extend([*inventory_errors, *resolution_errors])
     if inventory is None or resolution is None or errors:
         return GpuArtifactValidationResult(errors, [])
     if set(inventory.hosts) != set(resolution.hosts):
@@ -104,22 +101,10 @@ def check_gpu_artifacts(request: GpuArtifactValidationRequest) -> GpuArtifactVal
             return GpuArtifactValidationResult(errors, [])
         if pxe_policy.enabled != resolution.pxe_rootfs_enabled:
             errors.append("PXE pxe_gpu_access_enabled disagrees with GPU resolution manifest pxe_rootfs")
-        if resolution.pxe_rootfs_enabled and resolution.pxe_rootfs_gid is None:
-            errors.append("GPU-enabled PXE rootfs requires a numeric render GID")
-        if not resolution.pxe_rootfs_enabled and resolution.pxe_rootfs_gid is not None:
-            errors.append("GPU-disabled PXE rootfs requires a null render GID")
-        if resolution.pxe_rootfs_enabled and pxe_policy.render_gid != resolution.pxe_rootfs_gid:
-            errors.append("PXE auplc_render_gid disagrees with GPU resolution manifest pxe_rootfs render_gid")
-    gids = [inventory.render_gid, helm_gid, resolution.render_gid]
-    if pxe_policy is not None:
-        gids.append(pxe_policy.render_gid)
-    if len(set(gids)) != 1:
-        errors.append("inventory, Helm, PXE, and GPU resolution render GIDs disagree")
-    enabled_scope = any(resolution.hosts.values()) or resolution.pxe_rootfs_enabled is True
     if resolution.status == "cpu_only":
-        if enabled_scope or resolution.render_gid is not None or any(gid is not None for gid in gids):
-            errors.append("cpu_only GPU resolution requires all host/rootfs booleans false and all render GIDs null")
-    elif not enabled_scope or resolution.render_gid is None:
-        errors.append("gpu_resolved GPU resolution requires an enabled scope and a numeric render GID")
+        if any(resolution.hosts.values()):
+            errors.append("cpu_only GPU resolution requires all host booleans false")
+    elif not any(resolution.hosts.values()):
+        errors.append("gpu_resolved GPU resolution requires an enabled host")
     passed = [] if request.has_prior_errors or errors else ["GPU access artifacts agree"]
     return GpuArtifactValidationResult(errors, passed)

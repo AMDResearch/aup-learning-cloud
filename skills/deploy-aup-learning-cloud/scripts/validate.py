@@ -12,8 +12,8 @@ failed spawn:
   * nodeSelectors for the accelerators actually referenced by effective
     custom.resources.metadata.*.acceleratorKeys, checked against
     detect_cluster.sh output when supplied;
-  * generated inventory, GPU-resolution manifest, Helm render GID, and PXE
-    rootfs policy agree when generated artifacts are supplied;
+   * generated inventory, GPU-resolution manifest, and PXE rootfs policy agree
+     when generated artifacts are supplied;
   * (optional) the chart does not render: a `helm template` dry-run.
 
 This intentionally uses regex/line scanning rather than a YAML parser so it
@@ -254,7 +254,6 @@ def main(argv=None) -> int:
                 repo=repo,
                 inventory_path=args.inventory,
                 resolution_path=args.gpu_resolution,
-                values=args.values,
                 topology=args.topology,
                 pxe_vars_path=pxe_vars_path(repo, args.pxe_vars),
                 has_prior_errors=bool(errors),
