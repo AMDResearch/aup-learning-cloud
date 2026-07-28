@@ -27,6 +27,7 @@ from auplc_installer.catalog import (
 )
 from auplc_installer.gpu import GpuConfig, SkuEntry, append_product
 from auplc_installer.overlay import (
+    GPU_RESOURCE_KEYS,
     emit_overlay,
     generate_values_overlay,
     try_load_courses_from_overlay,
@@ -45,6 +46,7 @@ def _render(
     courses: CourseSelection,
     offline_mode: bool = False,
     image_tag: str = "v1.0",
+    render_gid: int | None = 993,
 ) -> tuple[str, dict]:
     text = emit_overlay(
         cfg,
@@ -52,6 +54,7 @@ def _render(
         image_tag=image_tag,
         courses=courses,
         offline_mode=offline_mode,
+        render_gid=render_gid,
     )
     return text, yaml.safe_load(text)
 
@@ -93,6 +96,7 @@ def _write_and_read_back(courses: CourseSelection) -> CourseSelection | None:
             image_tag="v1.0",
             courses=courses,
             offline_mode=False,
+            render_gid=993,
             overlay_path=path,
         )
         return try_load_courses_from_overlay(path)
@@ -104,6 +108,36 @@ def test_default_selection_round_trips_valid_yaml() -> None:
     assert "custom" in parsed
     # default selection must NOT emit teams.mapping
     assert "teams" not in parsed["custom"]
+
+
+def test_overlay_emits_explicit_gpu_access_gid_without_global_pod_groups() -> None:
+    text = emit_overlay(
+        _strix_halo_cfg(),
+        image_registry="ghcr.io/amdresearch",
+        image_tag="v1.0",
+        courses=CourseSelection.default(),
+        offline_mode=False,
+        render_gid=993,
+    )
+    parsed = yaml.safe_load(text)
+
+    assert parsed["custom"]["gpuAccess"]["renderGid"] == 993
+    assert "supplementalGroups" not in text
+
+
+def test_overlay_emits_null_render_gid_without_removing_gpu_resources() -> None:
+    _, parsed = _render(
+        _strix_halo_cfg(),
+        courses=CourseSelection.default(),
+        render_gid=None,
+    )
+
+    custom = parsed["custom"]
+    assert custom["gpuAccess"]["renderGid"] is None
+    assert set(custom["resources"]["images"]) == set(GPU_RESOURCE_KEYS)
+    assert set(custom["resources"]["metadata"]) == set(GPU_RESOURCE_KEYS)
+    assert "teams" not in custom
+    assert "profiles" not in custom
 
 
 def test_resource_images_use_primary_tag() -> None:

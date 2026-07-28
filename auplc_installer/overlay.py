@@ -47,6 +47,7 @@ def emit_overlay(
     image_tag: str,
     courses: CourseSelection,
     offline_mode: bool,
+    render_gid: int | None,
 ) -> str:
     """Render the overlay as a string. Pure function — no I/O."""
     buf = StringIO()
@@ -66,6 +67,11 @@ def emit_overlay(
     buf.write(f"# Env selection : {courses.description()}\n")
     buf.write("# Regenerated on install/upgrade.\n")
     buf.write("custom:\n")
+    buf.write("  gpuAccess:\n")
+    if render_gid is None:
+        buf.write("    renderGid: null\n")
+    else:
+        buf.write(f"    renderGid: {render_gid}\n")
 
     # --- accelerators ---
     any_accel_emitted = False
@@ -164,6 +170,7 @@ def generate_values_overlay(
     image_tag: str,
     courses: CourseSelection,
     offline_mode: bool,
+    render_gid: int | None,
     overlay_path: Path,
 ) -> Path:
     """Render the overlay and write it to ``overlay_path``. Returns the path."""
@@ -175,6 +182,7 @@ def generate_values_overlay(
         image_tag=image_tag,
         courses=courses,
         offline_mode=offline_mode,
+        render_gid=render_gid,
     )
     overlay_path.write_text(text, encoding="utf-8")
     return overlay_path
