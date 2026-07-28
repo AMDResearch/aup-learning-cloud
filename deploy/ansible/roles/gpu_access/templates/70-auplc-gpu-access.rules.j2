@@ -1,0 +1,3 @@
+# Managed by auplc-installer: AMD GPU device access.
+KERNEL=="kfd", OWNER="root", GROUP="render", MODE="0660"
+SUBSYSTEM=="drm", KERNEL=="renderD*", DRIVERS=="amdgpu", OWNER="root", GROUP="render", MODE="0660"

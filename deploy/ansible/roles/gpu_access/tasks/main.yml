@@ -1,0 +1,14 @@
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+
+---
+- name: Validate GPU access configuration
+  ansible.builtin.import_tasks: validate.yml
+  when: auplc_gpu_access_enabled | bool
+
+- name: Preflight GPU access target
+  ansible.builtin.import_tasks: preflight.yml
+  when: auplc_gpu_access_enabled | bool
+
+- name: Apply GPU access configuration
+  ansible.builtin.import_tasks: apply.yml
+  when: auplc_gpu_access_enabled | bool

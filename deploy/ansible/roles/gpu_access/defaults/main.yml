@@ -1,0 +1,13 @@
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+
+---
+# Set this explicitly in cluster inventory or PXE extra vars. The role never
+# assumes a site-specific GID.
+auplc_render_gid: null
+auplc_normalize_render_gid: false
+auplc_gpu_access_enabled: false
+# Set for a PXE rootfs. Leave empty to configure the live host.
+auplc_rootfs_path: ""
+# Rootfs adapters must explicitly constrain their writable target below this
+# canonical directory. Live hosts leave this empty.
+auplc_rootfs_allowed_root: ""
