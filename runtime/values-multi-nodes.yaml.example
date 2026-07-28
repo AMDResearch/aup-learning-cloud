@@ -139,6 +139,11 @@ custom:
     defaultPersistence: true
     allowPersistenceChoice: false
 
+  # Generated deployment overlays resolve this from corroborated host evidence.
+  # Keep null in the base example; do not choose a fleet GID manually here.
+  gpuAccess:
+    renderGid: null
+
   # --------------------------------------------------------------------------
   # Accelerator Configuration
   # --------------------------------------------------------------------------
@@ -576,11 +581,8 @@ monitoring:
     enabled: false
 
 singleuser:
-  extraPodConfig:
-    securityContext:
-      fsGroup: 100
-      supplementalGroups:
-        - 993
+  # Must match the storage ownership group used by the shared volume.
+  fsGid: 100
   storage:
     dynamic:
       storageClass: nfs-client
