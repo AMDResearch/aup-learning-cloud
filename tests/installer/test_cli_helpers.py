@@ -41,6 +41,7 @@ def _write_overlay(path: Path, courses: CourseSelection) -> None:
         image_tag="v1.0",
         courses=courses,
         offline_mode=False,
+        render_gid=993,
         overlay_path=path,
     )
 
