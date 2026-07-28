@@ -12,8 +12,9 @@ failed spawn:
   * nodeSelectors for the accelerators actually referenced by effective
     custom.resources.metadata.*.acceleratorKeys, checked against
     detect_cluster.sh output when supplied;
-   * generated inventory, GPU-resolution manifest, and PXE rootfs policy agree
-     when generated artifacts are supplied;
+   * direct inventory GPU access booleans are valid, or generated inventory,
+     GPU-resolution manifest, and PXE rootfs policy agree when both artifacts
+     are supplied;
   * (optional) the chart does not render: a `helm template` dry-run.
 
 This intentionally uses regex/line scanning rather than a YAML parser so it
@@ -36,18 +37,21 @@ Exit codes: 0 if every check passed (warnings allowed); 1 if any check failed;
 import argparse
 import json
 import re
-import shutil
-import subprocess
 import sys
 from pathlib import Path
 
 from config_common import DuplicateJsonKeyError, strict_json_loads
-from gpu_resolution_validation import GpuArtifactValidationRequest, check_accelerator_labels, check_gpu_artifacts
+from gpu_resolution_validation import (
+    GpuArtifactValidationRequest,
+    check_accelerator_labels,
+    check_gpu_artifacts,
+    check_gpu_inventory,
+)
+from helm_validation import HelmValidationReporter, check_helm
 from values_resolution_parsing import collect_effective_values
 
 PXE_PLAYBOOK = "deploy/ansible/playbooks/pb-pxe-controller.yml"
 INVENTORY = "deploy/ansible/inventory.yml"
-CHART = "runtime/chart"
 
 errors: list[str] = []
 warnings: list[str] = []
@@ -168,27 +172,6 @@ def check_version_sync(repo: Path, configured_path: str | None = None) -> None:
         )
 
 
-def check_helm(repo: Path, values: list[str]) -> None:
-    if not shutil.which("helm"):
-        warn("helm not on PATH; skipped chart dry-run")
-        return
-    chart = repo / CHART
-    if not chart.exists():
-        warn(f"chart not found at {CHART}; skipped dry-run")
-        return
-    cmd = ["helm", "template", "jupyterhub", str(chart)]
-    for rel in values or ["runtime/values.yaml"]:
-        p = (repo / rel) if not Path(rel).is_absolute() else Path(rel)
-        if p.exists():
-            cmd += ["-f", str(p)]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
-    if proc.returncode == 0:
-        ok("helm template rendered the chart successfully")
-    else:
-        tail = (proc.stderr or proc.stdout).strip().splitlines()[-5:]
-        fail("helm template failed:\n        " + "\n        ".join(tail))
-
-
 def main(argv=None) -> int:
     global errors, passed, warnings
     errors = []
@@ -209,8 +192,10 @@ def main(argv=None) -> int:
         "--pxe-vars",
         help="PXE vars file to validate instead of deploy/ansible/playbooks/pb-pxe-controller.yml",
     )
-    ap.add_argument("--inventory", help="generated inventory.yml to cross-check with GPU resolution")
-    ap.add_argument("--gpu-resolution", help="generated gpu-access-resolution.json to cross-check")
+    ap.add_argument("--inventory", help="inventory.yml to validate directly or cross-check with GPU resolution")
+    ap.add_argument(
+        "--gpu-resolution", help="generated gpu-access-resolution.json; requires --inventory for consistency checks"
+    )
     ap.add_argument("--cluster", help="detect_cluster.sh JSON output to match labels against")
     ap.add_argument("--helm-dry-run", action="store_true", help="also run `helm template`")
     ap.add_argument("--json", action="store_true", help="emit a JSON report instead of text")
@@ -246,8 +231,14 @@ def main(argv=None) -> int:
         warn(message)
     for message in accelerator_result.passed:
         ok(message)
-    if bool(args.inventory) != bool(args.gpu_resolution):
-        fail("--inventory and --gpu-resolution must be supplied together")
+    if args.gpu_resolution and not args.inventory:
+        fail("--gpu-resolution requires --inventory")
+    elif args.inventory and not args.gpu_resolution:
+        inventory_result = check_gpu_inventory(repo, args.inventory)
+        for message in inventory_result.errors:
+            fail(message)
+        for message in inventory_result.passed:
+            ok(message)
     elif args.inventory and args.gpu_resolution:
         artifact_result = check_gpu_artifacts(
             GpuArtifactValidationRequest(
@@ -264,7 +255,7 @@ def main(argv=None) -> int:
         for message in artifact_result.passed:
             ok(message)
     if args.helm_dry_run:
-        check_helm(repo, args.values)
+        check_helm(repo, args.values, HelmValidationReporter(ok=ok, warn=warn, fail=fail))
 
     if args.json:
         print(

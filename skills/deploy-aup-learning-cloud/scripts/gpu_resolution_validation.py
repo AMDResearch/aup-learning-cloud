@@ -34,6 +34,14 @@ class AcceleratorValidationResult:
     passed: list[str]
 
 
+def check_gpu_inventory(repo: Path, inventory_path: str) -> GpuArtifactValidationResult:
+    inventory_file = configured_path(repo, inventory_path)
+    if not inventory_file.exists():
+        return GpuArtifactValidationResult([f"inventory not found: {inventory_file}"], [])
+    _, errors = parse_gpu_inventory(inventory_file.read_text(encoding="utf-8"))
+    return GpuArtifactValidationResult(errors, [] if errors else ["GPU access inventory is valid"])
+
+
 def check_accelerator_labels(
     accelerators: dict[str, str], metadata: dict[str, list[str]], cluster: dict | None
 ) -> AcceleratorValidationResult:
