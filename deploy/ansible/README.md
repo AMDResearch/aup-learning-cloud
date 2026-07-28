@@ -24,32 +24,14 @@ SOFTWARE.
 
 K3s cluster setup playbooks based on [k3s-ansible](https://github.com/k3s-io/k3s-ansible/tree/master).
 
-For full instructions, see [Multi-Node Cluster Deployment](https://amdresearch.github.io/aup-learning-cloud/installation/multi-node.html).
+For the generator, canonical inventory, validator arguments, and topology-specific
+playbook commands, see the authoritative [deployment guide](../README.md).
 
-## Quick Reference
-
-```bash
-# Configure inventory
-vim inventory.yml
-
-# Base setup
-sudo ansible-playbook playbooks/pb-base.yml
-
-# Deploy K3s cluster
-sudo ansible-playbook playbooks/pb-k3s-site.yml
-
-# Install ROCm GPU drivers
-sudo ansible-playbook playbooks/pb-rocm.yml
-
-# Add new nodes (update inventory.yml first)
-sudo ansible-playbook playbooks/pb-k3s-site.yml
-
-# Reset cluster
-sudo ansible-playbook playbooks/pb-k3s-reset.yml
-
-# Reset single node
-sudo ansible-playbook playbooks/pb-k3s-reset.yml --limit <node_name>
-```
+Don't write GPU policy into the inventory by hand. SSH generation discovers GPU
+hosts and their shared `render` group ID. PXE generation uses only
+`pxe.diskless_agents_have_amd_gpus`; when enabled, the controller playbook uses
+private bootstrap inputs and publishes canonical files automatically after a
+successful rootfs build.
 
 ## Prerequisites
 
