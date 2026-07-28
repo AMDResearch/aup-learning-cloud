@@ -193,8 +193,8 @@ function App() {
     const rateDesc = minRate === maxRate ? `${minRate} credits/min` : `${minRate}–${maxRate} credits/min`;
     const autoOption: Accelerator = {
       key: 'auto',
-      displayName: 'Auto (Best Available)',
-      description: 'Auto select',
+      displayName: 'Auto',
+      description: 'Auto select best available GPU node',
       quotaRate: minRate,
     };
     return [autoOption, ...real];
