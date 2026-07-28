@@ -785,8 +785,7 @@ class RemoteLabKubeSpawner(KubeSpawner):
                 pods = await v1.list_pod_for_all_namespaces(field_selector="status.phase=Running")
 
             node_labels = {
-                node.metadata.name: (node.metadata.labels or {}, node.status.allocatable or {})
-                for node in nodes.items
+                node.metadata.name: (node.metadata.labels or {}, node.status.allocatable or {}) for node in nodes.items
             }
 
             used_gpus: dict[str, int] = {}
