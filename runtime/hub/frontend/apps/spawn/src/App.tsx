@@ -194,7 +194,7 @@ function App() {
     const autoOption: Accelerator = {
       key: 'auto',
       displayName: 'Auto (Best Available)',
-      description: `Automatically selected based on availability. Rate: ${rateDesc}`,
+      description: 'Auto select',
       quotaRate: minRate,
     };
     return [autoOption, ...real];
