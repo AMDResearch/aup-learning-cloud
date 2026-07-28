@@ -45,6 +45,13 @@ cluster infrastructure prerequisites owned outside AUPLC. The infrastructure
 owner must select, deploy, and maintain them according to the
 [official AMD Kubernetes device plugin project](https://github.com/ROCm/k8s-device-plugin).
 
+The device plugin allocates devices to Pods; it does not set host device-node
+permissions. Host provisioning separately installs the pinned
+`amdgpu-insecure-instinct-udev-rules` package at version
+`30.30.4.0-2341068.24.04`. That package sets mode `0666` only on `/dev/kfd` and
+DRM `renderD*` nodes and leaves `card*` under normal system policy. AUPLC adds
+no supplemental GPU group; none is required for the tested ROCm compute path.
+
 To install the same pinned manifests used by `auplc-installer`:
 
 ```bash

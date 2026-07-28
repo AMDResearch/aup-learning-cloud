@@ -105,16 +105,20 @@ records under `/sys/bus/pci/devices`; it does not require the devices to be
 attached to `amdgpu` before ROCm installation. The resulting GPU resolution
 report records which managed hosts have AMD display hardware.
 
-The GPU permission contract is fixed across GPU hosts and PXE root filesystems:
+The installer, Ansible GPU access role, and PXE controller install AMD's
+`amdgpu-insecure-instinct-udev-rules` package, pinned to version
+`30.30.4.0-2341068.24.04`. Its package-owned rule sets mode `0666` only on
+`/dev/kfd` and DRM `/dev/dri/renderD*` nodes. It does not match
+`/dev/dri/card*`; card nodes retain the normal system policy, observed as
+`root:video 0660`.
 
-- `/dev/kfd` and AMD `/dev/dri/renderD*` nodes are `root:render` with mode `0666`.
-- AMD `/dev/dri/card*` nodes are `root:video` with mode `0666`.
-- Every GPU device node injected into a Pod therefore has mode `0666`.
-- Host provisioning owns device-node discretionary access control.
-- AUPLC Hub adds no GPU supplemental group to user Pods.
-- AMD device-plugin allocation is the visibility boundary: only Pods that
-  request `amd.com/gpu` receive GPU device nodes. The plugin does not set Unix
-  ownership or modes on host device nodes.
+This host permission policy is separate from Kubernetes allocation. The AMD
+device plugin remains the visibility boundary: only Pods that request
+`amd.com/gpu` receive allocated GPU devices, and the plugin does not change
+host inode ownership or mode. AUPLC Hub adds no GPU supplemental group. The
+tested ROCm compute path needs none: on both SHC GPU nodes, `rocminfo` succeeded
+as UID `12345` with only supplemental GID `100`, while card nodes remained
+inaccessible at mode `0660`. The reported agents were `gfx1151` and `gfx1200`.
 
 `singleuser.fsGid: 100` controls shared notebook storage ownership only. It is
 not part of GPU access and must not be treated as a GPU group setting.
@@ -157,10 +161,10 @@ helm upgrade --install jupyterhub ./runtime/chart \
   -f runtime/values-basic-example.yaml
 ```
 
-A fresh PXE rootfs receives the fixed udev rule during the controller playbook.
-A retained rootfs is accepted only when it already contains that exact canonical
-rule and no conflicting legacy GPU rule. Rebuild or correct a retained rootfs
-separately if that safety check fails.
+A fresh PXE rootfs receives the pinned AMD udev package during the controller
+playbook. A retained rootfs is accepted only when that exact package version and
+its unmodified package-owned rule are present, with no conflicting legacy GPU
+rule. Rebuild or correct a retained rootfs separately if that safety check fails.
 
 #### Discovery failures
 
@@ -169,7 +173,7 @@ separately if that safety check fails.
 | Host is unreachable | Restore passwordless root SSH to that inventory host, then regenerate. |
 | `lspci` is missing or fails | Install `pciutils` on the reported host and rerun generation. |
 | Host evidence is `UNKNOWN` or AMD GPU BDF probes disagree | Compare AMD display BDFs from `lspci` with vendor `0x1002` display-class devices under `/sys/bus/pci/devices`; fix missing or inconsistent PCI enumeration, then regenerate. |
-| Retained PXE rootfs has a legacy or non-canonical GPU rule | Rebuild the rootfs, or replace the conflicting rule through a separate reviewed maintenance action before rerunning the playbook. |
+| Retained PXE rootfs has the wrong AMD udev package version, a modified package rule, or a conflicting legacy GPU rule | Rebuild the rootfs, or correct the package state through a separate reviewed maintenance action before rerunning the playbook. |
 
 ## Deployment branch boundary
 

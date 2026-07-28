@@ -32,14 +32,16 @@ hosts from managed-host evidence. PXE generation uses only
 `pxe.diskless_agents_have_amd_gpus` and writes canonical files before the
 controller playbook runs.
 
-The GPU access role sets AMD device-node policy on GPU hosts and GPU-enabled PXE
-root filesystems. `/dev/kfd` and AMD `renderD*` nodes are `root:render 0666`;
-AMD `card*` nodes are `root:video 0666`. All injected GPU device nodes therefore
-use mode `0666`. Device-plugin allocation is the visibility boundary: only Pods
-requesting `amd.com/gpu` receive the nodes. The plugin does not change host inode
-permissions, and AUPLC Hub adds no GPU supplemental group to user Pods. Ordinary
-container group membership does not participate in GPU permissions; host
-provisioning owns device-node discretionary access control.
+The GPU access role installs AMD's `amdgpu-insecure-instinct-udev-rules`
+package, pinned to `30.30.4.0-2341068.24.04`, on GPU hosts and GPU-enabled PXE
+root filesystems. The package sets mode `0666` only on `/dev/kfd` and DRM
+`renderD*` nodes. It does not change `card*` nodes, which retain normal system
+policy, observed as `root:video 0660`.
+
+Device-plugin allocation is a separate layer and remains the visibility
+boundary for Pods requesting `amd.com/gpu`; it does not change host inode
+permissions. AUPLC Hub adds no GPU supplemental group. No GPU group was needed
+for the tested ROCm compute path.
 
 ## Prerequisites
 
