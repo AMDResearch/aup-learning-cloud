@@ -40,17 +40,18 @@ which `runtime/values.yaml` uses as `nodeSelector`s. The installer pins the
 accelerator `nodeSelector` to the real `amd.com/gpu.product-name` detected on
 the host, so no manual labelling is needed on single-machine deployments.
 
-If you are deploying manually instead:
+For multi-node deployments, the AMD device plugin and ROCm node labeller are
+cluster infrastructure prerequisites owned outside AUPLC. The infrastructure
+owner must select, deploy, and maintain them according to the
+[official AMD Kubernetes device plugin project](https://github.com/ROCm/k8s-device-plugin).
+AUPLC documentation does not install these privileged components.
+
+Before deploying the AUPLC Helm release, verify the existing infrastructure:
 
 ```bash
-# Deploy AMD GPU device plugin
-kubectl create -f https://raw.githubusercontent.com/ROCm/k8s-device-plugin/master/k8s-ds-amdgpu-dp.yaml
-
-# Deploy AMD GPU node labeller (publishes amd.com/gpu.* labels)
-kubectl create -f https://raw.githubusercontent.com/ROCm/k8s-device-plugin/master/k8s-ds-amdgpu-labeller.yaml
-
-# Verify GPU detection and labels
-kubectl describe node <node-name> | grep amd.com/gpu
+kubectl rollout status -n kube-system daemonset/amdgpu-device-plugin-daemonset --timeout=5m
+kubectl rollout status -n kube-system daemonset/amdgpu-labeller-daemonset --timeout=5m
+kubectl get nodes -o 'custom-columns=NAME:.metadata.name,AMD_GPU:.status.allocatable.amd\.com/gpu'
 ```
 
 `runtime/values-multi-nodes.yaml.example` now follows `runtime/values.yaml` and
