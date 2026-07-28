@@ -1,15 +1,27 @@
 # Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
 
-"""Single-node AMD GPU device-access reconciler."""
-
 from __future__ import annotations
 
+import contextlib
+import tempfile
 from pathlib import Path
 from typing import Protocol
 
-from auplc_installer.util import InstallerError, run, run_capture
+from auplc_installer.util import InstallerError, run, run_capture, verify_sha256
 
-GPU_ACCESS_RULES_PATH = Path("/etc/udev/rules.d/70-auplc-gpu-access.rules")
+AMD_GPU_UDEV_PACKAGE_NAME = "amdgpu-insecure-instinct-udev-rules"
+AMD_GPU_UDEV_PACKAGE_VERSION = "30.30.4.0-2341068.24.04"
+AMD_GPU_UDEV_PACKAGE_FILENAME = "amdgpu-insecure-instinct-udev-rules_30.30.4.0-2341068.24.04_all.deb"
+AMD_GPU_UDEV_PACKAGE_URL = (
+    "https://repo.radeon.com/amdgpu/30.30.4/ubuntu/pool/main/a/amdgpu-insecure-instinct-udev-rules/"
+    f"{AMD_GPU_UDEV_PACKAGE_FILENAME}"
+)
+AMD_GPU_UDEV_PACKAGE_SHA256 = "4be865985c7a13114c45925e77bc0b411b9fd47d5040ed35df44b9c411766162"
+AMD_GPU_UDEV_PACKAGE_RULES_PATH = Path("/etc/udev/rules.d/70-amdgpu.rules")
+AMD_GPU_UDEV_PACKAGE_RULES = (
+    'KERNEL=="kfd", GROUP="render", MODE="0666"\nSUBSYSTEM=="drm", KERNEL=="renderD*", GROUP="render", MODE="0666"\n'
+)
+
 LEGACY_KFD_RULES_PATH = Path("/etc/udev/rules.d/70-kfd.rules")
 LEGACY_AMDGPU_RULES_PATH = Path("/etc/udev/rules.d/70-amdgpu.rules")
 LEGACY_ROCM_DEVICES_RULES_PATH = Path("/etc/udev/rules.d/70-rocm-devices.rules")
@@ -33,91 +45,35 @@ LEGACY_RULE_CONTENTS: dict[Path, frozenset[str]] = {
     LEGACY_AMDGPU_RULES_PATH: frozenset((LEGACY_AMDGPU_RULES, LEGACY_AMDGPU_PXE_RULES)),
     LEGACY_ROCM_DEVICES_RULES_PATH: frozenset((LEGACY_ROCM_DEVICES_RULES,)),
 }
-UDEV_MANAGED_MARKER = "# Managed by auplc-installer: AMD GPU device access."
-CANONICAL_UDEV_RULES = (
-    f"{UDEV_MANAGED_MARKER}\n"
-    'KERNEL=="kfd", OWNER="root", GROUP="render", MODE="0666"\n'
-    'SUBSYSTEM=="drm", KERNEL=="renderD*", DRIVERS=="amdgpu", OWNER="root", GROUP="render", MODE="0666"\n'
-    'SUBSYSTEM=="drm", KERNEL=="card*", DRIVERS=="amdgpu", OWNER="root", GROUP="video", MODE="0666"\n'
-)
-_FSYNC_PATH_SCRIPT = (
-    "import os\n"
-    "import sys\n"
-    "fd = os.open(sys.argv[1], os.O_RDONLY)\n"
-    "try:\n"
-    "    os.fsync(fd)\n"
-    "finally:\n"
-    "    os.close(fd)\n"
-)
-_VERIFY_DEVICE_ACCESS_SCRIPT = (
-    "import grp, pathlib, stat\n"
-    "drm = pathlib.Path('/sys/class/drm')\n"
-    "devices = [(pathlib.Path('/dev/kfd'), 'render', 0o666)]\n"
-    "render_nodes = []\n"
-    "for node in drm.glob('renderD*'):\n"
-    "    driver = node / 'device' / 'driver'\n"
-    "    if driver.exists() and driver.resolve().name == 'amdgpu':\n"
-    "        render_nodes.append(pathlib.Path('/dev/dri') / node.name)\n"
-    "if not render_nodes: raise SystemExit('no AMD renderD device found')\n"
-    "devices.extend((path, 'render', 0o666) for path in render_nodes)\n"
-    "card_nodes = []\n"
-    "for node in drm.glob('card*'):\n"
-    "    driver = node / 'device' / 'driver'\n"
-    "    if driver.exists() and driver.resolve().name == 'amdgpu':\n"
-    "        card_nodes.append(pathlib.Path('/dev/dri') / node.name)\n"
-    "if not card_nodes: raise SystemExit('no AMD card device found')\n"
-    "devices.extend((path, 'video', 0o666) for path in card_nodes)\n"
-    "for path, expected_group, expected_mode in devices:\n"
-    "    data = path.lstat()\n"
-    "    try:\n"
-    "        group_name = grp.getgrgid(data.st_gid).gr_name\n"
-    "    except KeyError:\n"
-    "        raise SystemExit(f'unknown GPU device group: {path}')\n"
-    "    if not stat.S_ISCHR(data.st_mode) or data.st_uid != 0 or group_name != expected_group or stat.S_IMODE(data.st_mode) != expected_mode:\n"
-    "        raise SystemExit(f'bad GPU device access: {path}')\n"
-)
 
 
 class GpuAccessHost(Protocol):
-    """Privileged host-operation seam for GPU access provisioning."""
+    def read_text(self, path: Path) -> str | None: ...
 
-    def read_text(self, path: Path) -> str | None:
-        """Return a privileged file's text, or ``None`` when it is absent."""
+    def remove_udev_rule(self, path: Path) -> None: ...
 
-    def write_udev_rule(self, path: Path, text: str) -> None:
-        """Write a managed udev rule after reconciliation has authorized it."""
+    def installed_package_version(self) -> str | None: ...
 
-    def reload_udev_rules(self) -> None:
-        """Reload host udev rules."""
+    def package_owns_rule(self, path: Path) -> bool: ...
 
-    def trigger_udev(self) -> None:
-        """Apply reloaded udev rules to current devices."""
+    def install_package(self, deb: Path) -> None: ...
 
-    def settle_udev(self) -> None:
-        """Wait until triggered udev events finish before inode verification."""
+    def reload_udev_rules(self) -> None: ...
 
-    def remove_udev_rule(self, path: Path) -> None:
-        """Remove an explicitly recognized legacy udev rule."""
+    def trigger_udev(self) -> None: ...
 
-    def verify_device_access(self) -> None:
-        """Verify the relevant GPU device inodes use the host access contract."""
+    def settle_udev(self) -> None: ...
 
-    def is_symlink(self, path: Path) -> bool:
-        """Return whether ``path`` is a symlink without following it."""
+    def is_symlink(self, path: Path) -> bool: ...
 
-    def is_regular_file(self, path: Path) -> bool:
-        """Return whether an existing ``path`` is a regular file."""
+    def is_regular_file(self, path: Path) -> bool: ...
 
-    def path_exists(self, path: Path) -> bool:
-        """Return whether ``path`` exists after a separate symlink check."""
+    def path_exists(self, path: Path) -> bool: ...
 
-    def is_directory(self, path: Path) -> bool:
-        """Return whether an existing ``path`` is a directory."""
+    def is_directory(self, path: Path) -> bool: ...
 
 
 class SystemGpuAccessHost:
-    """Production host adapter using the installer's sudo-aware command helpers."""
-
     def read_text(self, path: Path) -> str | None:
         exists = run(["test", "-e", str(path)], sudo=True, check=False)
         if exists.returncode != 0:
@@ -125,33 +81,32 @@ class SystemGpuAccessHost:
         result = run_capture(["cat", str(path)], sudo=True)
         return result.stdout or ""
 
-    def write_udev_rule(self, path: Path, text: str) -> None:
-        self._write_text_atomically(path, text)
+    def remove_udev_rule(self, path: Path) -> None:
+        run(["rm", "-f", str(path)], sudo=True)
 
-    def _write_text_atomically(self, path: Path, text: str) -> None:
-        """Durably replace ``path`` after atomically renaming a temporary file."""
-        _validate_parent_chain(self, path.parent)
-        run(["mkdir", "-p", str(path.parent)], sudo=True)
-        temporary_result = run_capture(
-            ["mktemp", str(path.parent / f".{path.name}.XXXXXX")],
+    def installed_package_version(self) -> str | None:
+        result = run_capture(
+            ["dpkg-query", "--show", "--showformat=${Status}\t${Version}", AMD_GPU_UDEV_PACKAGE_NAME],
             sudo=True,
+            check=False,
         )
-        temporary_path = (temporary_result.stdout or "").strip()
-        if not temporary_path:
-            raise InstallerError(f"Could not create temporary GPU access rule beside {path}")
+        if result.returncode != 0:
+            return None
+        status, separator, version = (result.stdout or "").strip().partition("\t")
+        if status != "install ok installed" or not separator or not version:
+            return None
+        return version
 
-        try:
-            run(["tee", temporary_path], sudo=True, input_text=text)
-            run(["chmod", "0644", temporary_path], sudo=True)
-            self._fsync_path(temporary_path)
-            run(["mv", "-f", temporary_path, str(path)], sudo=True)
-            self._fsync_path(str(path.parent))
-        except BaseException:
-            run(["rm", "-f", temporary_path], sudo=True, check=False)
-            raise
+    def package_owns_rule(self, path: Path) -> bool:
+        result = run_capture(
+            ["dpkg-query", "--listfiles", AMD_GPU_UDEV_PACKAGE_NAME],
+            sudo=True,
+            check=False,
+        )
+        return result.returncode == 0 and str(path) in (result.stdout or "").splitlines()
 
-    def _fsync_path(self, path: str) -> None:
-        run(["python3", "-c", _FSYNC_PATH_SCRIPT, path], sudo=True)
+    def install_package(self, deb: Path) -> None:
+        run(["dpkg", "--force-confnew", "--install", str(deb)], sudo=True)
 
     def reload_udev_rules(self) -> None:
         run(["udevadm", "control", "--reload-rules"], sudo=True)
@@ -161,12 +116,6 @@ class SystemGpuAccessHost:
 
     def settle_udev(self) -> None:
         run(["udevadm", "settle"], sudo=True)
-
-    def remove_udev_rule(self, path: Path) -> None:
-        run(["rm", "-f", str(path)], sudo=True)
-
-    def verify_device_access(self) -> None:
-        run(["python3", "-c", _VERIFY_DEVICE_ACCESS_SCRIPT], sudo=True)
 
     def is_symlink(self, path: Path) -> bool:
         return run(["test", "-L", str(path)], sudo=True, check=False).returncode == 0
@@ -181,35 +130,68 @@ class SystemGpuAccessHost:
         return run(["test", "-d", str(path)], sudo=True, check=False).returncode == 0
 
 
-def render_udev_rules() -> str:
-    """Return the canonical AMD GPU host-device udev rules."""
-    return CANONICAL_UDEV_RULES
-
-
-def provision_gpu_access(host: GpuAccessHost | None = None) -> None:
-    """Reconcile and verify the canonical AMD GPU host-device policy."""
+def provision_gpu_access(
+    host: GpuAccessHost | None = None,
+    *,
+    offline_mode: bool = False,
+    bundle_dir: Path | None = None,
+) -> None:
     active_host = host if host is not None else SystemGpuAccessHost()
-    _validate_parent_chain(active_host, GPU_ACCESS_RULES_PATH.parent)
+    _validate_parent_chain(active_host, AMD_GPU_UDEV_PACKAGE_RULES_PATH.parent)
+    installed_version = active_host.installed_package_version()
     legacy_paths = _legacy_rules_to_remove(active_host)
-    existing_rule = _read_regular_text(active_host, GPU_ACCESS_RULES_PATH)
+    if installed_version == AMD_GPU_UDEV_PACKAGE_VERSION:
+        _verify_installed_package(active_host, installed_version)
+    else:
+        _install_package(active_host, offline_mode=offline_mode, bundle_dir=bundle_dir)
+        installed_version = active_host.installed_package_version()
+        if installed_version is None:
+            raise InstallerError(f"{AMD_GPU_UDEV_PACKAGE_NAME} was not installed")
+        _verify_installed_package(active_host, installed_version)
+    _remove_separate_legacy_rules(active_host, legacy_paths)
 
-    for path in legacy_paths:
-        active_host.remove_udev_rule(path)
-    if _should_rewrite_udev_rule(existing_rule):
-        active_host.write_udev_rule(GPU_ACCESS_RULES_PATH, render_udev_rules())
-    active_host.reload_udev_rules()
-    active_host.trigger_udev()
-    active_host.settle_udev()
-    active_host.verify_device_access()
+
+def _install_package(active_host: GpuAccessHost, *, offline_mode: bool, bundle_dir: Path | None) -> None:
+    if offline_mode:
+        if bundle_dir is None:
+            raise InstallerError("Offline GPU udev package installation requires a bundle directory")
+        deb = bundle_dir / "packages" / AMD_GPU_UDEV_PACKAGE_FILENAME
+        if not deb.is_file():
+            raise InstallerError(f"Offline GPU udev package is missing: {deb}")
+        verify_sha256(deb, AMD_GPU_UDEV_PACKAGE_SHA256)
+        active_host.install_package(deb)
+        return
+
+    with tempfile.NamedTemporaryFile(prefix="auplc-amdgpu-udev-", suffix=".deb", delete=False) as temporary:
+        deb = Path(temporary.name)
+    try:
+        run(["wget", "-q", AMD_GPU_UDEV_PACKAGE_URL, "-O", str(deb)])
+        verify_sha256(deb, AMD_GPU_UDEV_PACKAGE_SHA256)
+        active_host.install_package(deb)
+    finally:
+        with contextlib.suppress(OSError):
+            deb.unlink()
+
+
+def _verify_installed_package(active_host: GpuAccessHost, installed_version: str) -> None:
+    if installed_version != AMD_GPU_UDEV_PACKAGE_VERSION:
+        raise InstallerError(
+            f"{AMD_GPU_UDEV_PACKAGE_NAME} has version {installed_version}, expected {AMD_GPU_UDEV_PACKAGE_VERSION}"
+        )
+    if not active_host.package_owns_rule(AMD_GPU_UDEV_PACKAGE_RULES_PATH):
+        raise InstallerError(f"{AMD_GPU_UDEV_PACKAGE_NAME} does not own {AMD_GPU_UDEV_PACKAGE_RULES_PATH}")
+    rule = _read_regular_text(active_host, AMD_GPU_UDEV_PACKAGE_RULES_PATH)
+    if rule != AMD_GPU_UDEV_PACKAGE_RULES:
+        raise InstallerError(f"{AMD_GPU_UDEV_PACKAGE_NAME} rule does not match the pinned package policy")
 
 
 def _read_regular_text(host: GpuAccessHost, path: Path) -> str | None:
     if host.is_symlink(path):
-        raise InstallerError(f"Refusing symlinked GPU access file: {path}")
+        raise InstallerError(f"Refusing symlinked GPU udev rule: {path}")
     if not host.path_exists(path):
         return None
     if not host.is_regular_file(path):
-        raise InstallerError(f"Refusing non-regular GPU access file: {path}")
+        raise InstallerError(f"Refusing non-regular GPU udev rule: {path}")
     return host.read_text(path)
 
 
@@ -217,13 +199,13 @@ def _validate_parent_chain(host: GpuAccessHost, parent: Path) -> None:
     components = [*reversed(parent.parents), parent]
     for index, component in enumerate(components):
         if host.is_symlink(component):
-            raise InstallerError(f"Refusing symlinked GPU access directory: {component}")
+            raise InstallerError(f"Refusing symlinked GPU udev directory: {component}")
         if not host.path_exists(component):
             if index != len(components) - 1:
-                raise InstallerError(f"Missing parent GPU access directory: {component}")
+                raise InstallerError(f"Missing parent GPU udev directory: {component}")
             return
         if not host.is_directory(component):
-            raise InstallerError(f"Refusing non-directory GPU access parent: {component}")
+            raise InstallerError(f"Refusing non-directory GPU udev parent: {component}")
 
 
 def _legacy_rules_to_remove(host: GpuAccessHost) -> list[Path]:
@@ -232,17 +214,22 @@ def _legacy_rules_to_remove(host: GpuAccessHost) -> list[Path]:
         content = _read_regular_text(host, path)
         if content is None:
             continue
+        if path == AMD_GPU_UDEV_PACKAGE_RULES_PATH and host.package_owns_rule(path):
+            continue
         if content not in expected_contents:
             raise InstallerError(f"Refusing to remove unexpected legacy GPU udev rule: {path}")
         removals.append(path)
     return removals
 
 
-def _should_rewrite_udev_rule(existing_rule: str | None) -> bool:
-    if existing_rule is None:
-        return True
-    if existing_rule == render_udev_rules():
-        return False
-    if existing_rule.split("\n", maxsplit=1)[0] != UDEV_MANAGED_MARKER:
-        raise InstallerError(f"Refusing to overwrite unmanaged GPU udev rule: {GPU_ACCESS_RULES_PATH}")
-    raise InstallerError(f"Refusing to overwrite unrecognized managed GPU udev rule: {GPU_ACCESS_RULES_PATH}")
+def _remove_separate_legacy_rules(host: GpuAccessHost, paths: list[Path]) -> None:
+    removed = False
+    for path in paths:
+        if path == AMD_GPU_UDEV_PACKAGE_RULES_PATH:
+            continue
+        host.remove_udev_rule(path)
+        removed = True
+    if removed:
+        host.reload_udev_rules()
+        host.trigger_udev()
+        host.settle_udev()

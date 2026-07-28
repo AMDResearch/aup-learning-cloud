@@ -1,6 +1,6 @@
 # Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
 
-"""Tests for the single-node AMD GPU host device-access reconciler."""
+"""Tests for AMD's packaged single-node GPU udev policy."""
 
 from __future__ import annotations
 
@@ -11,26 +11,29 @@ import pytest
 
 from auplc_installer import gpu_access
 from auplc_installer.gpu_access import (
-    GPU_ACCESS_RULES_PATH,
-    LEGACY_AMDGPU_PXE_RULES,
+    AMD_GPU_UDEV_PACKAGE_FILENAME,
+    AMD_GPU_UDEV_PACKAGE_RULES,
+    AMD_GPU_UDEV_PACKAGE_RULES_PATH,
+    AMD_GPU_UDEV_PACKAGE_VERSION,
     LEGACY_AMDGPU_RULES,
     LEGACY_AMDGPU_RULES_PATH,
-    LEGACY_KFD_RULES,
-    LEGACY_KFD_RULES_PATH,
-    LEGACY_ROCM_DEVICES_RULES,
-    LEGACY_ROCM_DEVICES_RULES_PATH,
     SystemGpuAccessHost,
     provision_gpu_access,
-    render_udev_rules,
 )
 from auplc_installer.util import InstallerError
 
 
 class FakeGpuAccessHost:
-    """In-memory adapter for the installer host-operation seam."""
-
-    def __init__(self, *, files: dict[Path, str] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        files: dict[Path, str] | None = None,
+        installed_version: str | None = None,
+        package_owns_rule: bool | None = None,
+    ) -> None:
         self.files = dict(files or {})
+        self.installed_version = installed_version
+        self._package_owns_rule = installed_version is not None if package_owns_rule is None else package_owns_rule
         self.calls: list[str] = []
         self.symlinks: set[Path] = set()
         self.nonregular_files: set[Path] = set()
@@ -40,13 +43,23 @@ class FakeGpuAccessHost:
         self.calls.append(f"read:{path}")
         return self.files.get(path)
 
-    def write_udev_rule(self, path: Path, text: str) -> None:
-        self.calls.append(f"write-rule:{path}")
-        self.files[path] = text
-
     def remove_udev_rule(self, path: Path) -> None:
         self.calls.append(f"remove-rule:{path}")
         self.files.pop(path, None)
+
+    def installed_package_version(self) -> str | None:
+        self.calls.append("installed-version")
+        return self.installed_version
+
+    def package_owns_rule(self, path: Path) -> bool:
+        self.calls.append(f"owns-rule:{path}")
+        return self._package_owns_rule
+
+    def install_package(self, deb: Path) -> None:
+        self.calls.append(f"install-package:{deb}")
+        self.installed_version = AMD_GPU_UDEV_PACKAGE_VERSION
+        self._package_owns_rule = True
+        self.files[AMD_GPU_UDEV_PACKAGE_RULES_PATH] = AMD_GPU_UDEV_PACKAGE_RULES
 
     def reload_udev_rules(self) -> None:
         self.calls.append("reload-udev")
@@ -56,9 +69,6 @@ class FakeGpuAccessHost:
 
     def settle_udev(self) -> None:
         self.calls.append("settle-udev")
-
-    def verify_device_access(self) -> None:
-        self.calls.append("verify-devices")
 
     def is_symlink(self, path: Path) -> bool:
         return path in self.symlinks
@@ -73,254 +83,139 @@ class FakeGpuAccessHost:
         return path in self.directories
 
 
-def test_render_udev_rules_is_the_canonical_host_device_policy() -> None:
-    rules = render_udev_rules()
+def test_offline_install_replaces_legacy_rule_at_the_package_owned_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # Given: an offline bundle and a legacy rule from an earlier shipped installer.
+    bundle = tmp_path / "bundle"
+    deb = bundle / "packages" / AMD_GPU_UDEV_PACKAGE_FILENAME
+    deb.parent.mkdir(parents=True)
+    deb.write_bytes(b"package")
+    host = FakeGpuAccessHost(files={LEGACY_AMDGPU_RULES_PATH: LEGACY_AMDGPU_RULES})
+    verified: list[tuple[Path, str]] = []
+    monkeypatch.setattr(gpu_access, "verify_sha256", lambda path, checksum: verified.append((Path(path), checksum)))
 
-    assert rules == (
-        "# Managed by auplc-installer: AMD GPU device access.\n"
-        'KERNEL=="kfd", OWNER="root", GROUP="render", MODE="0666"\n'
-        'SUBSYSTEM=="drm", KERNEL=="renderD*", DRIVERS=="amdgpu", OWNER="root", GROUP="render", MODE="0666"\n'
-        'SUBSYSTEM=="drm", KERNEL=="card*", DRIVERS=="amdgpu", OWNER="root", GROUP="video", MODE="0666"\n'
-    )
-    assert "chmod" not in rules
+    # When: GPU access is provisioned from the bundle.
+    provision_gpu_access(host, offline_mode=True, bundle_dir=bundle)
 
-
-def test_device_verification_checks_kfd_and_amd_render_and_card_nodes_without_a_render_gid() -> None:
-    script = gpu_access._VERIFY_DEVICE_ACCESS_SCRIPT
-
-    assert "path.lstat()" in script
-    assert "stat.S_ISCHR(data.st_mode)" in script
-    assert "glob('renderD*')" in script
-    assert "glob('card*')" in script
-    assert "'render', 0o666" in script
-    assert "'video', 0o666" in script
-    assert "render_gid" not in script
-    assert "sys.argv[1]" not in script
+    # Then: package installation replaces the path without deleting the package-owned rule afterward.
+    assert not any(call == f"remove-rule:{LEGACY_AMDGPU_RULES_PATH}" for call in host.calls)
+    assert host.files == {AMD_GPU_UDEV_PACKAGE_RULES_PATH: AMD_GPU_UDEV_PACKAGE_RULES}
+    assert verified == [(deb, gpu_access.AMD_GPU_UDEV_PACKAGE_SHA256)]
 
 
-@pytest.mark.parametrize("unsafe_parent", [Path("/etc/udev"), Path("/etc/udev/rules.d")])
-def test_symlinked_gpu_access_parent_fails_before_any_file_read_or_write(unsafe_parent: Path) -> None:
+def test_online_install_downloads_to_a_temporary_deb_then_removes_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Given: no installed package and a downloader that materializes its destination.
     host = FakeGpuAccessHost()
-    host.symlinks.add(unsafe_parent)
+    downloads: list[list[str]] = []
+    verified: list[Path] = []
 
-    with pytest.raises(InstallerError, match="symlinked GPU access directory"):
-        provision_gpu_access(host)
-
-    assert not any(call.startswith(("read:", "write-", "remove-rule:")) for call in host.calls)
-
-
-def test_nonregular_canonical_rule_fails_before_reading_or_writing_it() -> None:
-    host = FakeGpuAccessHost()
-    host.nonregular_files.add(GPU_ACCESS_RULES_PATH)
-
-    with pytest.raises(InstallerError, match="non-regular GPU access file"):
-        provision_gpu_access(host)
-
-    assert f"read:{GPU_ACCESS_RULES_PATH}" not in host.calls
-    assert f"write-rule:{GPU_ACCESS_RULES_PATH}" not in host.calls
-
-
-def test_provision_reconciles_the_canonical_rule_without_group_lookup_or_state() -> None:
-    host = FakeGpuAccessHost()
-
-    result = provision_gpu_access(host)
-
-    assert result is None
-    assert host.files == {GPU_ACCESS_RULES_PATH: render_udev_rules()}
-    assert host.calls[-4:] == ["reload-udev", "trigger-udev", "settle-udev", "verify-devices"]
-    assert not any("group" in call or "state" in call for call in host.calls)
-
-
-@pytest.mark.parametrize(
-    ("path", "content"),
-    [
-        (LEGACY_KFD_RULES_PATH, LEGACY_KFD_RULES),
-        (LEGACY_AMDGPU_RULES_PATH, LEGACY_AMDGPU_RULES),
-        (LEGACY_AMDGPU_RULES_PATH, LEGACY_AMDGPU_PXE_RULES),
-        (LEGACY_ROCM_DEVICES_RULES_PATH, LEGACY_ROCM_DEVICES_RULES),
-    ],
-)
-def test_provision_removes_only_exact_legacy_rules_before_verifying(path: Path, content: str) -> None:
-    host = FakeGpuAccessHost(files={path: content})
-
-    provision_gpu_access(host)
-
-    assert path not in host.files
-    assert host.files[GPU_ACCESS_RULES_PATH] == render_udev_rules()
-    assert host.calls.index(f"remove-rule:{path}") < host.calls.index(f"write-rule:{GPU_ACCESS_RULES_PATH}")
-    assert host.calls[-4:] == ["reload-udev", "trigger-udev", "settle-udev", "verify-devices"]
-
-
-@pytest.mark.parametrize(
-    ("path", "content"),
-    [
-        (LEGACY_AMDGPU_RULES_PATH, 'KERNEL=="kfd", MODE="0666"\nKERNEL=="renderD*", MODE="0666"\n'),
-        (
-            LEGACY_ROCM_DEVICES_RULES_PATH,
-            "# ROCm device permissions\n"
-            "# Ensure /dev/kfd and /dev/dri/renderD* are accessible by render group\n"
-            'SUBSYSTEM=="kfd", GROUP="render", MODE="0666"\n'
-            'SUBSYSTEM=="drm", KERNEL=="renderD*", GROUP="render", MODE="0660"\n',
-        ),
-    ],
-)
-def test_near_legacy_rule_fails_closed_without_removal(path: Path, content: str) -> None:
-    host = FakeGpuAccessHost(files={path: content})
-
-    with pytest.raises(InstallerError, match="unexpected legacy"):
-        provision_gpu_access(host)
-
-    assert host.files[path] == content
-
-
-def test_matching_managed_rule_is_reapplied_and_verified_without_rewriting() -> None:
-    host = FakeGpuAccessHost(files={GPU_ACCESS_RULES_PATH: render_udev_rules()})
-
-    provision_gpu_access(host)
-
-    assert not any(call.startswith("write-") for call in host.calls)
-    assert host.calls[-4:] == ["reload-udev", "trigger-udev", "settle-udev", "verify-devices"]
-
-
-@pytest.mark.parametrize(
-    "unexpected_rule",
-    [
-        f"{gpu_access.UDEV_MANAGED_MARKER}\n"
-        'KERNEL=="kfd", OWNER="root", GROUP="render", MODE="0660"\n'
-        'SUBSYSTEM=="drm", KERNEL=="renderD*", DRIVERS=="amdgpu", OWNER="root", GROUP="render", MODE="0660"\n',
-        f'{gpu_access.UDEV_MANAGED_MARKER}\nKERNEL=="kfd", MODE="0666"\n',
-    ],
-)
-def test_noncanonical_managed_rule_fails_closed_before_mutation(unexpected_rule: str) -> None:
-    host = FakeGpuAccessHost(files={GPU_ACCESS_RULES_PATH: unexpected_rule})
-
-    with pytest.raises(InstallerError, match="unrecognized managed"):
-        provision_gpu_access(host)
-
-    assert host.files[GPU_ACCESS_RULES_PATH] == unexpected_rule
-    assert not any(call.startswith(("write-", "remove-rule:")) for call in host.calls)
-    assert "reload-udev" not in host.calls
-
-
-def test_unmanaged_rule_fails_before_any_mutation() -> None:
-    host = FakeGpuAccessHost(files={GPU_ACCESS_RULES_PATH: 'KERNEL=="kfd", MODE="0666"\n'})
-
-    with pytest.raises(InstallerError, match="unmanaged"):
-        provision_gpu_access(host)
-
-    assert not any(call.startswith(("write-", "remove-rule:")) for call in host.calls)
-    assert "reload-udev" not in host.calls
-
-
-def test_system_adapter_persists_udev_rule_with_durable_atomic_replacement(monkeypatch) -> None:
-    commands: list[list[str]] = []
-    capture_commands: list[list[str]] = []
-
-    def fake_run(command: list[str], **kwargs: object) -> SimpleNamespace:
-        commands.append(command)
-        if command[:2] == ["test", "-L"]:
-            return SimpleNamespace(returncode=1)
+    def fake_run(command: list[str], **_: object) -> SimpleNamespace:
+        downloads.append(command)
+        Path(command[-1]).write_bytes(b"package")
         return SimpleNamespace(returncode=0)
 
-    def fake_run_capture(command: list[str], **kwargs: object) -> SimpleNamespace:
-        capture_commands.append(command)
-        return SimpleNamespace(stdout="/etc/udev/rules.d/.70-auplc-gpu-access.rules.temporary\n")
-
     monkeypatch.setattr(gpu_access, "run", fake_run)
-    monkeypatch.setattr(gpu_access, "run_capture", fake_run_capture)
+    monkeypatch.setattr(gpu_access, "verify_sha256", lambda path, _: verified.append(Path(path)))
 
-    SystemGpuAccessHost().write_udev_rule(GPU_ACCESS_RULES_PATH, "rule\n")
+    # When: GPU access is provisioned online.
+    provision_gpu_access(host, offline_mode=False, bundle_dir=None)
 
-    assert capture_commands == [["mktemp", "/etc/udev/rules.d/.70-auplc-gpu-access.rules.XXXXXX"]]
-    assert [command for command in commands if command[0] != "test"] == [
-        ["mkdir", "-p", "/etc/udev/rules.d"],
-        ["tee", "/etc/udev/rules.d/.70-auplc-gpu-access.rules.temporary"],
-        ["chmod", "0644", "/etc/udev/rules.d/.70-auplc-gpu-access.rules.temporary"],
-        ["python3", "-c", gpu_access._FSYNC_PATH_SCRIPT, "/etc/udev/rules.d/.70-auplc-gpu-access.rules.temporary"],
-        [
-            "mv",
-            "-f",
-            "/etc/udev/rules.d/.70-auplc-gpu-access.rules.temporary",
-            "/etc/udev/rules.d/70-auplc-gpu-access.rules",
-        ],
-        ["python3", "-c", gpu_access._FSYNC_PATH_SCRIPT, "/etc/udev/rules.d"],
+    # Then: the exact Radeon URL is downloaded, verified, installed, and cleaned up.
+    downloaded_path = Path(downloads[0][-1])
+    assert downloads == [["wget", "-q", gpu_access.AMD_GPU_UDEV_PACKAGE_URL, "-O", str(downloaded_path)]]
+    assert verified == [downloaded_path]
+    assert not downloaded_path.exists()
+    assert host.calls == [
+        "installed-version",
+        f"install-package:{downloaded_path}",
+        "installed-version",
+        f"owns-rule:{AMD_GPU_UDEV_PACKAGE_RULES_PATH}",
+        f"read:{AMD_GPU_UDEV_PACKAGE_RULES_PATH}",
     ]
 
 
-def test_system_adapter_removes_temporary_rule_when_durable_write_fails(monkeypatch) -> None:
+def test_installed_package_requires_the_pinned_version_and_its_exact_rule() -> None:
+    # Given: the package is already present with the expected package-owned rule.
+    host = FakeGpuAccessHost(
+        files={AMD_GPU_UDEV_PACKAGE_RULES_PATH: AMD_GPU_UDEV_PACKAGE_RULES},
+        installed_version=AMD_GPU_UDEV_PACKAGE_VERSION,
+    )
+
+    # When: provisioning is repeated.
+    provision_gpu_access(host)
+
+    # Then: no download, install, legacy removal, or device probe is performed.
+    assert host.files == {AMD_GPU_UDEV_PACKAGE_RULES_PATH: AMD_GPU_UDEV_PACKAGE_RULES}
+    assert not any(call.startswith(("install-package:", "remove-rule:")) for call in host.calls)
+    assert not any(call in {"reload-udev", "trigger-udev", "settle-udev"} for call in host.calls)
+
+
+@pytest.mark.parametrize(
+    ("installed_version", "package_owns_rule", "rule"),
+    [
+        (AMD_GPU_UDEV_PACKAGE_VERSION, False, AMD_GPU_UDEV_PACKAGE_RULES),
+        (AMD_GPU_UDEV_PACKAGE_VERSION, True, 'KERNEL=="kfd", MODE="0660"\n'),
+    ],
+)
+def test_installed_package_fails_closed_when_its_version_or_rule_contract_is_wrong(
+    installed_version: str, package_owns_rule: bool, rule: str
+) -> None:
+    # Given: an installed package that does not satisfy the pinned package contract.
+    host = FakeGpuAccessHost(
+        files={AMD_GPU_UDEV_PACKAGE_RULES_PATH: rule},
+        installed_version=installed_version,
+        package_owns_rule=package_owns_rule,
+    )
+
+    # When: provisioning checks the installed package.
+    with pytest.raises(InstallerError):
+        provision_gpu_access(host)
+
+    # Then: it fails before installing or mutating any udev rule.
+    assert not any(call.startswith(("install-package:", "remove-rule:")) for call in host.calls)
+
+
+def test_symlinked_legacy_rule_fails_closed_before_installation(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Given: a legacy-rule path replaced by a symlink.
+    host = FakeGpuAccessHost()
+    host.symlinks.add(LEGACY_AMDGPU_RULES_PATH)
+    monkeypatch.setattr(gpu_access, "run", lambda *args, **kwargs: pytest.fail("must not download"))
+
+    # When: first-time provisioning inspects legacy rules.
+    with pytest.raises(InstallerError, match="symlinked GPU udev rule"):
+        provision_gpu_access(host)
+
+    # Then: no package installation is attempted.
+    assert not any(call.startswith("install-package:") for call in host.calls)
+
+
+def test_official_rule_matches_the_extracted_deb_policy_not_the_old_pxe_shape() -> None:
+    # Given: the exact package verification constant.
+    rules = AMD_GPU_UDEV_PACKAGE_RULES
+    old_pxe_shape = 'KERNEL=="kfd", MODE="0666"\nKERNEL=="renderD*", MODE="0666"\n'
+
+    # When: its policy is inspected.
+    # Then: it matches the extracted package rule rather than the former two-line PXE shape.
+    assert rules == (
+        'KERNEL=="kfd", GROUP="render", MODE="0666"\n'
+        'SUBSYSTEM=="drm", KERNEL=="renderD*", GROUP="render", MODE="0666"\n'
+    )
+    assert rules != old_pxe_shape
+    assert "card" not in rules
+
+
+def test_system_adapter_uses_dpkg_for_the_package_install(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Given: the production host adapter and a recorded command runner.
     commands: list[list[str]] = []
-
-    def fake_run(command: list[str], **kwargs: object) -> SimpleNamespace:
-        commands.append(command)
-        if command[:2] == ["test", "-L"]:
-            return SimpleNamespace(returncode=1)
-        if command == [
-            "python3",
-            "-c",
-            gpu_access._FSYNC_PATH_SCRIPT,
-            "/etc/udev/rules.d/.70-auplc-gpu-access.rules.temporary",
-        ]:
-            raise InstallerError("fsync failed")
-        return SimpleNamespace(returncode=0)
-
-    monkeypatch.setattr(gpu_access, "run", fake_run)
     monkeypatch.setattr(
         gpu_access,
-        "run_capture",
-        lambda command, **kwargs: SimpleNamespace(stdout="/etc/udev/rules.d/.70-auplc-gpu-access.rules.temporary\n"),
+        "run",
+        lambda command, **_: commands.append(command) or SimpleNamespace(returncode=0),
     )
 
-    with pytest.raises(InstallerError, match="fsync failed"):
-        SystemGpuAccessHost().write_udev_rule(GPU_ACCESS_RULES_PATH, "rule\n")
+    # When: it installs the verified package artifact.
+    SystemGpuAccessHost().install_package(Path("/tmp/package.deb"))
 
-    assert [command for command in commands if command[0] != "test"] == [
-        ["mkdir", "-p", "/etc/udev/rules.d"],
-        ["tee", "/etc/udev/rules.d/.70-auplc-gpu-access.rules.temporary"],
-        ["chmod", "0644", "/etc/udev/rules.d/.70-auplc-gpu-access.rules.temporary"],
-        ["python3", "-c", gpu_access._FSYNC_PATH_SCRIPT, "/etc/udev/rules.d/.70-auplc-gpu-access.rules.temporary"],
-        ["rm", "-f", "/etc/udev/rules.d/.70-auplc-gpu-access.rules.temporary"],
-    ]
-
-
-@pytest.mark.parametrize("failing_method", ["write_udev_rule", "reload_udev_rules", "trigger_udev", "settle_udev"])
-def test_reconciliation_stops_when_udev_mutation_fails(monkeypatch, failing_method: str) -> None:
-    host = FakeGpuAccessHost()
-    original_method = getattr(host, failing_method)
-
-    def fail_after_recording(*args: object) -> None:
-        original_method(*args)
-        raise InstallerError(f"{failing_method} failed")
-
-    monkeypatch.setattr(host, failing_method, fail_after_recording)
-
-    with pytest.raises(InstallerError, match=f"{failing_method} failed"):
-        provision_gpu_access(host)
-
-    assert "verify-devices" not in host.calls
-
-
-def test_failed_inode_verification_leaves_the_reconciled_rule_in_place(monkeypatch) -> None:
-    host = FakeGpuAccessHost()
-
-    def fail_verification() -> None:
-        host.calls.append("verify-devices")
-        raise InstallerError("device ownership mismatch")
-
-    monkeypatch.setattr(host, "verify_device_access", fail_verification)
-
-    with pytest.raises(InstallerError, match="ownership mismatch"):
-        provision_gpu_access(host)
-
-    assert host.files[GPU_ACCESS_RULES_PATH] == render_udev_rules()
-    assert host.calls[-1] == "verify-devices"
-
-
-@pytest.mark.parametrize("path", [LEGACY_KFD_RULES_PATH, LEGACY_AMDGPU_RULES_PATH, GPU_ACCESS_RULES_PATH])
-def test_symlinked_gpu_access_files_fail_closed_before_mutation(path: Path) -> None:
-    host = FakeGpuAccessHost()
-    host.symlinks.add(path)
-
-    with pytest.raises(InstallerError, match="symlinked"):
-        provision_gpu_access(host)
-
-    assert not any(call.startswith(("write-", "remove-rule:")) for call in host.calls)
+    # Then: installation is delegated to dpkg with sudo awareness.
+    assert commands == [["dpkg", "--force-confnew", "--install", "/tmp/package.deb"]]
