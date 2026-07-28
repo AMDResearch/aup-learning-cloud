@@ -39,7 +39,7 @@ def test_full_install_gates_gpu_access_without_passing_it_to_the_overlay(
     monkeypatch.setattr(cli, "stage", fake_stage)
     monkeypatch.setattr(cli, "classify_gpu_hardware", lambda: hardware)
     monkeypatch.setattr(cli, "detect_and_configure_gpu", lambda *args, **kwargs: events.append("detect"))
-    monkeypatch.setattr(cli, "provision_gpu_access", lambda: events.append("provision"))
+    monkeypatch.setattr(cli, "provision_gpu_access", lambda **kwargs: events.append("provision"))
     monkeypatch.setattr(cli, "generate_values_overlay", fake_overlay)
     monkeypatch.setattr(cli, "install_tools", lambda **kwargs: events.append("tools"))
     monkeypatch.setattr(cli, "install_k3s_single_node", lambda **kwargs: events.append("k3s"))
@@ -84,7 +84,7 @@ def test_runtime_upgrade_gates_host_access_without_provisioning_helm_values(
 
     monkeypatch.setattr(state, "runtime_paths", lambda: paths)
     monkeypatch.setattr(cli, "classify_gpu_hardware", lambda: hardware)
-    monkeypatch.setattr(cli, "provision_gpu_access", lambda: events.append("provision"))
+    monkeypatch.setattr(cli, "provision_gpu_access", lambda **kwargs: events.append("provision"))
     monkeypatch.setattr(cli, "detect_and_configure_gpu", lambda *args, **kwargs: events.append("detect"))
     monkeypatch.setattr(cli, "refine_gpu_config_from_node_labels", lambda *args, **kwargs: events.append("refine"))
     monkeypatch.setattr(cli, "_preserve_courses_for_upgrade", lambda *args, **kwargs: events.append("preserve-courses"))
@@ -116,7 +116,7 @@ def test_cpu_hardware_skips_host_access_and_preserves_runtime_flow(
     monkeypatch.setattr(state, "runtime_paths", lambda: paths)
     monkeypatch.setattr(cli, "classify_gpu_hardware", lambda: GpuHardware.CPU)
     monkeypatch.setattr(
-        cli, "provision_gpu_access", lambda: (_ for _ in ()).throw(AssertionError("must not provision"))
+        cli, "provision_gpu_access", lambda **kwargs: (_ for _ in ()).throw(AssertionError("must not provision"))
     )
     monkeypatch.setattr(cli, "detect_and_configure_gpu", lambda *args, **kwargs: events.append("detect"))
     monkeypatch.setattr(cli, "refine_gpu_config_from_node_labels", lambda *args, **kwargs: events.append("refine"))
@@ -152,7 +152,7 @@ def test_reinstall_gates_host_access_before_removing_runtime(
     state = InstallerState()
 
     monkeypatch.setattr(cli, "classify_gpu_hardware", lambda: hardware)
-    monkeypatch.setattr(cli, "provision_gpu_access", lambda: events.append("provision"))
+    monkeypatch.setattr(cli, "provision_gpu_access", lambda **kwargs: events.append("provision"))
     monkeypatch.setattr(cli, "remove_runtime", lambda: events.append("remove-runtime"))
     monkeypatch.setattr(cli.time, "sleep", lambda seconds: events.append("sleep"))
     monkeypatch.setattr(cli, delegate_name, lambda current_state: events.append("delegate"))
@@ -169,7 +169,7 @@ def test_unknown_hardware_blocks_full_install_before_gpu_access_mutation(monkeyp
     monkeypatch.setattr(cli, "classify_gpu_hardware", lambda: GpuHardware.UNKNOWN)
     monkeypatch.setattr(cli, "detect_and_configure_gpu", lambda *args, **kwargs: events.append("detect"))
     monkeypatch.setattr(
-        cli, "provision_gpu_access", lambda: (_ for _ in ()).throw(AssertionError("must not provision"))
+        cli, "provision_gpu_access", lambda **kwargs: (_ for _ in ()).throw(AssertionError("must not provision"))
     )
 
     with pytest.raises(RuntimeError, match="hardware"):
@@ -190,7 +190,7 @@ def test_unknown_hardware_blocks_reinstall_before_runtime_removal(
 
     monkeypatch.setattr(cli, "classify_gpu_hardware", lambda: GpuHardware.UNKNOWN)
     monkeypatch.setattr(
-        cli, "provision_gpu_access", lambda: (_ for _ in ()).throw(AssertionError("must not provision"))
+        cli, "provision_gpu_access", lambda **kwargs: (_ for _ in ()).throw(AssertionError("must not provision"))
     )
     monkeypatch.setattr(cli, "remove_runtime", lambda: events.append("remove-runtime"))
     monkeypatch.setattr(cli, delegate_name, lambda current_state: events.append("delegate"))
@@ -204,3 +204,19 @@ def test_unknown_hardware_blocks_reinstall_before_runtime_removal(
 def test_cli_exposes_no_render_gid_reconciliation_api() -> None:
     assert not hasattr(cli, "_render_gid_for_local_hardware")
     assert not hasattr(cli, "load_existing_gpu_access")
+
+
+def test_gpu_hardware_gate_passes_offline_bundle_context_to_package_provisioning(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # Given: a local GPU installation running from an offline bundle.
+    bundle = tmp_path / "bundle"
+    package_calls: list[dict[str, object]] = []
+    monkeypatch.setattr(cli, "classify_gpu_hardware", lambda: GpuHardware.GPU)
+    monkeypatch.setattr(cli, "provision_gpu_access", lambda **kwargs: package_calls.append(kwargs))
+
+    # When: the CLI's local-hardware gate provisions GPU access.
+    cli._provision_gpu_access_for_local_hardware(offline_mode=True, bundle_dir=bundle)
+
+    # Then: package provisioning receives the bundle context unchanged.
+    assert package_calls == [{"offline_mode": True, "bundle_dir": bundle}]
