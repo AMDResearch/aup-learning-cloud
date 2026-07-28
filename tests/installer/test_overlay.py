@@ -46,7 +46,6 @@ def _render(
     courses: CourseSelection,
     offline_mode: bool = False,
     image_tag: str = "v1.0",
-    render_gid: int | None = 993,
 ) -> tuple[str, dict]:
     text = emit_overlay(
         cfg,
@@ -54,7 +53,6 @@ def _render(
         image_tag=image_tag,
         courses=courses,
         offline_mode=offline_mode,
-        render_gid=render_gid,
     )
     return text, yaml.safe_load(text)
 
@@ -96,7 +94,6 @@ def _write_and_read_back(courses: CourseSelection) -> CourseSelection | None:
             image_tag="v1.0",
             courses=courses,
             offline_mode=False,
-            render_gid=993,
             overlay_path=path,
         )
         return try_load_courses_from_overlay(path)
@@ -110,30 +107,29 @@ def test_default_selection_round_trips_valid_yaml() -> None:
     assert "teams" not in parsed["custom"]
 
 
-def test_overlay_emits_explicit_gpu_access_gid_without_global_pod_groups() -> None:
+def test_overlay_never_emits_gpu_access_contract() -> None:
     text = emit_overlay(
         _strix_halo_cfg(),
         image_registry="ghcr.io/amdresearch",
         image_tag="v1.0",
         courses=CourseSelection.default(),
         offline_mode=False,
-        render_gid=993,
     )
     parsed = yaml.safe_load(text)
 
-    assert parsed["custom"]["gpuAccess"]["renderGid"] == 993
+    assert "gpuAccess" not in parsed["custom"]
+    assert "renderGid" not in text
     assert "supplementalGroups" not in text
 
 
-def test_overlay_emits_null_render_gid_without_removing_gpu_resources() -> None:
+def test_overlay_keeps_gpu_resources_without_gpu_access_contract() -> None:
     _, parsed = _render(
         _strix_halo_cfg(),
         courses=CourseSelection.default(),
-        render_gid=None,
     )
 
     custom = parsed["custom"]
-    assert custom["gpuAccess"]["renderGid"] is None
+    assert "gpuAccess" not in custom
     assert set(custom["resources"]["images"]) == set(GPU_RESOURCE_KEYS)
     assert set(custom["resources"]["metadata"]) == set(GPU_RESOURCE_KEYS)
     assert "teams" not in custom
