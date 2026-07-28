@@ -13,7 +13,7 @@ import argparse
 import contextlib
 import sys
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from pathlib import Path
 from typing import NoReturn
 
@@ -23,7 +23,7 @@ from auplc_installer.gpu import (
     detect_and_configure_gpu,
     refine_gpu_config_from_node_labels,
 )
-from auplc_installer.gpu_access import GpuAccessState, load_existing_gpu_access, provision_gpu_access
+from auplc_installer.gpu_access import provision_gpu_access
 from auplc_installer.gpu_hardware import GpuHardware, classify_gpu_hardware
 from auplc_installer.helm import (
     deploy_runtime,
@@ -326,12 +326,12 @@ def _raise_unreachable_gpu_hardware(hardware: GpuHardware) -> NoReturn:
     raise AssertionError(f"Unhandled GPU hardware classification: {hardware!r}")
 
 
-def _render_gid_for_local_hardware(reconcile_gpu_access: Callable[[], GpuAccessState]) -> int | None:
+def _provision_gpu_access_for_local_hardware() -> None:
     match classify_gpu_hardware():
         case GpuHardware.GPU:
-            return reconcile_gpu_access().render_gid
+            provision_gpu_access()
         case GpuHardware.CPU:
-            return None
+            return
         case GpuHardware.UNKNOWN:
             raise InstallerError("Could not determine local AMD GPU hardware; refusing to modify installer state")
         case unreachable:
@@ -355,7 +355,7 @@ def _cmd_install_inner(state: InstallerState, *, pull: bool) -> None:
         detect_and_configure_gpu(state.gpu, gpu_type_override=state.gpu_type)
 
     with stage("Provisioning GPU device access", idx=2, total=total):
-        render_gid = _render_gid_for_local_hardware(provision_gpu_access)
+        _provision_gpu_access_for_local_hardware()
     paths = state.runtime_paths()
 
     with stage("Generating values overlay (initial)", idx=3, total=total):
@@ -368,7 +368,6 @@ def _cmd_install_inner(state: InstallerState, *, pull: bool) -> None:
             image_tag=state.image_tag,
             courses=state.courses,
             offline_mode=state.offline_mode,
-            render_gid=render_gid,
             overlay_path=paths.overlay_path,
         )
 
@@ -434,7 +433,6 @@ def _cmd_install_inner(state: InstallerState, *, pull: bool) -> None:
             image_tag=state.image_tag,
             courses=state.courses,
             offline_mode=state.offline_mode,
-            render_gid=render_gid,
             overlay_path=paths.overlay_path,
         )
 
@@ -606,7 +604,7 @@ def cmd_dev_quick(state: InstallerState) -> None:
 
 
 def cmd_dev_deploy(state: InstallerState) -> None:
-    render_gid = _render_gid_for_local_hardware(load_existing_gpu_access)
+    _provision_gpu_access_for_local_hardware()
     detect_and_configure_gpu(state.gpu, gpu_type_override=state.gpu_type)
     paths = state.runtime_paths()
     refine_gpu_config_from_node_labels(state.gpu)
@@ -616,14 +614,13 @@ def cmd_dev_deploy(state: InstallerState) -> None:
         image_tag=state.image_tag,
         courses=state.courses,
         offline_mode=state.offline_mode,
-        render_gid=render_gid,
         overlay_path=paths.overlay_path,
     )
     deploy_runtime(paths, dev=True)
 
 
 def cmd_dev_upgrade(state: InstallerState) -> None:
-    render_gid = _render_gid_for_local_hardware(load_existing_gpu_access)
+    _provision_gpu_access_for_local_hardware()
     detect_and_configure_gpu(state.gpu, gpu_type_override=state.gpu_type)
     paths = state.runtime_paths()
     refine_gpu_config_from_node_labels(state.gpu)
@@ -634,14 +631,13 @@ def cmd_dev_upgrade(state: InstallerState) -> None:
         image_tag=state.image_tag,
         courses=state.courses,
         offline_mode=state.offline_mode,
-        render_gid=render_gid,
         overlay_path=paths.overlay_path,
     )
     upgrade_runtime(paths, dev=True)
 
 
 def cmd_dev_reinstall(state: InstallerState) -> None:
-    _render_gid_for_local_hardware(load_existing_gpu_access)
+    _provision_gpu_access_for_local_hardware()
     with contextlib.suppress(InstallerError):
         remove_runtime()
     time.sleep(0.5)
@@ -652,7 +648,7 @@ def cmd_dev_reinstall(state: InstallerState) -> None:
 
 
 def cmd_rt_install(state: InstallerState) -> None:
-    render_gid = _render_gid_for_local_hardware(load_existing_gpu_access)
+    _provision_gpu_access_for_local_hardware()
     detect_and_configure_gpu(state.gpu, gpu_type_override=state.gpu_type)
     paths = state.runtime_paths()
     refine_gpu_config_from_node_labels(state.gpu)
@@ -662,14 +658,13 @@ def cmd_rt_install(state: InstallerState) -> None:
         image_tag=state.image_tag,
         courses=state.courses,
         offline_mode=state.offline_mode,
-        render_gid=render_gid,
         overlay_path=paths.overlay_path,
     )
     deploy_runtime(paths)
 
 
 def cmd_rt_upgrade(state: InstallerState) -> None:
-    render_gid = _render_gid_for_local_hardware(load_existing_gpu_access)
+    _provision_gpu_access_for_local_hardware()
     detect_and_configure_gpu(state.gpu, gpu_type_override=state.gpu_type)
     paths = state.runtime_paths()
     refine_gpu_config_from_node_labels(state.gpu)
@@ -680,7 +675,6 @@ def cmd_rt_upgrade(state: InstallerState) -> None:
         image_tag=state.image_tag,
         courses=state.courses,
         offline_mode=state.offline_mode,
-        render_gid=render_gid,
         overlay_path=paths.overlay_path,
     )
     upgrade_runtime(paths)
@@ -711,7 +705,7 @@ def cmd_rt_remove(state: InstallerState) -> None:
 
 
 def cmd_rt_reinstall(state: InstallerState) -> None:
-    _render_gid_for_local_hardware(load_existing_gpu_access)
+    _provision_gpu_access_for_local_hardware()
     with contextlib.suppress(InstallerError):
         remove_runtime()
     time.sleep(0.5)
