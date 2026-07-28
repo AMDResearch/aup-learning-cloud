@@ -4,6 +4,8 @@
 
 from pathlib import Path
 
+import yaml
+
 ROOT = Path(__file__).resolve().parents[2]
 ANSIBLE = ROOT / "deploy" / "ansible"
 GPU_ACCESS_ROLE = ANSIBLE / "roles" / "gpu_access"
@@ -49,6 +51,20 @@ def test_gpu_access_role_pins_the_official_amd_package_contract() -> None:
     assert "--search" in verify
     assert "package-owned" in verify
     assert "modified package conffile" in verify
+
+
+def test_inventory_placeholders_define_boolean_gpu_access() -> None:
+    inventory_text = read(ANSIBLE / "inventory.yml")
+    inventory = yaml.safe_load(inventory_text)
+    raw_inventory = yaml.load(inventory_text, Loader=yaml.BaseLoader)
+    hosts = inventory["k3s_cluster"]["children"]
+    raw_hosts = raw_inventory["k3s_cluster"]["children"]
+
+    for group_name in ("server", "agent"):
+        for host_name, host in hosts[group_name]["hosts"].items():
+            value = host["auplc_gpu_access_enabled"]
+            assert type(value) is bool
+            assert raw_hosts[group_name]["hosts"][host_name]["auplc_gpu_access_enabled"] in {"true", "false"}
 
 
 def test_gpu_access_role_preserves_rootfs_and_exact_legacy_safety() -> None:
