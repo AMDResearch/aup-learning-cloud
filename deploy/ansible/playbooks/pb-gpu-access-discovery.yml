@@ -1,0 +1,386 @@
+# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+---
+- name: Discover fleet GPU-access evidence
+  hosts: k3s_cluster
+  gather_facts: false
+  become: false
+  ignore_unreachable: true
+  vars:
+    _auplc_gpu_access_unknown_evidence:
+      reachable: false
+      lspci:
+        rc: 255
+        stdout: ""
+      sysfs:
+        rc: 255
+        stdout: ""
+      render_group:
+        rc: 255
+        stdout: ""
+      groups:
+        rc: 255
+        stdout: ""
+      state:
+        stat_success: false
+        content_success: false
+        exists: false
+        regular: false
+        symlink: false
+        content: ""
+      rule:
+        stat_success: false
+        content_success: false
+        exists: false
+        regular: false
+        symlink: false
+        content: ""
+      legacy_rules:
+        kfd:
+          stat_success: false
+          content_success: false
+          exists: false
+          regular: false
+          symlink: false
+          content: ""
+        amdgpu:
+          stat_success: false
+          content_success: false
+          exists: false
+          regular: false
+          symlink: false
+          content: ""
+        rocm_devices:
+          stat_success: false
+          content_success: false
+          exists: false
+          regular: false
+          symlink: false
+          content: ""
+  pre_tasks:
+    - name: Require a safe local discovery evidence output path
+      ansible.builtin.assert:
+        that:
+          - gpu_access_discovery_output_path is defined
+          - gpu_access_discovery_output_path is string
+          - gpu_access_discovery_output_path is match('^/')
+        fail_msg: >-
+          Set gpu_access_discovery_output_path to an absolute controller-local
+          path before running discovery.
+      delegate_to: localhost
+      run_once: true
+      changed_when: false
+
+    - name: Inspect local discovery evidence parent
+      ansible.builtin.stat:
+        path: "{{ gpu_access_discovery_output_path | dirname }}"
+        follow: false
+      delegate_to: localhost
+      run_once: true
+      register: _auplc_discovery_output_parent
+      changed_when: false
+
+    - name: Require safe local discovery evidence parent
+      ansible.builtin.assert:
+        that:
+          - _auplc_discovery_output_parent.stat.exists
+          - _auplc_discovery_output_parent.stat.isdir
+          - not _auplc_discovery_output_parent.stat.islnk
+        fail_msg: Discovery output parent must be an existing non-symlink directory.
+      delegate_to: localhost
+      run_once: true
+      changed_when: false
+
+    - name: Inspect local discovery evidence destination
+      ansible.builtin.stat:
+        path: "{{ gpu_access_discovery_output_path }}"
+        follow: false
+      delegate_to: localhost
+      run_once: true
+      register: _auplc_discovery_output_destination
+      changed_when: false
+
+    - name: Require safe local discovery evidence destination
+      ansible.builtin.assert:
+        that:
+          - >-
+            not _auplc_discovery_output_destination.stat.exists or
+            (_auplc_discovery_output_destination.stat.isreg and
+            not _auplc_discovery_output_destination.stat.islnk)
+        fail_msg: Discovery output destination must be absent or a regular non-symlink file.
+      delegate_to: localhost
+      run_once: true
+      changed_when: false
+  tasks:
+    - name: Discover AMD VGA display BDFs with lspci
+      ansible.builtin.command:
+        argv:
+          - lspci
+          - -Dnn
+          - -d
+          - "1002::0300"
+      register: _auplc_discovery_lspci_vga
+      changed_when: false
+      failed_when: false
+
+    - name: Discover AMD 3D display BDFs with lspci
+      ansible.builtin.command:
+        argv:
+          - lspci
+          - -Dnn
+          - -d
+          - "1002::0302"
+      register: _auplc_discovery_lspci_3d
+      changed_when: false
+      failed_when: false
+
+    - name: Discover AMD display-controller BDFs with lspci
+      ansible.builtin.command:
+        argv:
+          - lspci
+          - -Dnn
+          - -d
+          - "1002::0380"
+      register: _auplc_discovery_lspci_display
+      changed_when: false
+      failed_when: false
+
+    - name: Combine AMD display lspci evidence
+      ansible.builtin.set_fact:
+        _auplc_discovery_lspci:
+          rc: >-
+            {{ 0 if _auplc_discovery_lspci_vga.rc == 0 and
+            _auplc_discovery_lspci_3d.rc == 0 and
+            _auplc_discovery_lspci_display.rc == 0 else 1 }}
+          stdout: >-
+            {{ [_auplc_discovery_lspci_vga.stdout | default(''),
+            _auplc_discovery_lspci_3d.stdout | default(''),
+            _auplc_discovery_lspci_display.stdout | default('')]
+            | reject('equalto', '') | join('\n') }}
+      changed_when: false
+
+    - name: Discover AMD display BDFs through sysfs
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - >-
+            from pathlib import Path; devices = Path('/sys/bus/pci/devices');
+            print('\n'.join(sorted(device.name for device in devices.iterdir()
+            if (device / 'vendor').read_text().strip() == '0x1002' and
+            (device / 'class').read_text().strip().startswith('0x03'))))
+      register: _auplc_discovery_sysfs
+      changed_when: false
+      failed_when: false
+
+    - name: Read render group record
+      ansible.builtin.command:
+        argv:
+          - getent
+          - group
+          - render
+      register: _auplc_discovery_render_group
+      changed_when: false
+      failed_when: false
+
+    - name: Read all group records for render GID collision detection
+      ansible.builtin.command:
+        argv:
+          - getent
+          - group
+      register: _auplc_discovery_groups
+      changed_when: false
+      failed_when: false
+
+    - name: Inspect persisted GPU access state
+      ansible.builtin.stat:
+        path: /var/lib/auplc/gpu-access.json
+        follow: false
+      register: _auplc_discovery_state
+      changed_when: false
+      ignore_errors: true
+
+    - name: Read persisted GPU access state
+      ansible.builtin.slurp:
+        src: /var/lib/auplc/gpu-access.json
+      register: _auplc_discovery_state_content
+      when:
+        - _auplc_discovery_state.stat.exists | default(false)
+        - _auplc_discovery_state.stat.isreg | default(false)
+        - not (_auplc_discovery_state.stat.islnk | default(false))
+      changed_when: false
+      ignore_errors: true
+
+    - name: Inspect canonical GPU access rule
+      ansible.builtin.stat:
+        path: /etc/udev/rules.d/70-auplc-gpu-access.rules
+        follow: false
+      register: _auplc_discovery_rule
+      changed_when: false
+      ignore_errors: true
+
+    - name: Read canonical GPU access rule
+      ansible.builtin.slurp:
+        src: /etc/udev/rules.d/70-auplc-gpu-access.rules
+      register: _auplc_discovery_rule_content
+      when:
+        - _auplc_discovery_rule.stat.exists | default(false)
+        - _auplc_discovery_rule.stat.isreg | default(false)
+        - not (_auplc_discovery_rule.stat.islnk | default(false))
+      changed_when: false
+      ignore_errors: true
+
+    - name: Inspect legacy kfd GPU access rule
+      ansible.builtin.stat:
+        path: /etc/udev/rules.d/70-kfd.rules
+        follow: false
+      register: _auplc_discovery_legacy_kfd
+      changed_when: false
+      ignore_errors: true
+
+    - name: Read legacy kfd GPU access rule
+      ansible.builtin.slurp:
+        src: /etc/udev/rules.d/70-kfd.rules
+      register: _auplc_discovery_legacy_kfd_content
+      when:
+        - _auplc_discovery_legacy_kfd.stat.exists | default(false)
+        - _auplc_discovery_legacy_kfd.stat.isreg | default(false)
+        - not (_auplc_discovery_legacy_kfd.stat.islnk | default(false))
+      changed_when: false
+      ignore_errors: true
+
+    - name: Inspect legacy amdgpu GPU access rule
+      ansible.builtin.stat:
+        path: /etc/udev/rules.d/70-amdgpu.rules
+        follow: false
+      register: _auplc_discovery_legacy_amdgpu
+      changed_when: false
+      ignore_errors: true
+
+    - name: Read legacy amdgpu GPU access rule
+      ansible.builtin.slurp:
+        src: /etc/udev/rules.d/70-amdgpu.rules
+      register: _auplc_discovery_legacy_amdgpu_content
+      when:
+        - _auplc_discovery_legacy_amdgpu.stat.exists | default(false)
+        - _auplc_discovery_legacy_amdgpu.stat.isreg | default(false)
+        - not (_auplc_discovery_legacy_amdgpu.stat.islnk | default(false))
+      changed_when: false
+      ignore_errors: true
+
+    - name: Inspect legacy ROCm devices GPU access rule
+      ansible.builtin.stat:
+        path: /etc/udev/rules.d/70-rocm-devices.rules
+        follow: false
+      register: _auplc_discovery_legacy_rocm_devices
+      changed_when: false
+      ignore_errors: true
+
+    - name: Read legacy ROCm devices GPU access rule
+      ansible.builtin.slurp:
+        src: /etc/udev/rules.d/70-rocm-devices.rules
+      register: _auplc_discovery_legacy_rocm_devices_content
+      when:
+        - _auplc_discovery_legacy_rocm_devices.stat.exists | default(false)
+        - _auplc_discovery_legacy_rocm_devices.stat.isreg | default(false)
+        - not (_auplc_discovery_legacy_rocm_devices.stat.islnk | default(false))
+      changed_when: false
+      ignore_errors: true
+
+    - name: Record machine-readable GPU access discovery evidence
+      ansible.builtin.set_fact:
+        _auplc_gpu_access_discovery_evidence:
+          host: "{{ inventory_hostname }}"
+          reachable: true
+          lspci:
+            rc: "{{ _auplc_discovery_lspci.rc }}"
+            stdout: "{{ _auplc_discovery_lspci.stdout | default('') }}"
+          sysfs:
+            rc: "{{ _auplc_discovery_sysfs.rc }}"
+            stdout: "{{ _auplc_discovery_sysfs.stdout | default('') }}"
+          render_group:
+            rc: "{{ _auplc_discovery_render_group.rc }}"
+            stdout: "{{ _auplc_discovery_render_group.stdout | default('') }}"
+          groups:
+            rc: "{{ _auplc_discovery_groups.rc }}"
+            stdout: "{{ _auplc_discovery_groups.stdout | default('') }}"
+          state:
+            stat_success: "{{ not (_auplc_discovery_state.failed | default(false)) }}"
+            content_success: >-
+              {{ not (_auplc_discovery_state.failed | default(false)) and
+              (not (_auplc_discovery_state.stat.exists | default(false)) or
+              not (_auplc_discovery_state.stat.isreg | default(false)) or
+              (_auplc_discovery_state.stat.islnk | default(false)) or
+              not (_auplc_discovery_state_content.failed | default(false))) }}
+            exists: "{{ _auplc_discovery_state.stat.exists | default(false) }}"
+            regular: "{{ _auplc_discovery_state.stat.isreg | default(false) }}"
+            symlink: "{{ _auplc_discovery_state.stat.islnk | default(false) }}"
+            content: "{{ _auplc_discovery_state_content.content | default('') | b64decode }}"
+          rule:
+            stat_success: "{{ not (_auplc_discovery_rule.failed | default(false)) }}"
+            content_success: >-
+              {{ not (_auplc_discovery_rule.failed | default(false)) and
+              (not (_auplc_discovery_rule.stat.exists | default(false)) or
+              not (_auplc_discovery_rule.stat.isreg | default(false)) or
+              (_auplc_discovery_rule.stat.islnk | default(false)) or
+              not (_auplc_discovery_rule_content.failed | default(false))) }}
+            exists: "{{ _auplc_discovery_rule.stat.exists | default(false) }}"
+            regular: "{{ _auplc_discovery_rule.stat.isreg | default(false) }}"
+            symlink: "{{ _auplc_discovery_rule.stat.islnk | default(false) }}"
+            content: "{{ _auplc_discovery_rule_content.content | default('') | b64decode }}"
+          legacy_rules:
+            kfd:
+              stat_success: "{{ not (_auplc_discovery_legacy_kfd.failed | default(false)) }}"
+              content_success: >-
+                {{ not (_auplc_discovery_legacy_kfd.failed | default(false)) and
+                (not (_auplc_discovery_legacy_kfd.stat.exists | default(false)) or
+                not (_auplc_discovery_legacy_kfd.stat.isreg | default(false)) or
+                (_auplc_discovery_legacy_kfd.stat.islnk | default(false)) or
+                not (_auplc_discovery_legacy_kfd_content.failed | default(false))) }}
+              exists: "{{ _auplc_discovery_legacy_kfd.stat.exists | default(false) }}"
+              regular: "{{ _auplc_discovery_legacy_kfd.stat.isreg | default(false) }}"
+              symlink: "{{ _auplc_discovery_legacy_kfd.stat.islnk | default(false) }}"
+              content: "{{ _auplc_discovery_legacy_kfd_content.content | default('') | b64decode }}"
+            amdgpu:
+              stat_success: "{{ not (_auplc_discovery_legacy_amdgpu.failed | default(false)) }}"
+              content_success: >-
+                {{ not (_auplc_discovery_legacy_amdgpu.failed | default(false)) and
+                (not (_auplc_discovery_legacy_amdgpu.stat.exists | default(false)) or
+                not (_auplc_discovery_legacy_amdgpu.stat.isreg | default(false)) or
+                (_auplc_discovery_legacy_amdgpu.stat.islnk | default(false)) or
+                not (_auplc_discovery_legacy_amdgpu_content.failed | default(false))) }}
+              exists: "{{ _auplc_discovery_legacy_amdgpu.stat.exists | default(false) }}"
+              regular: "{{ _auplc_discovery_legacy_amdgpu.stat.isreg | default(false) }}"
+              symlink: "{{ _auplc_discovery_legacy_amdgpu.stat.islnk | default(false) }}"
+              content: "{{ _auplc_discovery_legacy_amdgpu_content.content | default('') | b64decode }}"
+            rocm_devices:
+              stat_success: "{{ not (_auplc_discovery_legacy_rocm_devices.failed | default(false)) }}"
+              content_success: >-
+                {{ not (_auplc_discovery_legacy_rocm_devices.failed | default(false)) and
+                (not (_auplc_discovery_legacy_rocm_devices.stat.exists | default(false)) or
+                not (_auplc_discovery_legacy_rocm_devices.stat.isreg | default(false)) or
+                (_auplc_discovery_legacy_rocm_devices.stat.islnk | default(false)) or
+                not (_auplc_discovery_legacy_rocm_devices_content.failed | default(false))) }}
+              exists: "{{ _auplc_discovery_legacy_rocm_devices.stat.exists | default(false) }}"
+              regular: "{{ _auplc_discovery_legacy_rocm_devices.stat.isreg | default(false) }}"
+              symlink: "{{ _auplc_discovery_legacy_rocm_devices.stat.islnk | default(false) }}"
+              content: "{{ _auplc_discovery_legacy_rocm_devices_content.content | default('') | b64decode }}"
+      changed_when: false
+
+    - name: Write machine-readable GPU access discovery evidence locally
+      ansible.builtin.copy:
+        content: |
+          {"version":2,"hosts":[{% for discovery_host in ansible_play_hosts_all %}
+          {{ (
+            hostvars[discovery_host]._auplc_gpu_access_discovery_evidence
+            | default(
+              _auplc_gpu_access_unknown_evidence | combine({'host': discovery_host}),
+              true
+            )
+            | to_json
+          ) }}{% if not loop.last %},{% endif %}
+          {% endfor %}]}
+        dest: "{{ gpu_access_discovery_output_path }}"
+        mode: "0600"
+      delegate_to: localhost
+      run_once: true
+      changed_when: false
