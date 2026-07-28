@@ -112,6 +112,13 @@ This operation needs root privileges. Requesting sudo password...
     kubectl is configured at $HOME/.kube/config; try `kubectl get nodes`
 ```
 
+The GPU access stage installs AMD's `amdgpu-insecure-instinct-udev-rules`
+package, pinned to `30.30.4.0-2341068.24.04`. It sets mode `0666` only on
+`/dev/kfd` and DRM `renderD*` nodes; `card*` keeps the normal system policy. The
+device plugin remains a separate allocation layer, and the tested ROCm compute
+path needs no supplemental GPU group. The offline `pack` bundle carries the
+pinned deb for installation without network access.
+
 See the full guide at [Quick Start](https://amdresearch.github.io/aup-learning-cloud/installation/quick-start.html) and [Single-Node Deployment](https://amdresearch.github.io/aup-learning-cloud/installation/single-node.html).
 
 ### Uninstall

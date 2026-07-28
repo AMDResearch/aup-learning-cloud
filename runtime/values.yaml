@@ -669,7 +669,7 @@ monitoring:
 
 singleuser:
   # Storage ownership only. AUPLC runtime does not inject GPU groups.
-  # An amd.com/gpu request is the device-visibility boundary; injected nodes are 0666.
+  # amd.com/gpu requests allocate devices; host udev policy controls node modes.
   fsGid: 100
 
   storage:
