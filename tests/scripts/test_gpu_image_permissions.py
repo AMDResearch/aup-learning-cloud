@@ -13,12 +13,10 @@ def test_rocm_base_leaves_gpu_device_permissions_to_the_host() -> None:
     dockerfile = DOCKERFILE.read_text(encoding="utf-8")
 
     forbidden_patterns = (
-        r"groupmod\s+-g\s+992\s+render",
-        r"groupadd\s+-g\s+992\s+render",
-        r"usermod\s+-aG\s+video,render\s+\$\{NB_USER\}",
-        r"\brender\b",
+        r"\b(?:groupadd|groupmod|usermod)\b.*\b(?:video|render)\b",
         r"/etc/udev",
         r"chmod\s+666\b",
+        r"chmod\b.*(?:/dev/|kfd|render|card)",
     )
     for pattern in forbidden_patterns:
         assert re.search(pattern, dockerfile) is None, pattern
