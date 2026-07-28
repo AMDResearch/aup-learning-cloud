@@ -3195,20 +3195,6 @@ properties:
               Enable auto-admin creation on first install.
               Credentials will be stored in `jupyterhub-admin-credentials` secret.
 
-      gpuAccess:
-        type: object
-        additionalProperties: false
-        description: |
-          Host group access settings for GPU-enabled user pods.
-        properties:
-          renderGid:
-            type: [integer, "null"]
-            minimum: 1
-            maximum: 4294967294
-            description: |
-              Numeric GID of the host render group. GPU resources receive this
-              as a supplemental group; CPU resources do not.
-
       notifications:
         type: object
         additionalProperties: false

@@ -50,11 +50,6 @@ custom:
   # Define these in runtime/values.yaml, not here
   accelerators: {}
 
-  # Host render-group access for GPU user pods. The installer overlay sets this
-  # to the detected host render GID when GPU access is provisioned.
-  gpuAccess:
-    renderGid: null
-
   # Resource images, requirements, and metadata
   # Define these in runtime/values.yaml, not here
   resources:
