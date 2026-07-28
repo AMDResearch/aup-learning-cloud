@@ -88,10 +88,7 @@ export const CourseCard = memo(function CourseCard({
     }
     const real = accelerators.filter(acc => acceleratorKeys.includes(acc.key));
     if (real.length <= 1) return real;
-    const rates = real.map(a => a.quotaRate);
-    const minRate = Math.min(...rates);
-    const maxRate = Math.max(...rates);
-    const rateDesc = minRate === maxRate ? `${minRate} credits/min` : `${minRate}–${maxRate} credits/min`;
+    const minRate = Math.min(...real.map(a => a.quotaRate));
     const autoOption: Accelerator = {
       key: 'auto',
       displayName: 'Auto',
