@@ -27,9 +27,6 @@
     - /etc
     - /etc/udev
     - /etc/udev/rules.d
-    - /var
-    - /var/lib
-    - /var/lib/auplc
   register: _auplc_destination_parent_stats
 
 - name: Reject unsafe canonical GPU access destination parents
@@ -39,52 +36,38 @@
     fail_msg: "Unsafe canonical GPU access destination parent: {{ item.item }}"
   loop: "{{ _auplc_destination_parent_stats.results }}"
 
-- name: Inspect canonical GPU access destinations
+- name: Inspect canonical GPU access destination
   ansible.builtin.stat:
-    path: "{{ _auplc_target_root }}{{ item }}"
+    path: "{{ _auplc_target_root }}/etc/udev/rules.d/70-auplc-gpu-access.rules"
     follow: false
-  loop:
-    - /etc/udev/rules.d/70-auplc-gpu-access.rules
-    - /var/lib/auplc/gpu-access.json
-  register: _auplc_destination_stats
+  register: _auplc_destination_rule
 
-- name: Reject unsafe canonical GPU access destinations
+- name: Reject unsafe canonical GPU access destination
   ansible.builtin.assert:
     that:
-      - not item.stat.exists or (item.stat.isreg and not item.stat.islnk)
-    fail_msg: "Unsafe canonical GPU access destination: {{ item.item }}"
-  loop: "{{ _auplc_destination_stats.results }}"
+      - not _auplc_destination_rule.stat.exists or
+        (_auplc_destination_rule.stat.isreg and not _auplc_destination_rule.stat.islnk)
+    fail_msg: Unsafe canonical GPU access destination.
 
-- name: Read existing canonical GPU access destinations
+- name: Read existing canonical GPU access rule
   ansible.builtin.slurp:
-    src: "{{ _auplc_target_root }}{{ item.item }}"
-  loop: "{{ _auplc_destination_stats.results }}"
-  when: item.stat.exists
-  register: _auplc_existing_destinations
+    src: "{{ _auplc_target_root }}/etc/udev/rules.d/70-auplc-gpu-access.rules"
+  register: _auplc_existing_rule
+  when: _auplc_destination_rule.stat.exists
 
-- name: Define canonical GPU access rule content
+- name: Define canonical GPU access rule contents
   ansible.builtin.set_fact:
     _auplc_canonical_rule: |
       # Managed by auplc-installer: AMD GPU device access.
-      KERNEL=="kfd", OWNER="root", GROUP="render", MODE="0660"
-      SUBSYSTEM=="drm", KERNEL=="renderD*", DRIVERS=="amdgpu", OWNER="root", GROUP="render", MODE="0660"
+      KERNEL=="kfd", OWNER="root", GROUP="render", MODE="0666"
+      SUBSYSTEM=="drm", KERNEL=="renderD*", DRIVERS=="amdgpu", OWNER="root", GROUP="render", MODE="0666"
+      SUBSYSTEM=="drm", KERNEL=="card*", DRIVERS=="amdgpu", OWNER="root", GROUP="video", MODE="0666"
 
 - name: Reject unmanaged canonical GPU access rule
   ansible.builtin.assert:
-    that: (item.content | b64decode) == _auplc_canonical_rule
-    fail_msg: "Unmanaged canonical GPU access rule: {{ item.item.item }}"
-  loop: "{{ _auplc_existing_destinations.results }}"
-  when:
-    - not item.skipped | default(false)
-    - item.item.item.endswith('70-auplc-gpu-access.rules')
-
-- name: Parse existing canonical GPU access state
-  ansible.builtin.set_fact:
-    _auplc_existing_state: "{{ item.content | b64decode | auplc_from_json_strict }}"
-  loop: "{{ _auplc_existing_destinations.results }}"
-  when:
-    - not item.skipped | default(false)
-    - item.item.item.endswith('gpu-access.json')
+    that: (_auplc_existing_rule.content | b64decode) == _auplc_canonical_rule
+    fail_msg: Unmanaged canonical GPU access rule.
+  when: _auplc_destination_rule.stat.exists
 
 - name: Define recognized project-owned legacy GPU rules
   ansible.builtin.set_fact:
@@ -137,70 +120,3 @@
     fail_msg: "Unexpected legacy GPU rule content: {{ item.item.item.path }}"
   loop: "{{ _auplc_legacy_gpu_rule_contents.results }}"
   when: not item.skipped | default(false)
-
-- name: Read target render group
-  ansible.builtin.command:
-    argv: >-
-      {{ ['getent', 'group', 'render'] if _auplc_target_root | length == 0
-         else ['chroot', _auplc_target_root, 'getent', 'group', 'render'] }}
-  register: _auplc_render_group
-  changed_when: false
-  failed_when: false
-
-- name: Require target render group
-  ansible.builtin.assert:
-    that:
-      - _auplc_render_group.rc == 0
-      - _auplc_render_group.stdout_lines | length == 1
-      - _auplc_render_group.stdout.split(':') | length == 4
-      - _auplc_render_group.stdout.split(':')[0] == 'render'
-      - _auplc_render_group.stdout.split(':')[2] is match('^[1-9][0-9]*$')
-      - _auplc_render_group.stdout.split(':')[2] | int <= 4294967294
-    fail_msg: Target has no valid render group; this role never creates groups.
-
-- name: Record target render GID
-  ansible.builtin.set_fact:
-    _auplc_current_render_gid: "{{ _auplc_render_group.stdout.split(':')[2] | int }}"
-
-- name: Reject invalid canonical GPU access state except Interrupted normalization retry
-  ansible.builtin.assert:
-    that:
-      - _auplc_existing_state is mapping
-      - _auplc_existing_state.keys() | list | sort == ['renderGid', 'version']
-      - _auplc_existing_state.version is integer
-      - _auplc_existing_state.version == 1
-      - _auplc_existing_state.renderGid is integer
-      - _auplc_existing_state.renderGid >= 1
-      - _auplc_existing_state.renderGid <= 4294967294
-      - >-
-        _auplc_existing_state.renderGid == auplc_render_gid or
-        ((auplc_normalize_render_gid | bool) and
-        (_auplc_existing_state.renderGid == _auplc_current_render_gid or
-        _auplc_current_render_gid == auplc_render_gid))
-    fail_msg: Invalid canonical GPU access state.
-  when: _auplc_existing_state is defined
-
-- name: List target groups for desired GID collision
-  ansible.builtin.command:
-    argv: >-
-      {{ ['getent', 'group'] if _auplc_target_root | length == 0
-         else ['chroot', _auplc_target_root, 'getent', 'group'] }}
-  register: _auplc_all_groups
-  changed_when: false
-  failed_when: false
-
-- name: Reject desired GID collision
-  ansible.builtin.assert:
-    that:
-      - _auplc_all_groups.rc == 0
-      - >-
-        _auplc_all_groups.stdout_lines
-        | select('match', '^[^:]*:[^:]*:' ~ (auplc_render_gid | string) ~ ':')
-        | reject('match', '^render:') | list | length == 0
-    fail_msg: auplc_render_gid is already assigned to another target group.
-
-- name: Reject render GID mismatch without normalization
-  ansible.builtin.assert:
-    that:
-      - _auplc_current_render_gid == auplc_render_gid or (auplc_normalize_render_gid | bool)
-    fail_msg: Target render GID differs from auplc_render_gid and normalization is disabled.

@@ -1,15 +1,6 @@
 # Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
 
 ---
-- name: Validate desired render GID
-  ansible.builtin.assert:
-    that:
-      - auplc_render_gid is not none
-      - auplc_render_gid is integer
-      - auplc_render_gid >= 1
-      - auplc_render_gid <= 4294967294
-    fail_msg: auplc_render_gid must be an explicit integer between 1 and 4294967294.
-
 - name: Validate GPU access rootfs path syntax
   ansible.builtin.assert:
     that:
