@@ -1,54 +1,89 @@
 # Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
 
 ---
-- name: Inspect canonical GPU access rule before apply
-  ansible.builtin.stat:
-    path: "{{ _auplc_target_root }}/etc/udev/rules.d/70-auplc-gpu-access.rules"
-    follow: false
-  register: _auplc_apply_destination_rule
+- name: Install AMD udev package when required
+  block:
+    - name: Create deterministic AMD udev package cache
+      ansible.builtin.file:
+        path: "{{ auplc_gpu_udev_package_cache_path | dirname }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
 
-- name: Reject unsafe canonical GPU access rule before apply
-  ansible.builtin.assert:
-    that:
-      - not _auplc_apply_destination_rule.stat.exists or
-        (_auplc_apply_destination_rule.stat.isreg and not _auplc_apply_destination_rule.stat.islnk)
-    fail_msg: Unsafe canonical GPU access destination.
+    - name: Download checksummed AMD udev package
+      ansible.builtin.get_url:
+        url: "{{ auplc_gpu_udev_package_url }}"
+        dest: "{{ auplc_gpu_udev_package_cache_path }}"
+        checksum: "{{ auplc_gpu_udev_package_checksum }}"
+        owner: root
+        group: root
+        mode: "0644"
 
-- name: Read canonical GPU access rule before apply
-  ansible.builtin.slurp:
-    src: "{{ _auplc_target_root }}/etc/udev/rules.d/70-auplc-gpu-access.rules"
-  register: _auplc_apply_existing_rule
-  when: _auplc_apply_destination_rule.stat.exists
+    - name: Install AMD udev package on live host
+      ansible.builtin.apt:
+        deb: "{{ auplc_gpu_udev_package_cache_path }}"
+        state: present
+        allow_downgrade: true
+        dpkg_options: force-confnew
+      when: _auplc_target_root | length == 0
 
-- name: Define canonical GPU access rule contents for apply
-  ansible.builtin.set_fact:
-    _auplc_apply_canonical_rule: |
-      # Managed by auplc-installer: AMD GPU device access.
-      KERNEL=="kfd", OWNER="root", GROUP="render", MODE="0666"
-      SUBSYSTEM=="drm", KERNEL=="renderD*", DRIVERS=="amdgpu", OWNER="root", GROUP="render", MODE="0666"
-      SUBSYSTEM=="drm", KERNEL=="card*", DRIVERS=="amdgpu", OWNER="root", GROUP="video", MODE="0666"
+    - name: Copy AMD udev package into PXE rootfs
+      ansible.builtin.copy:
+        src: "{{ auplc_gpu_udev_package_cache_path }}"
+        dest: "{{ _auplc_target_root }}/tmp/{{ auplc_gpu_udev_package_filename }}"
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0644"
+      when: _auplc_target_root | length > 0
 
-- name: Recheck canonical GPU access rule before apply
-  ansible.builtin.assert:
-    that: (_auplc_apply_existing_rule.content | b64decode) == _auplc_apply_canonical_rule
-    fail_msg: Unmanaged canonical GPU access rule.
-  when: _auplc_apply_destination_rule.stat.exists
+    - name: Install AMD udev package in PXE rootfs
+      ansible.builtin.command:
+        argv:
+          - chroot
+          - "{{ _auplc_target_root }}"
+          - apt-get
+          - --option=Dpkg::Options::=--force-confnew
+          - install
+          - --yes
+          - --no-install-recommends
+          - "/tmp/{{ auplc_gpu_udev_package_filename }}"
+      environment:
+        DEBIAN_FRONTEND: noninteractive
+      changed_when: true
+      when: _auplc_target_root | length > 0
 
-- name: Inspect recognized project-owned legacy GPU rules for apply
+    - name: Verify installed AMD udev package
+      ansible.builtin.import_tasks: verify.yml
+
+  always:
+    - name: Remove temporary AMD udev package from PXE rootfs
+      ansible.builtin.file:
+        path: "{{ _auplc_target_root }}/tmp/{{ auplc_gpu_udev_package_filename }}"
+        state: absent
+      when: _auplc_target_root | length > 0
+  when: _auplc_gpu_udev_install_needed | bool
+
+- name: Verify installed AMD udev package without installation
+  ansible.builtin.import_tasks: verify.yml
+  when: not _auplc_gpu_udev_install_needed | bool
+
+- name: Recheck recognized project-owned legacy GPU rules before apply
   ansible.builtin.stat:
     path: "{{ item.path }}"
     follow: false
   loop: "{{ _auplc_legacy_gpu_rules }}"
   register: _auplc_apply_legacy_gpu_rule_stats
 
-- name: Reject legacy GPU rule symlinks and non-regular files before apply
+- name: Reject unsafe legacy GPU rules before apply
   ansible.builtin.assert:
     that:
       - not item.stat.exists or (item.stat.isreg and not item.stat.islnk)
     fail_msg: "Unexpected legacy GPU rule filesystem type: {{ item.item.path }}"
   loop: "{{ _auplc_apply_legacy_gpu_rule_stats.results }}"
 
-- name: Read recognized project-owned legacy GPU rules for apply
+- name: Read recognized project-owned legacy GPU rules before apply
   ansible.builtin.slurp:
     src: "{{ item.item.path }}"
   loop: "{{ _auplc_apply_legacy_gpu_rule_stats.results }}"
@@ -58,7 +93,10 @@
 - name: Reject unexpected legacy GPU rule content before apply
   ansible.builtin.assert:
     that:
-      - (item.content | b64decode) in item.item.item.contents
+      - >-
+        ((item.content | b64decode) | hash('sha256')) in item.item.item.sha256 or
+        (item.item.item.path == _auplc_target_root + auplc_gpu_udev_rule_path and
+        (item.content | b64decode) == auplc_gpu_udev_rule_content)
     fail_msg: "Unexpected legacy GPU rule content: {{ item.item.item.path }}"
   loop: "{{ _auplc_apply_legacy_gpu_rule_contents.results }}"
   when: not item.skipped | default(false)
@@ -68,153 +106,23 @@
     path: "{{ item.item.item.path }}"
     state: absent
   loop: "{{ _auplc_apply_legacy_gpu_rule_contents.results }}"
-  when: not item.skipped | default(false)
+  when: >-
+    not item.skipped | default(false) and
+    ((item.content | b64decode) | hash('sha256')) in item.item.item.sha256
+  register: _auplc_removed_legacy_gpu_rules
 
-- name: Create target udev rules directory
-  ansible.builtin.file:
-    path: "{{ _auplc_target_root }}/etc/udev/rules.d"
-    state: directory
-    owner: root
-    group: root
-    mode: "0755"
-
-- name: Install canonical AMD GPU udev rules
-  ansible.builtin.template:
-    src: 70-auplc-gpu-access.rules.j2
-    dest: "{{ _auplc_target_root }}/etc/udev/rules.d/70-auplc-gpu-access.rules"
-    owner: root
-    group: root
-    mode: "0644"
-
-- name: Reload live udev rules on every apply
+- name: Reload live udev rules after legacy cleanup
   ansible.builtin.command:
     argv: [udevadm, control, --reload-rules]
   changed_when: false
-  when: _auplc_target_root | length == 0
+  when:
+    - _auplc_target_root | length == 0
+    - _auplc_removed_legacy_gpu_rules.changed
 
-- name: Trigger live udev rules on every apply
+- name: Trigger live udev rules after legacy cleanup
   ansible.builtin.command:
     argv: [udevadm, trigger]
   changed_when: false
-  when: _auplc_target_root | length == 0
-
-- name: Settle live udev events before inode verification
-  ansible.builtin.command:
-    argv: [udevadm, settle]
-  changed_when: false
-  when: _auplc_target_root | length == 0
-
-- name: Inspect /dev/kfd after live reconciliation
-  ansible.builtin.stat:
-    path: /dev/kfd
-    follow: false
-  register: _auplc_kfd
-  when: _auplc_target_root | length == 0
-
-- name: Verify /dev/kfd ownership and mode
-  ansible.builtin.assert:
-    that:
-      - _auplc_kfd.stat.exists
-      - _auplc_kfd.stat.ischr
-      - _auplc_kfd.stat.uid == 0
-      - _auplc_kfd.stat.gr_name == 'render'
-      - _auplc_kfd.stat.mode == '0666'
-    fail_msg: /dev/kfd is not root:render with mode 0666 after reconciliation.
-  when: _auplc_target_root | length == 0
-
-- name: Find live DRM render nodes
-  ansible.builtin.find:
-    paths: /dev/dri
-    patterns: renderD*
-    file_type: any
-    recurse: false
-  register: _auplc_render_nodes
-  when: _auplc_target_root | length == 0
-
-- name: Find live DRM card nodes
-  ansible.builtin.find:
-    paths: /dev/dri
-    patterns: card*
-    file_type: any
-    recurse: false
-  register: _auplc_card_nodes
-  when: _auplc_target_root | length == 0
-
-- name: Resolve live DRM node driver symlinks
-  ansible.builtin.command:
-    argv: [readlink, -f, "/sys/class/drm/{{ item.path | basename }}/device/driver"]
-  loop: "{{ (_auplc_render_nodes.files | default([])) + (_auplc_card_nodes.files | default([])) }}"
-  register: _auplc_drm_node_drivers
-  changed_when: false
-  failed_when: false
-  when: _auplc_target_root | length == 0
-
-- name: Select AMD live DRM render nodes
-  ansible.builtin.set_fact:
-    _auplc_amd_render_nodes: >-
-      {{ (_auplc_amd_render_nodes | default([])) +
-         ([item.item.path] if item.rc == 0 and (item.stdout | basename) == 'amdgpu' and
-         (item.item.path | basename) is match('^renderD') else []) }}
-  loop: "{{ _auplc_drm_node_drivers.results | default([]) }}"
-  when: _auplc_target_root | length == 0
-
-- name: Select AMD live DRM card nodes
-  ansible.builtin.set_fact:
-    _auplc_amd_card_nodes: >-
-      {{ (_auplc_amd_card_nodes | default([])) +
-         ([item.item.path] if item.rc == 0 and (item.stdout | basename) == 'amdgpu' and
-         (item.item.path | basename) is match('^card') else []) }}
-  loop: "{{ _auplc_drm_node_drivers.results | default([]) }}"
-  when: _auplc_target_root | length == 0
-
-- name: Require AMD live DRM render nodes
-  ansible.builtin.assert:
-    that: (_auplc_amd_render_nodes | default([])) | length > 0
-    fail_msg: No AMD renderD node was available for GPU access verification.
-  when: _auplc_target_root | length == 0
-
-- name: Require AMD live DRM card nodes
-  ansible.builtin.assert:
-    that: (_auplc_amd_card_nodes | default([])) | length > 0
-    fail_msg: No AMD card node was available for GPU access verification.
-  when: _auplc_target_root | length == 0
-
-- name: Inspect AMD live DRM render nodes
-  ansible.builtin.stat:
-    path: "{{ item }}"
-    follow: false
-  loop: "{{ _auplc_amd_render_nodes | default([]) }}"
-  register: _auplc_amd_render_node_stats
-  when: _auplc_target_root | length == 0
-
-- name: Inspect AMD live DRM card nodes
-  ansible.builtin.stat:
-    path: "{{ item }}"
-    follow: false
-  loop: "{{ _auplc_amd_card_nodes | default([]) }}"
-  register: _auplc_amd_card_node_stats
-  when: _auplc_target_root | length == 0
-
-- name: Verify AMD render node ownership and mode
-  ansible.builtin.assert:
-    that:
-      - item.stat.exists
-      - item.stat.ischr
-      - item.stat.uid == 0
-      - item.stat.gr_name == 'render'
-      - item.stat.mode == '0666'
-    fail_msg: "AMD render node {{ item.item }} is not root:render with mode 0666."
-  loop: "{{ _auplc_amd_render_node_stats.results | default([]) }}"
-  when: _auplc_target_root | length == 0
-
-- name: Verify AMD card node ownership and mode
-  ansible.builtin.assert:
-    that:
-      - item.stat.exists
-      - item.stat.ischr
-      - item.stat.uid == 0
-      - item.stat.gr_name == 'video'
-      - item.stat.mode == '0666'
-    fail_msg: "AMD card node {{ item.item }} is not root:video with mode 0666."
-  loop: "{{ _auplc_amd_card_node_stats.results | default([]) }}"
-  when: _auplc_target_root | length == 0
+  when:
+    - _auplc_target_root | length == 0
+    - _auplc_removed_legacy_gpu_rules.changed

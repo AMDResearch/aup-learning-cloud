@@ -7,3 +7,15 @@ auplc_rootfs_path: ""
 # Rootfs adapters must explicitly constrain their writable target below this
 # canonical directory. Live hosts leave this empty.
 auplc_rootfs_allowed_root: ""
+auplc_gpu_udev_package_name: amdgpu-insecure-instinct-udev-rules
+auplc_gpu_udev_package_version: 30.30.4.0-2341068.24.04
+auplc_gpu_udev_package_filename: amdgpu-insecure-instinct-udev-rules_30.30.4.0-2341068.24.04_all.deb
+auplc_gpu_udev_package_url: >-
+  https://repo.radeon.com/amdgpu/30.30.4/ubuntu/pool/main/a/amdgpu-insecure-instinct-udev-rules/amdgpu-insecure-instinct-udev-rules_30.30.4.0-2341068.24.04_all.deb
+auplc_gpu_udev_package_checksum: sha256:4be865985c7a13114c45925e77bc0b411b9fd47d5040ed35df44b9c411766162
+auplc_gpu_udev_package_cache_path: >-
+  /var/cache/auplc/amdgpu-udev-rules/amdgpu-insecure-instinct-udev-rules_30.30.4.0-2341068.24.04_all.deb
+auplc_gpu_udev_rule_path: /etc/udev/rules.d/70-amdgpu.rules
+auplc_gpu_udev_rule_content: |
+  KERNEL=="kfd", GROUP="render", MODE="0666"
+  SUBSYSTEM=="drm", KERNEL=="renderD*", GROUP="render", MODE="0666"
