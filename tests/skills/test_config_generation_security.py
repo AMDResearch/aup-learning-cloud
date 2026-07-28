@@ -73,6 +73,15 @@ def test_generator_rejects_an_invalid_k3s_version_before_discovery(capsys: pytes
     assert "spec.k3s_version" in capsys.readouterr().err
 
 
+def test_generator_applies_the_normal_unknown_field_policy_to_draft_gpu_fields() -> None:
+    module = load_config_generation_module()
+    spec = safe_spec()
+    spec["render_gid"] = 993
+    spec["gpu_access"] = {"hosts": []}
+
+    assert module.validate_spec(spec) == "ssh-preinstalled"
+
+
 @pytest.mark.parametrize(
     "raw",
     [

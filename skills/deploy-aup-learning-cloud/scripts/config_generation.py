@@ -8,12 +8,11 @@ import ipaddress
 import re
 
 from config_common import DEFAULT_ACCEL_LABELS, HEADER_HASH, die, require, yaml_quote
-from config_rendering import ResolvedGpuPolicy, render_inventory, render_pxe_vars, render_values
+from config_rendering import render_inventory, render_pxe_vars, render_values
 
 __all__ = [
     "DEFAULT_ACCEL_LABELS",
     "HEADER_HASH",
-    "ResolvedGpuPolicy",
     "SCHEMA",
     "die",
     "render_inventory",
@@ -200,10 +199,6 @@ def validate_spec(spec: dict) -> str:
     server_name = _validate_server(require(spec, "server"), "spec.server")
     _validate_agents(spec, server_name)
     _validate_rendered_options(spec)
-    if "render_gid" in spec:
-        die("spec.render_gid is no longer accepted; GPU policy is discovered automatically")
-    if "gpu_access" in spec:
-        die("spec.gpu_access is no longer accepted; GPU policy is discovered automatically")
     if topo == "pxe-diskless":
         _validate_pxe(spec)
     return topo
