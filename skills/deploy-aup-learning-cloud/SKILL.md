@@ -13,9 +13,11 @@ description: >-
 Stand up a multi-node AUP Learning Cloud cluster with Ansible, AMD GPU access,
 shared storage, and the JupyterHub Helm chart.
 
-Use [deploy/README.md](../../deploy/README.md) as the source of truth for the
-generator schema, commands, generated files, validation, and troubleshooting.
-This skill defines the interview and safety gates around that procedure.
+Use the [skill scripts guide](scripts/README.md) as the source of truth for the
+complete generator-first command sequences and generated files. Use
+[deploy/README.md](../../deploy/README.md) for the human direct-edit workflow,
+operational background, and troubleshooting. This skill defines the interview
+and safety gates around the generated procedure.
 
 ## Prerequisites
 
@@ -65,27 +67,34 @@ does not prove rootfs provisioning succeeded. Review, install, and validate thos
 files, then run the controller playbook with the canonical inventory and PXE
 vars; the playbook must complete successfully before proceeding.
 
-Follow the exact generation, installation, and playbook commands in
-[deploy/README.md](../../deploy/README.md).
+Follow the complete topology command sequence in the
+[skill scripts guide](scripts/README.md). Don't substitute the human direct-edit
+SSH workflow from `deploy/README.md`; the skill's SSH path remains
+generator-first and discovers GPU policy from managed-host evidence.
 
 ## Phase 3: Validate and execute
 
 Install the canonical generated inventory and runtime overlay into the checkout,
-then run the validator with the arguments shown in the deployment guide:
+then run the topology's exact validator command from the
+[skill scripts guide](scripts/README.md). The validator inputs are:
 
 - `--repo`
 - `--topology`
-- `--inventory`
-- `--gpu-resolution`
+- `--inventory` to validate explicit host booleans
+- `--gpu-resolution` with `--inventory` for generated-artifact consistency
 - both `--values` files
 - `--pxe-vars` for PXE only
 
-Stop on validation failure. After a clean result, follow the topology's Ansible,
-storage, device plugin, and Helm sequence in
-[deploy/README.md](../../deploy/README.md). Treat the AMD device plugin and ROCm
-node labeller as infrastructure prerequisites owned outside AUPLC. Verify both
-existing DaemonSets and advertised GPU capacity before Helm; do not install
-these privileged components as part of the AUPLC procedure.
+An inventory can be validated without a GPU resolution report. A resolution
+report requires an inventory. Supply both in this generator-first workflow so
+the validator also checks their consistency.
+
+Stop on validation failure. After a clean result, continue with the topology's
+Ansible, device plugin, and Helm commands in the skill scripts guide. Treat the
+AMD device plugin and ROCm node labeller as infrastructure prerequisites owned
+outside AUPLC. Verify both existing DaemonSets and advertised GPU capacity
+before Helm; do not install these privileged components as part of the AUPLC
+procedure.
 
 Keep the GPU contract distinct from storage configuration. The installer,
 Ansible role, and PXE controller install AMD's
@@ -119,5 +128,6 @@ are changed.
 
 ## Reference
 
-- [Deployment commands and troubleshooting](../../deploy/README.md)
+- [Complete skill command sequences](scripts/README.md)
+- [Human deployment and troubleshooting](../../deploy/README.md)
 - [Skill-specific summary](reference.md)

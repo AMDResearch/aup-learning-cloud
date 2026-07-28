@@ -1,8 +1,10 @@
 # Deploy AUP Learning Cloud Reference
 
-The authoritative procedure, command lines, generated file list, and failure
-guidance live in [deploy/README.md](../../deploy/README.md). Don't copy those
-commands into this reference.
+The complete generator-first command sequences and generated file list live in
+the [skill scripts guide](scripts/README.md). Human direct-edit deployment,
+operational background, and failure guidance live in
+[deploy/README.md](../../deploy/README.md). Don't copy those commands into this
+reference.
 
 ## Topology contract
 
@@ -11,13 +13,14 @@ commands into this reference.
 | `ssh-preinstalled` | Connects to every managed host, discovers GPU hardware, and publishes canonical files when discovery is consistent. |
 | `pxe-diskless` | Uses `pxe.diskless_agents_have_amd_gpus` as its sole GPU policy input and publishes canonical desired-input files before the controller playbook runs. Their existence does not prove rootfs provisioning succeeded. |
 
-Don't hand-author generated GPU policy. Create deployment specs from the current
+The skill is generator-first for both topologies. Don't hand-author generated
+GPU policy, including for SSH. Create deployment specs from the current
 `--print-schema` output.
 
 ## Canonical validation inputs
 
-Use the validator command from [deploy/README.md](../../deploy/README.md). It
-passes:
+Use the topology's validator command from the
+[skill scripts guide](scripts/README.md). It passes:
 
 - repository root with `--repo`
 - selected topology with `--topology`
@@ -26,7 +29,11 @@ passes:
 - base and generated overlays as two `--values` arguments
 - canonical PXE vars with `--pxe-vars` for PXE only
 
-Generation and validation must finish before Ansible or Helm changes are made.
+`--inventory` alone validates that every managed host has exactly one explicit
+YAML boolean `auplc_gpu_access_enabled`. `--gpu-resolution` requires
+`--inventory`; supplying both enables generated-artifact consistency checks.
+The skill supplies both because its workflow is generator-first. Generation
+and validation must finish before Ansible or Helm changes are made.
 
 ## GPU permission contract
 
