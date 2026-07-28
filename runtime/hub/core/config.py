@@ -45,6 +45,8 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, Field, field_validator
 
+MAX_RENDER_GID = (2**32) - 2
+
 # =============================================================================
 # YAML Configuration Models
 # =============================================================================
@@ -81,6 +83,25 @@ class QuotaSettings(BaseModel):
     cpuRate: int = 1
     minimumToStart: int = 10
     defaultQuota: int = 0
+
+    model_config = {"extra": "allow"}
+
+
+class GpuAccessSettings(BaseModel):
+    """Host group access settings for GPU-enabled user pods."""
+
+    renderGid: int | None = None
+
+    @field_validator("renderGid", mode="before")
+    @classmethod
+    def validate_render_gid(cls, value: Any) -> int | None:
+        """Require a native positive integer GID when GPU access is configured."""
+
+        if value is None:
+            return None
+        if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= MAX_RENDER_GID:
+            raise ValueError(f"custom.gpuAccess.renderGid must be an integer between 1 and {MAX_RENDER_GID}")
+        return value
 
     model_config = {"extra": "allow"}
 
@@ -211,6 +232,7 @@ class ParsedConfig(BaseModel):
     accelerators: dict[str, AcceleratorConfig] = Field(default_factory=dict)
     teams: TeamsConfig = Field(default_factory=TeamsConfig)
     quota: QuotaSettings = Field(default_factory=QuotaSettings)
+    gpuAccess: GpuAccessSettings = Field(default_factory=GpuAccessSettings)
     gitClone: GitCloneSettings = Field(default_factory=GitCloneSettings)
     hub: HubNetworkSettings = Field(default_factory=HubNetworkSettings)
     notebook: NotebookNetworkSettings = Field(default_factory=NotebookNetworkSettings)
@@ -226,6 +248,7 @@ class ParsedConfig(BaseModel):
         accelerators: dict | None = None,
         teams: dict | None = None,
         quota: dict | None = None,
+        gpu_access: dict | None = None,
         git_clone: dict | None = None,
         hub: dict | None = None,
         notebook: dict | None = None,
@@ -243,6 +266,8 @@ class ParsedConfig(BaseModel):
             raw_config["teams"] = teams
         if quota:
             raw_config["quota"] = quota
+        if gpu_access is not None:
+            raw_config["gpuAccess"] = gpu_access
         if git_clone:
             raw_config["gitClone"] = git_clone
         if hub:
@@ -334,6 +359,7 @@ class HubConfig:
             accelerators=raw_config.get("accelerators"),
             teams=raw_config.get("teams"),
             quota=raw_config.get("quota"),
+            gpu_access=raw_config.get("gpuAccess"),
             git_clone=raw_config.get("gitClone"),
             hub=raw_config.get("hub"),
             notebook=raw_config.get("notebook"),
@@ -410,6 +436,11 @@ class HubConfig:
     def quota(self) -> QuotaSettings:
         """Get quota configuration."""
         return self._config.quota
+
+    @property
+    def gpu_access(self) -> GpuAccessSettings:
+        """Get GPU pod access configuration."""
+        return self._config.gpuAccess
 
     @property
     def git_clone(self) -> GitCloneSettings:
