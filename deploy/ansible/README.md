@@ -24,13 +24,21 @@ SOFTWARE.
 
 K3s cluster setup playbooks based on [k3s-ansible](https://github.com/k3s-io/k3s-ansible).
 
-For the generator, canonical inventory, validator arguments, and topology-specific
-playbook commands, see the authoritative [deployment guide](../README.md).
+For the human SSH-preinstalled workflow, edit `inventory.yml` directly and use
+the playbook commands in the [deployment guide](../README.md). Every server and
+agent host entry must define `auplc_gpu_access_enabled` as the unquoted YAML
+boolean `true` or `false`. Set it to `true` only on hosts where the GPU access
+package and ROCm should be installed. Pass `--inventory` to the deployment
+validator to check this explicit per-host policy. A generated
+`--gpu-resolution` report is not required for the human workflow; if supplied,
+it requires `--inventory`, and the validator checks the two generated artifacts
+for consistency.
 
-Don't write GPU policy into the inventory by hand. SSH generation discovers GPU
-hosts from managed-host evidence. PXE generation uses only
-`pxe.diskless_agents_have_amd_gpus` and writes canonical files before the
-controller playbook runs.
+The deploy skill has a separate generator-first SSH workflow that discovers GPU
+hosts from managed-host evidence. PXE is always generator-based and uses only
+`pxe.diskless_agents_have_amd_gpus` as its GPU policy input. See the
+[skill scripts guide](../../skills/deploy-aup-learning-cloud/scripts/README.md)
+for the complete generator-first skill command sequences.
 
 The GPU access role installs AMD's `amdgpu-insecure-instinct-udev-rules`
 package, pinned to `30.30.4.0-2341068.24.04`, on GPU hosts and GPU-enabled PXE

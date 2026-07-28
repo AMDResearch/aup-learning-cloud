@@ -53,10 +53,10 @@ sudo ./auplc-installer install
 
 ### Multi-Node Cluster
 
-Generate the spec and fill in the network and node details. The SSH flow needs
-only the managed host details. A PXE spec asks one extra GPU question:
-`pxe.diskless_agents_have_amd_gpus`. Set it explicitly because the diskless
-agents' hardware is not inferred from the controller.
+For SSH-preinstalled nodes, edit the Ansible inventory and multi-node values
+file directly. PXE remains generator-based because the controller inventory,
+rootfs settings, runtime overlay, and GPU policy must be generated as one
+consistent artifact set.
 
 The AMD device plugin and ROCm node labeller are cluster infrastructure
 prerequisites owned outside AUPLC. The infrastructure owner must deploy and
@@ -67,21 +67,44 @@ DaemonSets are ready and that GPU capacity is advertised.
 
 #### SSH-preinstalled
 
+Edit `deploy/ansible/inventory.yml` with the server and agent hostnames, IPs,
+k3s token, and other site settings. Every host entry must set
+`auplc_gpu_access_enabled` to the YAML boolean `true` or `false`. Use `true`
+only for hosts where the AMD GPU access package and ROCm should be installed.
+Don't quote the boolean or use alternatives such as `yes` and `no`.
+
+For example:
+
+```yaml
+k3s_cluster:
+  children:
+    server:
+      hosts:
+        controller-1:
+          ansible_host: 192.0.2.10
+          auplc_gpu_access_enabled: false
+    agent:
+      hosts:
+        gpu-worker-1:
+          ansible_host: 192.0.2.11
+          auplc_gpu_access_enabled: true
+```
+
+Copy the human-maintained multi-node values example, then edit the copy for the
+site's authentication, storage, images, accelerators, and network access:
+
 ```bash
 cd ..
 REPO_ROOT="$(pwd)"
 DEPLOY_SCRIPTS="$REPO_ROOT/skills/deploy-aup-learning-cloud/scripts"
-python3 "$DEPLOY_SCRIPTS/gen_configs.py" --print-schema > spec.json
-# Edit spec.json: choose ssh-preinstalled and fill the node/network fields.
-GENERATED_DIR="$REPO_ROOT/generated"
-python3 "$DEPLOY_SCRIPTS/gen_configs.py" --spec spec.json --out-dir "$GENERATED_DIR"
-install -m 0600 "$GENERATED_DIR/inventory.yml" "$REPO_ROOT/deploy/ansible/inventory.yml"
-install -m 0644 "$GENERATED_DIR/values-basic-example.yaml" "$REPO_ROOT/runtime/values-basic-example.yaml"
+cp runtime/values-multi-nodes.yaml.example runtime/values-multi-nodes.yaml
+# Edit deploy/ansible/inventory.yml and runtime/values-multi-nodes.yaml.
+
 python3 "$DEPLOY_SCRIPTS/validate.py" --repo "$REPO_ROOT" --topology ssh-preinstalled \
   --inventory "$REPO_ROOT/deploy/ansible/inventory.yml" \
-  --gpu-resolution "$GENERATED_DIR/gpu-access-resolution.json" \
   --values "$REPO_ROOT/runtime/values.yaml" \
-  --values "$REPO_ROOT/runtime/values-basic-example.yaml"
+  --values "$REPO_ROOT/runtime/values-multi-nodes.yaml" \
+  --helm-dry-run
 
 cd "$REPO_ROOT/deploy/ansible"
 sudo ansible-playbook -i inventory.yml playbooks/pb-base.yml
@@ -96,14 +119,14 @@ cd "$REPO_ROOT"
 helm upgrade --install jupyterhub ./runtime/chart \
   --namespace jupyterhub --create-namespace \
   -f runtime/values.yaml \
-  -f runtime/values-basic-example.yaml
+  -f runtime/values-multi-nodes.yaml
 ```
 
-Generation runs read-only Ansible discovery against every managed host. It
-cross-checks AMD display BDFs from `lspci` with PCI vendor and display-class
-records under `/sys/bus/pci/devices`; it does not require the devices to be
-attached to `amdgpu` before ROCm installation. The resulting GPU resolution
-report records which managed hosts have AMD display hardware.
+The validator checks an inventory supplied by itself for exactly one explicit
+YAML boolean `auplc_gpu_access_enabled` on every managed host. This validates
+the direct-edit workflow without a generated GPU resolution report.
+`--gpu-resolution` may be supplied only with `--inventory`; when both are
+supplied, the validator also checks generated-artifact consistency.
 
 The installer, Ansible GPU access role, and PXE controller install AMD's
 `amdgpu-insecure-instinct-udev-rules` package, pinned to version
@@ -125,14 +148,22 @@ not part of GPU access and must not be treated as a GPU group setting.
 
 #### PXE-diskless
 
-After setting `topology` to `pxe-diskless`, fill the PXE network fields and set
-`pxe.diskless_agents_have_amd_gpus` explicitly. Generation writes the canonical
+Create a fresh spec, set `topology` to `pxe-diskless`, fill the PXE network
+fields, and set `pxe.diskless_agents_have_amd_gpus` explicitly. Diskless agent
+hardware can't be inferred from the controller. Generation writes the canonical
 inventory, controller vars, runtime overlay, and GPU resolution report directly.
 These artifacts express the desired deployment inputs; their existence is not
 proof that rootfs provisioning succeeded. Review and install them before running
 the controller playbook, whose successful completion provisions the rootfs.
 
 ```bash
+cd ..
+REPO_ROOT="$(pwd)"
+DEPLOY_SCRIPTS="$REPO_ROOT/skills/deploy-aup-learning-cloud/scripts"
+python3 "$DEPLOY_SCRIPTS/gen_configs.py" --print-schema > spec.json
+# Edit spec.json: choose pxe-diskless and fill the node, network, and PXE fields.
+GENERATED_DIR="$REPO_ROOT/generated"
+
 cd "$REPO_ROOT"
 python3 "$DEPLOY_SCRIPTS/gen_configs.py" --spec spec.json --out-dir "$GENERATED_DIR"
 install -m 0600 "$GENERATED_DIR/inventory.yml" "$REPO_ROOT/deploy/ansible/inventory.yml"
@@ -166,7 +197,7 @@ playbook. A retained rootfs is accepted only when that exact package version and
 its unmodified package-owned rule are present, with no conflicting legacy GPU
 rule. Rebuild or correct a retained rootfs separately if that safety check fails.
 
-#### Discovery failures
+#### Generator discovery failures
 
 | Error | Action |
 | --- | --- |
