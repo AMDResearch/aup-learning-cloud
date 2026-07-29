@@ -68,10 +68,18 @@ DaemonSets are ready and that GPU capacity is advertised.
 #### SSH-preinstalled
 
 Edit `deploy/ansible/inventory.yml` with the server and agent hostnames, IPs,
-k3s token, and other site settings. Every host entry must set
-`auplc_gpu_access_enabled` to the YAML boolean `true` or `false`. Use `true`
-only for hosts where the AMD GPU access package and ROCm should be installed.
-Don't quote the boolean or use alternatives such as `yes` and `no`.
+k3s token, and other site settings. Keep the human template default,
+`auplc_gpu_access_enabled: auto`, unquoted on each host. `auto` runs Python 3 on
+that host to scan `/sys/bus/pci/devices` for vendor `0x1002` devices whose PCI
+class starts with `0x03`. It does not use `lspci` or require `pciutils`. A match
+enables ROCm and the AMD GPU access package; a successful scan with no match
+skips both. If a scan fails, the play aborts before either is changed, and
+`any_errors_fatal` stops the play for all hosts.
+
+Set an unquoted YAML boolean `true` or `false` only when you need to override
+detection. `true` forces ROCm and package installation, while `false` forces
+both to be skipped. Either boolean bypasses the scan. Don't quote any of these
+values or use alternatives such as `yes` and `no`.
 
 For example:
 
@@ -82,12 +90,12 @@ k3s_cluster:
       hosts:
         controller-1:
           ansible_host: 192.0.2.10
-          auplc_gpu_access_enabled: false
+          auplc_gpu_access_enabled: auto
     agent:
       hosts:
         gpu-worker-1:
           ansible_host: 192.0.2.11
-          auplc_gpu_access_enabled: true
+          auplc_gpu_access_enabled: auto
 ```
 
 Copy the human-maintained multi-node values example, then edit the copy for the
@@ -122,11 +130,12 @@ helm upgrade --install jupyterhub ./runtime/chart \
   -f runtime/values-multi-nodes.yaml
 ```
 
-The validator checks an inventory supplied by itself for exactly one explicit
-YAML boolean `auplc_gpu_access_enabled` on every managed host. This validates
-the direct-edit workflow without a generated GPU resolution report.
-`--gpu-resolution` may be supplied only with `--inventory`; when both are
-supplied, the validator also checks generated-artifact consistency.
+With `--inventory` alone, the validator accepts exactly one unquoted `auto`,
+`true`, or `false` value for `auplc_gpu_access_enabled` on every managed host.
+This validates the direct-edit workflow without a generated GPU resolution
+report. `--gpu-resolution` may be supplied only with `--inventory`; that pair
+is for generated artifacts, whose inventory values and resolution entries must
+remain strict booleans. The generator never writes `auto`.
 
 The installer, Ansible GPU access role, and PXE controller install AMD's
 `amdgpu-insecure-instinct-udev-rules` package, pinned to version
