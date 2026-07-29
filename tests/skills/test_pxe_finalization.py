@@ -97,8 +97,10 @@ def test_pxe_gpu_agents_publish_immediate_boolean_only_rootfs_artifacts(
     manifest = json.loads((out_dir / "gpu-access-resolution.json").read_text(encoding="utf-8"))
     pxe_vars = (out_dir / "pb-pxe-controller.vars.yml").read_text(encoding="utf-8")
     assert "auplc_render_gid" not in inventory
+    assert "auplc_gpu_access_enabled: auto" not in inventory
     assert "gpuAccess" not in values
     assert "pxe_gpu_access_enabled: true" in pxe_vars
+    assert "pxe_gpu_access_enabled: auto" not in pxe_vars
     assert manifest == {
         "version": 1,
         "status": "cpu_only",
@@ -121,6 +123,7 @@ def test_pxe_cpu_agents_publish_a_disabled_rootfs_policy(tmp_path: Path, monkeyp
     pxe_vars = (out_dir / "pb-pxe-controller.vars.yml").read_text(encoding="utf-8")
     manifest = json.loads((out_dir / "gpu-access-resolution.json").read_text(encoding="utf-8"))
     assert "pxe_gpu_access_enabled: false" in pxe_vars
+    assert "pxe_gpu_access_enabled: auto" not in pxe_vars
     assert "auplc_render_gid" not in pxe_vars
     assert manifest["pxe_rootfs"] == {"gpu_access_enabled": False}
 
@@ -137,6 +140,9 @@ def test_pxe_gpu_controller_and_rootfs_publish_independent_booleans(
     inventory = (out_dir / "inventory.yml").read_text(encoding="utf-8")
     manifest = json.loads((out_dir / "gpu-access-resolution.json").read_text(encoding="utf-8"))
     assert "auplc_gpu_access_enabled: true" in inventory
+    assert "auplc_gpu_access_enabled: auto" not in inventory
+    pxe_vars = (out_dir / "pb-pxe-controller.vars.yml").read_text(encoding="utf-8")
+    assert "pxe_gpu_access_enabled: auto" not in pxe_vars
     assert manifest["status"] == "gpu_resolved"
     assert manifest["pxe_rootfs"] == {"gpu_access_enabled": True}
 

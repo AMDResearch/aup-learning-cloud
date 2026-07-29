@@ -154,6 +154,7 @@ def test_generator_discovers_mixed_ssh_targets_and_publishes_resolved_artifacts(
     inventory = (out_dir / "inventory.yml").read_text(encoding="utf-8")
     assert inventory.count("auplc_gpu_access_enabled: true") == 1
     assert inventory.count("auplc_gpu_access_enabled: false") == 1
+    assert "auplc_gpu_access_enabled: auto" not in inventory
     assert "auplc_render_gid" not in inventory
     assert "gpuAccess" not in (out_dir / "values-basic-example.yaml").read_text(encoding="utf-8")
     assert json.loads((out_dir / "gpu-access-resolution.json").read_text(encoding="utf-8")) == {
@@ -191,6 +192,7 @@ def test_generator_allows_heterogeneous_gpu_hosts_and_publishes_boolean_only_art
     values = (out_dir / "values-basic-example.yaml").read_text(encoding="utf-8")
     manifest = json.loads((out_dir / "gpu-access-resolution.json").read_text(encoding="utf-8"))
     assert inventory.count("auplc_gpu_access_enabled: true") == 2
+    assert "auplc_gpu_access_enabled: auto" not in inventory
     assert "auplc_render_gid" not in inventory
     assert "gpuAccess" not in values
     assert manifest == {"version": 1, "status": "gpu_resolved", "hosts": {"agent": True, "server": True}}
@@ -209,6 +211,7 @@ def test_generator_publishes_boolean_only_artifacts_for_all_cpu_ssh_targets(
     assert result.returncode == 0, result.stderr
     inventory = (out_dir / "inventory.yml").read_text(encoding="utf-8")
     assert inventory.count("auplc_gpu_access_enabled: false") == 2
+    assert "auplc_gpu_access_enabled: auto" not in inventory
     assert "auplc_render_gid" not in inventory
     assert "gpuAccess" not in (out_dir / "values-basic-example.yaml").read_text(encoding="utf-8")
     assert json.loads((out_dir / "gpu-access-resolution.json").read_text(encoding="utf-8")) == {
