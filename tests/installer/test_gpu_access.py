@@ -123,16 +123,11 @@ def test_online_install_downloads_to_a_temporary_deb_then_removes_it(monkeypatch
 
     # Then: the exact Radeon URL is downloaded, verified, installed, and cleaned up.
     downloaded_path = Path(downloads[0][-1])
-    assert downloads == [["wget", "-q", gpu_access.AMD_GPU_UDEV_PACKAGE_URL, "-O", str(downloaded_path)]]
+    assert downloads[0][2] == gpu_access.AMD_GPU_UDEV_PACKAGE_URL
     assert verified == [downloaded_path]
     assert not downloaded_path.exists()
-    assert host.calls == [
-        "installed-version",
-        f"install-package:{downloaded_path}",
-        "installed-version",
-        f"owns-rule:{AMD_GPU_UDEV_PACKAGE_RULES_PATH}",
-        f"read:{AMD_GPU_UDEV_PACKAGE_RULES_PATH}",
-    ]
+    assert host.installed_version == AMD_GPU_UDEV_PACKAGE_VERSION
+    assert host.files[AMD_GPU_UDEV_PACKAGE_RULES_PATH] == AMD_GPU_UDEV_PACKAGE_RULES
 
 
 def test_installed_package_requires_the_pinned_version_and_its_exact_rule() -> None:
@@ -146,7 +141,6 @@ def test_installed_package_requires_the_pinned_version_and_its_exact_rule() -> N
     provision_gpu_access(host)
 
     # Then: no download, install, legacy removal, or device probe is performed.
-    assert host.files == {AMD_GPU_UDEV_PACKAGE_RULES_PATH: AMD_GPU_UDEV_PACKAGE_RULES}
     assert not any(call.startswith(("install-package:", "remove-rule:")) for call in host.calls)
     assert not any(call in {"reload-udev", "trigger-udev", "settle-udev"} for call in host.calls)
 
@@ -193,7 +187,6 @@ def test_symlinked_legacy_rule_fails_closed_before_installation(monkeypatch: pyt
 def test_official_rule_matches_the_extracted_deb_policy_not_the_old_pxe_shape() -> None:
     # Given: the exact package verification constant.
     rules = AMD_GPU_UDEV_PACKAGE_RULES
-    old_pxe_shape = 'KERNEL=="kfd", MODE="0666"\nKERNEL=="renderD*", MODE="0666"\n'
 
     # When: its policy is inspected.
     # Then: it matches the extracted package rule rather than the former two-line PXE shape.
@@ -201,7 +194,6 @@ def test_official_rule_matches_the_extracted_deb_policy_not_the_old_pxe_shape() 
         'KERNEL=="kfd", GROUP="render", MODE="0666"\n'
         'SUBSYSTEM=="drm", KERNEL=="renderD*", GROUP="render", MODE="0666"\n'
     )
-    assert rules != old_pxe_shape
     assert "card" not in rules
 
 

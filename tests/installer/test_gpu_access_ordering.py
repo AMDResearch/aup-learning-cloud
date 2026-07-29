@@ -114,13 +114,14 @@ def test_failed_installation_keeps_legacy_rules_intact(monkeypatch: pytest.Monke
     assert "reload-udev" not in host.calls
 
 
-def test_wrong_version_package_owned_differing_conffile_converges(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+@pytest.mark.parametrize("installed_version", ["30.30.4.0-older", None])
+def test_package_owned_differing_conffile_converges(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, installed_version: str | None
 ) -> None:
-    # Given: a package-owned conffile from a different installed package version.
+    # Given: a wrong-version or partial package state that owns a differing conffile.
     host = FakeGpuAccessHost(
         files={AMD_GPU_UDEV_PACKAGE_RULES_PATH: 'KERNEL=="kfd", MODE="0600"\n'},
-        installed_version="30.30.4.0-older",
+        installed_version=installed_version,
         package_owns_rule=True,
     )
     monkeypatch.setattr(gpu_access, "verify_sha256", lambda *args: None)
@@ -128,23 +129,7 @@ def test_wrong_version_package_owned_differing_conffile_converges(
     # When: the pinned package is installed from an offline bundle.
     provision_gpu_access(host, offline_mode=True, bundle_dir=_offline_bundle(tmp_path))
 
-    # Then: forced installation replaces the differing conffile with the exact package rule.
-    assert host.files[AMD_GPU_UDEV_PACKAGE_RULES_PATH] == AMD_GPU_UDEV_PACKAGE_RULES
-    assert not any(call.startswith("remove-rule:") for call in host.calls)
-
-
-def test_partial_package_owned_conffile_converges(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    # Given: a config-files package state that still owns a differing conffile.
-    host = FakeGpuAccessHost(
-        files={AMD_GPU_UDEV_PACKAGE_RULES_PATH: 'KERNEL=="kfd", MODE="0600"\n'},
-        package_owns_rule=True,
-    )
-    monkeypatch.setattr(gpu_access, "verify_sha256", lambda *args: None)
-
-    # When: the pinned package is installed from an offline bundle.
-    provision_gpu_access(host, offline_mode=True, bundle_dir=_offline_bundle(tmp_path))
-
-    # Then: ownership prevents legacy admission and the package converges to the exact rule.
+    # Then: forced installation converges to the exact package rule without legacy deletion.
     assert host.files[AMD_GPU_UDEV_PACKAGE_RULES_PATH] == AMD_GPU_UDEV_PACKAGE_RULES
     assert not any(call.startswith("remove-rule:") for call in host.calls)
 
