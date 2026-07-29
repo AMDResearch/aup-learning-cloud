@@ -26,13 +26,18 @@ K3s cluster setup playbooks based on [k3s-ansible](https://github.com/k3s-io/k3s
 
 For the human SSH-preinstalled workflow, edit `inventory.yml` directly and use
 the playbook commands in the [deployment guide](../README.md). Every server and
-agent host entry must define `auplc_gpu_access_enabled` as the unquoted YAML
-boolean `true` or `false`. Set it to `true` only on hosts where the GPU access
-package and ROCm should be installed. Pass `--inventory` to the deployment
-validator to check this explicit per-host policy. A generated
-`--gpu-resolution` report is not required for the human workflow; if supplied,
-it requires `--inventory`, and the validator checks the two generated artifacts
-for consistency.
+agent host entry defaults to unquoted `auplc_gpu_access_enabled: auto`. On each
+host, `auto` uses Python 3 to scan `/sys/bus/pci/devices` for vendor `0x1002`
+and PCI class `0x03*`; it has no `lspci` or `pciutils` dependency. A match
+enables ROCm and the GPU access package, while a successful empty scan skips
+both. A scan failure aborts before mutation, and `any_errors_fatal` stops the
+play. Unquoted `true` and `false` force enablement or disablement and bypass
+detection.
+
+Pass `--inventory` to validate direct values of `auto`, `true`, or `false`. A
+generated `--gpu-resolution` report is not required for the human workflow. If
+supplied, it requires `--inventory`, and both generated artifacts must use
+strict booleans. The deploy skill never generates `auto`.
 
 The deploy skill has a separate generator-first SSH workflow that discovers GPU
 hosts from managed-host evidence. PXE is always generator-based and uses only
