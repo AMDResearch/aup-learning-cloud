@@ -107,29 +107,16 @@ def test_default_selection_round_trips_valid_yaml() -> None:
     assert "teams" not in parsed["custom"]
 
 
-def test_overlay_never_emits_gpu_access_contract() -> None:
-    text = emit_overlay(
-        _strix_halo_cfg(),
-        image_registry="ghcr.io/amdresearch",
-        image_tag="v1.0",
-        courses=CourseSelection.default(),
-        offline_mode=False,
-    )
-    parsed = yaml.safe_load(text)
-
-    assert "gpuAccess" not in parsed["custom"]
-    assert "renderGid" not in text
-    assert "supplementalGroups" not in text
-
-
 def test_overlay_keeps_gpu_resources_without_gpu_access_contract() -> None:
-    _, parsed = _render(
+    text, parsed = _render(
         _strix_halo_cfg(),
         courses=CourseSelection.default(),
     )
 
     custom = parsed["custom"]
     assert "gpuAccess" not in custom
+    assert "renderGid" not in text
+    assert "supplementalGroups" not in text
     assert set(custom["resources"]["images"]) == set(GPU_RESOURCE_KEYS)
     assert set(custom["resources"]["metadata"]) == set(GPU_RESOURCE_KEYS)
     assert "teams" not in custom

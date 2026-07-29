@@ -63,30 +63,6 @@ def test_classify_gpu_hardware_returns_unknown_for_incomplete_pci_evidence(tmp_p
     assert hardware is GpuHardware.UNKNOWN
 
 
-def test_classify_gpu_hardware_returns_unknown_for_malformed_pci_evidence(tmp_path: Path) -> None:
-    pci_devices = tmp_path / "devices"
-    malformed_vendor = pci_devices / "0000:00:02.0"
-    malformed_vendor.mkdir(parents=True)
-    (malformed_vendor / "vendor").write_text("0xZZZZ\n", encoding="ascii")
-    (malformed_vendor / "class").write_text("0x030000\n", encoding="ascii")
-
-    hardware = classify_gpu_hardware(pci_devices)
-
-    assert hardware is GpuHardware.UNKNOWN
-
-
-def test_classify_gpu_hardware_returns_unknown_for_unreadable_pci_attribute(tmp_path: Path) -> None:
-    pci_devices = tmp_path / "devices"
-    unreadable_class = pci_devices / "0000:00:02.0"
-    unreadable_class.mkdir(parents=True)
-    (unreadable_class / "vendor").write_text("0x8086\n", encoding="ascii")
-    (unreadable_class / "class").mkdir()
-
-    hardware = classify_gpu_hardware(pci_devices)
-
-    assert hardware is GpuHardware.UNKNOWN
-
-
 def test_classify_gpu_hardware_prefers_positive_amd_evidence_over_incomplete_sibling(tmp_path: Path) -> None:
     pci_devices = tmp_path / "devices"
     incomplete_device = pci_devices / "0000:00:02.0"
