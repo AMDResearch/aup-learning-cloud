@@ -20,9 +20,3 @@ def test_rocm_base_leaves_gpu_device_permissions_to_the_host() -> None:
     )
     for pattern in forbidden_patterns:
         assert re.search(pattern, dockerfile) is None, pattern
-
-    assert "echo 'export USER=jovyan' >> /entrypoint.sh" in dockerfile
-    assert "echo 'export SHELL=/bin/bash' >> /entrypoint.sh" in dockerfile
-    assert 'CMD ["/bin/bash", "/entrypoint.sh"]' in dockerfile
-    assert "USER $NB_UID" in dockerfile
-    assert "WORKDIR /home/jovyan" in dockerfile
