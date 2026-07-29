@@ -15,7 +15,8 @@ reference.
 
 The skill is generator-first for both topologies. Don't hand-author generated
 GPU policy, including for SSH. Create deployment specs from the current
-`--print-schema` output.
+`--print-schema` output. Generation resolves hosts to strict `true` or `false`
+values and never writes `auto`.
 
 ## Canonical validation inputs
 
@@ -29,11 +30,12 @@ Use the topology's validator command from the
 - base and generated overlays as two `--values` arguments
 - canonical PXE vars with `--pxe-vars` for PXE only
 
-`--inventory` alone validates that every managed host has exactly one explicit
-YAML boolean `auplc_gpu_access_enabled`. `--gpu-resolution` requires
-`--inventory`; supplying both enables generated-artifact consistency checks.
-The skill supplies both because its workflow is generator-first. Generation
-and validation must finish before Ansible or Helm changes are made.
+For a human direct inventory, `--inventory` alone accepts exactly one unquoted
+`auto`, `true`, or `false` value for `auplc_gpu_access_enabled` on every managed
+host. `--gpu-resolution` requires `--inventory`; supplying both checks generated
+artifacts and requires strict booleans in the inventory and resolution report.
+The skill supplies both because its workflow is generator-first. Generation and
+validation must finish before Ansible or Helm changes are made.
 
 ## GPU permission contract
 

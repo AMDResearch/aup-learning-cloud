@@ -80,14 +80,16 @@ then run the topology's exact validator command from the
 
 - `--repo`
 - `--topology`
-- `--inventory` to validate explicit host booleans
+- `--inventory` to validate generated host booleans
 - `--gpu-resolution` with `--inventory` for generated-artifact consistency
 - both `--values` files
 - `--pxe-vars` for PXE only
 
-An inventory can be validated without a GPU resolution report. A resolution
-report requires an inventory. Supply both in this generator-first workflow so
-the validator also checks their consistency.
+A human direct inventory can be validated by itself with unquoted `auto`,
+`true`, or `false`. A resolution report requires an inventory, and that pairing
+accepts only generated boolean values. Supply both in this generator-first
+workflow so the validator checks their consistency. The skill resolves every
+host to `true` or `false` and never generates `auto`.
 
 Stop on validation failure. After a clean result, continue with the topology's
 Ansible, device plugin, and Helm commands in the skill scripts guide. Treat the

@@ -19,6 +19,10 @@ The SSH topology discovers GPU hosts from managed-host evidence. Users don't
 provide a GPU host list. The PXE topology has one GPU policy input:
 `pxe.diskless_agents_have_amd_gpus`.
 
+Generation resolves every host to `true` or `false`; it never writes `auto`.
+Generated inventory and GPU resolution entries are strict booleans so their
+consistency can be checked.
+
 Generate specs from fresh `--print-schema` output. Both topologies write their
 canonical artifacts immediately. For PXE, review and validate those files, then
 run the controller playbook with the generated `inventory.yml` and
@@ -120,10 +124,12 @@ rule safety checks described in the deployment guide.
 
 The exact topology commands above pass `--repo`, `--topology`, `--inventory`,
 `--gpu-resolution`, two `--values` arguments, and `--pxe-vars` for PXE only.
-`--inventory` alone validates that every managed host defines exactly one
-explicit YAML boolean `auplc_gpu_access_enabled`. `--gpu-resolution` requires
-`--inventory`; supplying both performs generated-artifact consistency checks.
-The generator-first skill workflow supplies both.
+For direct validation, `--inventory` alone accepts exactly one unquoted `auto`,
+`true`, or `false` value for `auplc_gpu_access_enabled` on every managed host.
+`--gpu-resolution` requires `--inventory`; supplying both switches to generated
+consistency validation, where inventory and resolution values must be strict
+booleans. The generator-first skill workflow supplies both and never generates
+`auto`.
 
 ## Conventions
 
