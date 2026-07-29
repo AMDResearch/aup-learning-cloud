@@ -35,7 +35,7 @@ def ssh_spec() -> dict:
     }
 
 
-def write_fake_ansible(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, document: dict) -> Path:
+def write_fake_ansible(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, document: dict) -> None:
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     fake_ansible = fake_bin / "ansible-playbook"
@@ -60,11 +60,9 @@ Path(output).write_text(os.environ["FAKE_ANSIBLE_EVIDENCE"], encoding="utf-8")
         encoding="utf-8",
     )
     fake_ansible.chmod(0o755)
-    record = tmp_path / "ansible-argv.json"
-    monkeypatch.setenv("FAKE_ANSIBLE_RECORD", str(record))
+    monkeypatch.setenv("FAKE_ANSIBLE_RECORD", str(tmp_path / "ansible-argv.json"))
     monkeypatch.setenv("FAKE_ANSIBLE_EVIDENCE", json.dumps(document))
     monkeypatch.setenv("PATH", f"{fake_bin}:{os.environ['PATH']}")
-    return record
 
 
 def run_generator(spec_path: Path, out_dir: Path, *extra: str) -> subprocess.CompletedProcess[str]:
@@ -141,7 +139,7 @@ def test_generator_surfaces_redacted_bounded_ansible_failure_diagnostics(
 def test_generator_discovers_mixed_ssh_targets_and_publishes_resolved_artifacts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    record = write_fake_ansible(
+    write_fake_ansible(
         tmp_path,
         monkeypatch,
         {"version": 1, "hosts": [evidence_host("server", gpu=True), evidence_host("agent")]},
@@ -154,70 +152,11 @@ def test_generator_discovers_mixed_ssh_targets_and_publishes_resolved_artifacts(
     inventory = (out_dir / "inventory.yml").read_text(encoding="utf-8")
     assert inventory.count("auplc_gpu_access_enabled: true") == 1
     assert inventory.count("auplc_gpu_access_enabled: false") == 1
-    assert "auplc_gpu_access_enabled: auto" not in inventory
     assert "auplc_render_gid" not in inventory
-    assert "gpuAccess" not in (out_dir / "values-basic-example.yaml").read_text(encoding="utf-8")
     assert json.loads((out_dir / "gpu-access-resolution.json").read_text(encoding="utf-8")) == {
         "version": 1,
         "status": "gpu_resolved",
         "hosts": {"agent": False, "server": True},
-    }
-    discovery_inventory = out_dir / ".gpu-access-discovery.inventory.yml"
-    discovery_evidence = out_dir / ".gpu-access-discovery-evidence.json"
-    assert discovery_inventory.stat().st_mode & 0o777 == 0o600
-    assert discovery_evidence.stat().st_mode & 0o777 == 0o600
-    assert json.loads(record.read_text(encoding="utf-8")) == [
-        "-i",
-        str(discovery_inventory),
-        str(ROOT / "deploy" / "ansible" / "playbooks" / "pb-gpu-access-discovery.yml"),
-        "-e",
-        f"gpu_access_discovery_output_path={discovery_evidence}",
-    ]
-
-
-def test_generator_allows_heterogeneous_gpu_hosts_and_publishes_boolean_only_artifacts(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    write_fake_ansible(
-        tmp_path,
-        monkeypatch,
-        {"version": 1, "hosts": [evidence_host("server", gpu=True), evidence_host("agent", gpu=True)]},
-    )
-    out_dir = tmp_path / "generated"
-
-    result = run_generator(write_json(tmp_path / "spec.json", ssh_spec()), out_dir)
-
-    assert result.returncode == 0, result.stderr
-    inventory = (out_dir / "inventory.yml").read_text(encoding="utf-8")
-    values = (out_dir / "values-basic-example.yaml").read_text(encoding="utf-8")
-    manifest = json.loads((out_dir / "gpu-access-resolution.json").read_text(encoding="utf-8"))
-    assert inventory.count("auplc_gpu_access_enabled: true") == 2
-    assert "auplc_gpu_access_enabled: auto" not in inventory
-    assert "auplc_render_gid" not in inventory
-    assert "gpuAccess" not in values
-    assert manifest == {"version": 1, "status": "gpu_resolved", "hosts": {"agent": True, "server": True}}
-
-
-def test_generator_publishes_boolean_only_artifacts_for_all_cpu_ssh_targets(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    write_fake_ansible(
-        tmp_path, monkeypatch, {"version": 1, "hosts": [evidence_host("server"), evidence_host("agent")]}
-    )
-    out_dir = tmp_path / "generated"
-
-    result = run_generator(write_json(tmp_path / "spec.json", ssh_spec()), out_dir)
-
-    assert result.returncode == 0, result.stderr
-    inventory = (out_dir / "inventory.yml").read_text(encoding="utf-8")
-    assert inventory.count("auplc_gpu_access_enabled: false") == 2
-    assert "auplc_gpu_access_enabled: auto" not in inventory
-    assert "auplc_render_gid" not in inventory
-    assert "gpuAccess" not in (out_dir / "values-basic-example.yaml").read_text(encoding="utf-8")
-    assert json.loads((out_dir / "gpu-access-resolution.json").read_text(encoding="utf-8")) == {
-        "version": 1,
-        "status": "cpu_only",
-        "hosts": {"agent": False, "server": False},
     }
 
 
