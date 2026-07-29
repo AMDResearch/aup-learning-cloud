@@ -1,7 +1,7 @@
 # Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
 
 ---
-auplc_gpu_access_enabled: false
+auplc_gpu_access_enabled: auto
 # Set for a PXE rootfs. Leave empty to configure the live host.
 auplc_rootfs_path: ""
 # Rootfs adapters must explicitly constrain their writable target below this

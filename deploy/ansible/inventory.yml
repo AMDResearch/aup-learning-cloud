@@ -24,13 +24,13 @@ k3s_cluster:
       hosts:
         # suggested: aup-SHC1-395-1
         # You need to config the hostname in /etc/hosts
-        # Set true on hosts that provide AMD GPU access.
+        # Set auto to detect AMD display hardware, or true/false to override it.
         <YOUR-SERVER-HOSTNAME>:
-          auplc_gpu_access_enabled: false
+          auplc_gpu_access_enabled: auto
     agent:
       hosts:
         <YOUR-AGENT-HOSTNAME>:
-          auplc_gpu_access_enabled: false
+          auplc_gpu_access_enabled: auto
         # strix-5:
         # phx-1:
         # phx-64g:

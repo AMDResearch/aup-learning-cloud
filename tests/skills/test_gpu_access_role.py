@@ -53,18 +53,26 @@ def test_gpu_access_role_pins_the_official_amd_package_contract() -> None:
     assert "modified package conffile" in verify
 
 
-def test_inventory_placeholders_define_boolean_gpu_access() -> None:
+def test_gpu_access_defaults_and_inventory_placeholders_use_unquoted_auto() -> None:
+    defaults_text = read(GPU_ACCESS_ROLE / "defaults" / "main.yml")
+    defaults = yaml.safe_load(defaults_text)
     inventory_text = read(ANSIBLE / "inventory.yml")
     inventory = yaml.safe_load(inventory_text)
     raw_inventory = yaml.load(inventory_text, Loader=yaml.BaseLoader)
     hosts = inventory["k3s_cluster"]["children"]
     raw_hosts = raw_inventory["k3s_cluster"]["children"]
 
+    assert defaults["auplc_gpu_access_enabled"] == "auto"
+    assert "auplc_gpu_access_enabled: auto" in defaults_text
+    assert inventory_text.count("auplc_gpu_access_enabled: auto") == 2
+    assert all(
+        quoted not in inventory_text
+        for quoted in ('auplc_gpu_access_enabled: "auto"', "auplc_gpu_access_enabled: 'auto'")
+    )
     for group_name in ("server", "agent"):
         for host_name, host in hosts[group_name]["hosts"].items():
             value = host["auplc_gpu_access_enabled"]
-            assert type(value) is bool
-            assert raw_hosts[group_name]["hosts"][host_name]["auplc_gpu_access_enabled"] in {"true", "false"}
+            assert value == raw_hosts[group_name]["hosts"][host_name]["auplc_gpu_access_enabled"] == "auto"
 
 
 def test_gpu_access_role_preserves_rootfs_and_exact_legacy_safety() -> None:
@@ -237,12 +245,38 @@ def test_pxe_rootfs_unmounts_fail_on_real_errors_but_skip_absent_mounts() -> Non
 
 
 def test_gpu_access_playbooks_keep_two_phase_live_and_rootfs_safety() -> None:
+    role_main = read(GPU_ACCESS_ROLE / "tasks" / "main.yml")
+    resolve = read(GPU_ACCESS_ROLE / "tasks" / "resolve.yml")
+    detect = read(GPU_ACCESS_ROLE / "tasks" / "detect.yml")
     rocm_playbook = read(ANSIBLE / "playbooks" / "pb-rocm.yml")
     udev_playbook = read(ANSIBLE / "playbooks" / "pb-udev.yml")
     pxe_playbook = read(ANSIBLE / "playbooks" / "pb-pxe-controller.yml")
 
+    assert "ansible.builtin.import_tasks: resolve.yml" in role_main
+    assert "auplc_gpu_access_enabled | bool" not in role_main
+    assert "when: _auplc_gpu_access_enabled_resolved" in role_main
+    assert "python3" in detect
+    assert "/sys/bus/pci/devices" in detect
+    assert "0x1002" in detect
+    assert "startswith('0x03')" in detect
+    assert "sorted(" in detect
+    assert "register: _auplc_gpu_access_sysfs" in detect
+    assert "changed_when: false" in detect
+    assert "failed_when: false" in detect
+    assert "auplc_gpu_access_enabled is boolean" in resolve
+    assert "auplc_gpu_access_enabled == 'auto'" in resolve
+    assert "ansible.builtin.import_tasks: detect.yml" in resolve
+    assert "_auplc_gpu_access_sysfs.rc == 0" in resolve
+    assert "_auplc_gpu_access_sysfs.stdout | trim | length > 0" in resolve
+    assert "_auplc_gpu_access_enabled_resolved is boolean" in resolve
+    assert resolve.index("ansible.builtin.import_tasks: detect.yml") < resolve.index("_auplc_gpu_access_sysfs.rc == 0")
     assert "any_errors_fatal: true" in rocm_playbook
     assert "any_errors_fatal: true" in udev_playbook
+    for playbook in (rocm_playbook, udev_playbook):
+        assert "tasks_from: resolve" in playbook
+        assert playbook.index("tasks_from: resolve") < playbook.index("tasks_from: preflight")
+        assert "auplc_gpu_access_enabled | bool" not in playbook
+        assert "when: _auplc_gpu_access_enabled_resolved" in playbook
     assert rocm_playbook.index("tasks_from: preflight") < rocm_playbook.index("- role: rocm")
     assert "tasks_from: apply" in rocm_playbook
     assert "tasks_from: preflight" in udev_playbook

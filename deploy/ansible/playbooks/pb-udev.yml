@@ -22,23 +22,19 @@
   any_errors_fatal: true
   become: yes
   pre_tasks:
-    - name: Assert explicit GPU access enablement
-      ansible.builtin.assert:
-        that:
-          - auplc_gpu_access_enabled is defined
-          - auplc_gpu_access_enabled is boolean
-        fail_msg: >-
-          Set auplc_gpu_access_enabled to true or false for every host in the
-          inventory before running pb-udev.yml.
+    - name: Resolve GPU access enablement before GPU access mutation
+      ansible.builtin.include_role:
+        name: gpu_access
+        tasks_from: resolve
 
     - name: Preflight enabled GPU access hosts
       ansible.builtin.include_role:
         name: gpu_access
         tasks_from: preflight
-      when: auplc_gpu_access_enabled | bool
+      when: _auplc_gpu_access_enabled_resolved
   tasks:
     - name: Apply GPU access on enabled hosts
       ansible.builtin.include_role:
         name: gpu_access
         tasks_from: apply
-      when: auplc_gpu_access_enabled | bool
+      when: _auplc_gpu_access_enabled_resolved
