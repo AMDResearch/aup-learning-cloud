@@ -51,11 +51,111 @@ def test_validator_accepts_direct_inventory_without_resolution_manifest(tmp_path
     assert "GPU access inventory is valid" in result.stdout
 
 
+def test_validator_requires_gpu_resolution_for_pxe_inventory_only(tmp_path: Path) -> None:
+    repo = tmp_path / "checkout"
+    inventory = write(
+        repo / "inventory.yml",
+        valid_inventory().replace("auplc_gpu_access_enabled: true", "auplc_gpu_access_enabled: auto"),
+    )
+    values = write(repo / "values.yaml", "custom:\n  resources:\n    metadata: {}\n")
+    write(repo / "deploy/ansible/inventory.yml", "k3s_version: v1.32.3+k3s1\n")
+    pxe_vars = write(
+        repo / "pxe-vars.yml",
+        """pxe_network_interface: eno1
+pxe_subnet: 192.168.1.0/24
+pxe_controller_ip: 192.168.1.10
+pxe_dns_servers: 8.8.8.8
+pxe_k3s_server_ips: [192.168.1.10]
+pxe_rootfs_authorized_keys: [ssh-ed25519-AAA]
+pxe_k3s_version: v1.32.3+k3s1
+pxe_gpu_access_enabled: false
+""",
+    )
+
+    result = run_validate(
+        "--repo",
+        str(repo),
+        "--topology",
+        "pxe-diskless",
+        "--inventory",
+        str(inventory),
+        "--values",
+        str(values),
+        "--pxe-vars",
+        str(pxe_vars),
+    )
+
+    assert result.returncode == 1
+    assert "pxe-diskless inventory validation requires --gpu-resolution" in result.stdout
+
+
+@pytest.mark.parametrize("value", ("auto", "true", "false"))
+def test_validator_accepts_supported_direct_inventory_values(tmp_path: Path, value: str) -> None:
+    repo = tmp_path / "checkout"
+    inventory = write(repo / "inventory.yml", valid_inventory().replace("true", value).replace("false", value))
+    values = write(repo / "values.yaml", "custom:\n  resources:\n    metadata: {}\n")
+
+    result = run_validate(
+        "--repo", str(repo), "--topology", "ssh-preinstalled", "--inventory", str(inventory), "--values", str(values)
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "GPU access inventory is valid" in result.stdout
+
+
+def test_validator_rejects_auto_when_inventory_is_cross_checked_with_gpu_resolution(tmp_path: Path) -> None:
+    repo = tmp_path / "checkout"
+    inventory = write(
+        repo / "inventory.yml",
+        valid_inventory().replace("auplc_gpu_access_enabled: true", "auplc_gpu_access_enabled: auto"),
+    )
+    values = write(repo / "values.yaml", "custom:\n  resources:\n    metadata: {}\n")
+    resolution = write(
+        repo / "gpu-access-resolution.json",
+        """{
+  "version": 1,
+  "status": "gpu_resolved",
+  "hosts": {"agent": false, "server": true}
+}
+""",
+    )
+
+    result = run_validate(
+        "--repo",
+        str(repo),
+        "--topology",
+        "ssh-preinstalled",
+        "--inventory",
+        str(inventory),
+        "--gpu-resolution",
+        str(resolution),
+        "--values",
+        str(values),
+    )
+
+    assert result.returncode == 1
+    assert "inventory host 'server' has malformed auplc_gpu_access_enabled" in result.stdout
+
+
 @pytest.mark.parametrize(
     ("inventory_content", "expected_error"),
     [
         (valid_inventory().replace("          auplc_gpu_access_enabled: true\n", ""), "must define exactly one"),
         (valid_inventory().replace("auplc_gpu_access_enabled: true", "auplc_gpu_access_enabled: yes"), "malformed"),
+        (valid_inventory().replace("auplc_gpu_access_enabled: true", 'auplc_gpu_access_enabled: "auto"'), "malformed"),
+        (valid_inventory().replace("auplc_gpu_access_enabled: true", "auplc_gpu_access_enabled: 'auto'"), "malformed"),
+        (valid_inventory().replace("auplc_gpu_access_enabled: true", 'auplc_gpu_access_enabled: "true"'), "malformed"),
+        (valid_inventory().replace("auplc_gpu_access_enabled: true", "auplc_gpu_access_enabled: 'true'"), "malformed"),
+        (valid_inventory().replace("auplc_gpu_access_enabled: true", 'auplc_gpu_access_enabled: "false"'), "malformed"),
+        (valid_inventory().replace("auplc_gpu_access_enabled: true", "auplc_gpu_access_enabled: 'false'"), "malformed"),
+        (valid_inventory().replace("auplc_gpu_access_enabled: true", "auplc_gpu_access_enabled: AUTO"), "malformed"),
+        (valid_inventory().replace("auplc_gpu_access_enabled: true", "auplc_gpu_access_enabled: TRUE"), "malformed"),
+        (valid_inventory().replace("auplc_gpu_access_enabled: true", "auplc_gpu_access_enabled: FALSE"), "malformed"),
+        (valid_inventory().replace("auplc_gpu_access_enabled: true", "auplc_gpu_access_enabled: no"), "malformed"),
+        (
+            valid_inventory().replace("auplc_gpu_access_enabled: true", "auplc_gpu_access_enabled: malformed"),
+            "malformed",
+        ),
         (
             valid_inventory().replace(
                 "          auplc_gpu_access_enabled: true\n",

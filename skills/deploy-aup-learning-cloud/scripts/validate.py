@@ -12,9 +12,9 @@ failed spawn:
   * nodeSelectors for the accelerators actually referenced by effective
     custom.resources.metadata.*.acceleratorKeys, checked against
     detect_cluster.sh output when supplied;
-   * direct inventory GPU access booleans are valid, or generated inventory,
-     GPU-resolution manifest, and PXE rootfs policy agree when both artifacts
-     are supplied;
+  * direct SSH inventory GPU access values are exact unquoted `auto`, `true`,
+    or `false`; generated inventory, GPU-resolution manifest, and PXE rootfs
+    policy agree when both artifacts are supplied;
   * (optional) the chart does not render: a `helm template` dry-run.
 
 This intentionally uses regex/line scanning rather than a YAML parser so it
@@ -192,7 +192,10 @@ def main(argv=None) -> int:
         "--pxe-vars",
         help="PXE vars file to validate instead of deploy/ansible/playbooks/pb-pxe-controller.yml",
     )
-    ap.add_argument("--inventory", help="inventory.yml to validate directly or cross-check with GPU resolution")
+    ap.add_argument(
+        "--inventory",
+        help="inventory.yml for direct ssh-preinstalled validation (auto/true/false) or generated checks; pxe requires --gpu-resolution",
+    )
     ap.add_argument(
         "--gpu-resolution", help="generated gpu-access-resolution.json; requires --inventory for consistency checks"
     )
@@ -234,11 +237,14 @@ def main(argv=None) -> int:
     if args.gpu_resolution and not args.inventory:
         fail("--gpu-resolution requires --inventory")
     elif args.inventory and not args.gpu_resolution:
-        inventory_result = check_gpu_inventory(repo, args.inventory)
-        for message in inventory_result.errors:
-            fail(message)
-        for message in inventory_result.passed:
-            ok(message)
+        if args.topology == "pxe-diskless":
+            fail("pxe-diskless inventory validation requires --gpu-resolution")
+        else:
+            inventory_result = check_gpu_inventory(repo, args.inventory)
+            for message in inventory_result.errors:
+                fail(message)
+            for message in inventory_result.passed:
+                ok(message)
     elif args.inventory and args.gpu_resolution:
         artifact_result = check_gpu_artifacts(
             GpuArtifactValidationRequest(

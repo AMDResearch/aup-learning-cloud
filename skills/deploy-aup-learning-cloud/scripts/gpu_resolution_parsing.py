@@ -14,6 +14,11 @@ class GpuInventory:
 
 
 @dataclass(frozen=True, slots=True)
+class GpuInventoryHostScalars:
+    hosts: dict[str, str]
+
+
+@dataclass(frozen=True, slots=True)
 class GpuResolution:
     status: str
     hosts: dict[str, bool]
@@ -43,7 +48,7 @@ def yaml_indent(line: str) -> int:
     return len(line) - len(line.lstrip())
 
 
-def parse_gpu_inventory(text: str) -> tuple[GpuInventory | None, list[str]]:
+def scan_gpu_inventory_host_scalars(text: str) -> tuple[GpuInventoryHostScalars | None, list[str]]:
     host_values: dict[str, list[str]] = {}
     host_names: list[str] = []
     stack: list[tuple[int, str]] = []
@@ -85,20 +90,42 @@ def parse_gpu_inventory(text: str) -> tuple[GpuInventory | None, list[str]]:
         parse_errors.append("inventory has no generated k3s server or agent hosts")
     if len(set(host_names)) != len(host_names):
         parse_errors.append("inventory has duplicate generated host names")
-    hosts: dict[str, bool] = {}
+    hosts: dict[str, str] = {}
     for host in host_names:
         values = host_values[host]
         if len(values) != 1:
             parse_errors.append(f"inventory host '{host}' must define exactly one auplc_gpu_access_enabled")
             continue
-        enabled = parse_gpu_boolean(values[0])
+        hosts[host] = values[0]
+    if parse_errors:
+        return None, parse_errors
+    return GpuInventoryHostScalars(hosts=hosts), []
+
+
+def validate_direct_gpu_inventory(text: str) -> list[str]:
+    host_scalars, parse_errors = scan_gpu_inventory_host_scalars(text)
+    if host_scalars is None:
+        return parse_errors
+    for host, value in host_scalars.hosts.items():
+        if value not in {"auto", "true", "false"}:
+            parse_errors.append(f"inventory host '{host}' has malformed auplc_gpu_access_enabled")
+    return parse_errors
+
+
+def parse_gpu_inventory(text: str) -> tuple[GpuInventory | None, list[str]]:
+    host_scalars, parse_errors = scan_gpu_inventory_host_scalars(text)
+    if host_scalars is None:
+        return None, parse_errors
+    hosts: dict[str, bool] = {}
+    for host, value in host_scalars.hosts.items():
+        enabled = parse_gpu_boolean(value)
         if enabled is None:
             parse_errors.append(f"inventory host '{host}' has malformed auplc_gpu_access_enabled")
             continue
         hosts[host] = enabled
     if parse_errors:
         return None, parse_errors
-    return GpuInventory(hosts=hosts), parse_errors
+    return GpuInventory(hosts=hosts), []
 
 
 def parse_gpu_resolution(text: str, topology: str) -> tuple[GpuResolution | None, list[str]]:

@@ -8,6 +8,7 @@ from gpu_resolution_parsing import (
     parse_gpu_inventory,
     parse_gpu_resolution,
     parse_pxe_gpu_policy,
+    validate_direct_gpu_inventory,
 )
 
 
@@ -38,7 +39,7 @@ def check_gpu_inventory(repo: Path, inventory_path: str) -> GpuArtifactValidatio
     inventory_file = configured_path(repo, inventory_path)
     if not inventory_file.exists():
         return GpuArtifactValidationResult([f"inventory not found: {inventory_file}"], [])
-    _, errors = parse_gpu_inventory(inventory_file.read_text(encoding="utf-8"))
+    errors = validate_direct_gpu_inventory(inventory_file.read_text(encoding="utf-8"))
     return GpuArtifactValidationResult(errors, [] if errors else ["GPU access inventory is valid"])
 
 
