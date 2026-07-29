@@ -66,7 +66,7 @@ def expected_targets(module, *names: str):
     return tuple(module.InventoryTarget(name=name) for name in names)
 
 
-def test_discovery_playbook_serializes_the_exact_v1_host_evidence_shape() -> None:
+def test_discovery_playbook_preserves_lspci_agreement_and_exact_v1_host_evidence_shape() -> None:
     playbook = DISCOVERY_PLAYBOOK.read_text(encoding="utf-8")
     evidence_block = playbook.split("_auplc_gpu_access_discovery_evidence:", maxsplit=1)[1].split(
         "      changed_when:", maxsplit=1
@@ -83,6 +83,14 @@ def test_discovery_playbook_serializes_the_exact_v1_host_evidence_shape() -> Non
     assert '{"version":1,"hosts":[' in playbook
     assert "hostvars[discovery_host]._auplc_gpu_access_discovery_evidence" in playbook
     assert "| to_json" in playbook
+    assert "name: gpu_access" in playbook
+    assert "tasks_from: detect" in playbook
+    assert "_auplc_gpu_access_sysfs.rc" in playbook
+    assert "_auplc_gpu_access_sysfs.stdout" in playbook
+    assert "/sys/bus/pci/devices" not in playbook
+    assert 'argv: [lspci, -Dnn, -d, "1002::0300"]' in playbook
+    assert 'argv: [lspci, -Dnn, -d, "1002::0302"]' in playbook
+    assert 'argv: [lspci, -Dnn, -d, "1002::0380"]' in playbook
 
 
 def test_parse_fleet_evidence_accepts_the_exact_machine_evidence_schema() -> None:
