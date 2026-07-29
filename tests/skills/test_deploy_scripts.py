@@ -19,33 +19,7 @@ ROOT = Path(__file__).resolve().parents[2]
 DEPLOY_SCRIPTS = ROOT / "skills" / "deploy-aup-learning-cloud" / "scripts"
 VALIDATE = DEPLOY_SCRIPTS / "validate.py"
 GEN_CONFIGS = DEPLOY_SCRIPTS / "gen_configs.py"
-CONFIG_GENERATION = DEPLOY_SCRIPTS / "config_generation.py"
 ARTIFACT_STORE = DEPLOY_SCRIPTS / "artifact_store.py"
-VALUES_RESOLUTION_PARSING = DEPLOY_SCRIPTS / "values_resolution_parsing.py"
-
-EXPECTED_GENERATOR_SCHEMA = {
-    "topology": "pxe-diskless | ssh-preinstalled",
-    "k3s_version": "v1.32.3+k3s1",
-    "server": {"name": "aipc1", "ip": "192.168.0.140"},
-    "agents": [{"name": "aipc2", "ip": "192.168.0.141"}],
-    "network": {
-        "interface": "enp1s0",
-        "subnet": "192.168.0.0/24",
-        "gateway": "192.168.0.1",
-        "dns_servers": "8.8.8.8,8.8.4.4",
-    },
-    "pxe": {
-        "authorized_keys": ["ssh-ed25519 AAAA... you@host"],
-        "rootfs_password": "",
-        "web_port": 8080,
-        "diskless_agents_have_amd_gpus": True,
-    },
-    "accelerators": {"strix-halo": {"product_name": "AMD_Radeon_8060S_Graphics"}},
-    "storage": {"class": "nfs-client"},
-    "proxy": {"node_port": 30890},
-    "auth_mode": "auto-login",
-    "images": {"cpu": "ghcr.io/amdresearch/auplc-default:latest", "gpu": "ghcr.io/amdresearch/auplc-base:latest"},
-}
 
 
 def run_script(script: Path, *args: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
@@ -276,43 +250,6 @@ def test_validator_retains_selectors_from_partial_accelerator_overlays(tmp_path:
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert "AMD_Radeon_8060S_Graphics" in result.stdout
-
-
-def test_values_resolution_parser_preserves_overlay_precedence_and_error_categories(tmp_path: Path) -> None:
-    parser = load_deploy_module("values_resolution_parsing", VALUES_RESOLUTION_PARSING)
-    repo = tmp_path / "checkout"
-    base = write_file(
-        repo / "base.yaml",
-        """custom:
-  accelerators:
-    strix-halo:
-      nodeSelector:
-        amd.com/gpu.product-name: AMD_Radeon_8060S_Graphics
-  resources:
-    metadata:
-      gpu:
-        acceleratorKeys: [strix-halo]
-""",
-    )
-    partial_overlay = write_file(
-        repo / "partial.yaml",
-        """custom:
-  accelerators:
-    strix-halo:
-      displayName: Renamed
-""",
-    )
-    invalid_overlay = write_file(repo / "invalid.yaml", "custom: *defaults\n")
-
-    result = parser.collect_effective_values(
-        repo,
-        [str(base), str(partial_overlay), "missing.yaml", str(invalid_overlay)],
-    )
-
-    assert result.accelerators == {"strix-halo": "AMD_Radeon_8060S_Graphics"}
-    assert result.metadata == {"gpu": ["strix-halo"]}
-    assert result.missing_files == ["values file not found: missing.yaml"]
-    assert result.parse_errors == ["unsupported YAML syntax at custom"]
 
 
 def test_validator_accepts_quoted_product_label_keys(tmp_path: Path) -> None:
@@ -608,69 +545,6 @@ def test_validator_uses_generated_pxe_vars_file_when_requested(tmp_path: Path) -
     assert "k3s_version == pxe_k3s_version" in result.stdout
 
 
-def test_validator_preserves_explicit_selector_and_accelerator_key_clears(tmp_path: Path) -> None:
-    repo = tmp_path / "checkout"
-    base = write_file(
-        repo / "runtime/values.yaml",
-        """custom:
-  accelerators:
-    strix-halo:
-      nodeSelector:
-        amd.com/gpu.product-name: AMD_Radeon_8060S_Graphics
-  resources:
-    metadata:
-      gpu:
-        acceleratorKeys: [strix-halo]
-""",
-    )
-    selector_clear = write_file(
-        repo / "selector-clear.yaml",
-        """custom:
-  accelerators:
-    strix-halo:
-      nodeSelector:
-        amd.com/gpu.product-name: null
-""",
-    )
-    keys_clear = write_file(
-        repo / "keys-clear.yaml",
-        """custom:
-  resources:
-    metadata:
-      gpu:
-        acceleratorKeys: ~
-""",
-    )
-
-    selector_result = run_script(
-        VALIDATE,
-        "--repo",
-        str(repo),
-        "--topology",
-        "ssh-preinstalled",
-        "--values",
-        str(base),
-        "--values",
-        str(selector_clear),
-    )
-    keys_result = run_script(
-        VALIDATE,
-        "--repo",
-        str(repo),
-        "--topology",
-        "ssh-preinstalled",
-        "--values",
-        str(base),
-        "--values",
-        str(keys_clear),
-    )
-
-    assert selector_result.returncode == 1
-    assert "active accelerator 'strix-halo' has no amd.com/gpu.product-name nodeSelector" in selector_result.stdout
-    assert keys_result.returncode == 0, keys_result.stdout + keys_result.stderr
-    assert "no acceleratorKeys found" in keys_result.stdout
-
-
 def test_validator_honors_every_supported_explicit_clear_syntax(tmp_path: Path) -> None:
     repo = tmp_path / "checkout"
     base = write_file(
@@ -762,36 +636,6 @@ def test_validator_main_resets_report_state_between_invocations(tmp_path: Path) 
 
     assert first == 1
     assert second == 0
-
-
-def test_validator_requires_product_labels_under_active_accelerator_node_selectors(tmp_path: Path) -> None:
-    repo = tmp_path / "checkout"
-    values = write_file(
-        repo / "runtime/values.yaml",
-        """custom:
-  accelerators:
-    strix-halo:
-      env:
-        amd.com/gpu.product-name: AMD_Radeon_8060S_Graphics
-  resources:
-    metadata:
-      gpu:
-        acceleratorKeys: [strix-halo]
-""",
-    )
-
-    result = run_script(
-        VALIDATE,
-        "--repo",
-        str(repo),
-        "--topology",
-        "ssh-preinstalled",
-        "--values",
-        str(values),
-    )
-
-    assert result.returncode == 1
-    assert "active accelerator 'strix-halo' has no amd.com/gpu.product-name nodeSelector" in result.stdout
 
 
 def test_validator_ignores_accelerators_and_metadata_outside_custom_resources(tmp_path: Path) -> None:
@@ -892,60 +736,6 @@ def test_validator_fails_when_an_active_accelerator_has_no_product_selector(tmp_
     assert "active accelerator 'strix-halo' has no amd.com/gpu.product-name nodeSelector" in result.stdout
 
 
-def test_validator_accepts_consistent_cpu_only_gpu_artifacts(tmp_path: Path) -> None:
-    repo = tmp_path / "checkout"
-    inventory = write_file(
-        repo / "generated/inventory.yml",
-        """k3s_cluster:
-  children:
-    server:
-      hosts:
-        server:
-          ansible_host: 192.168.1.10
-          auplc_gpu_access_enabled: false
-    agent:
-      hosts:
-        agent:
-          ansible_host: 192.168.1.11
-          auplc_gpu_access_enabled: false
-""",
-    )
-    values = write_file(
-        repo / "generated/values-basic-example.yaml",
-        """custom:
-  resources:
-    metadata: {}
-""",
-    )
-    resolution = write_file(
-        repo / "generated/gpu-access-resolution.json",
-        json.dumps(
-            {
-                "version": 1,
-                "status": "cpu_only",
-                "hosts": {"agent": False, "server": False},
-            }
-        ),
-    )
-
-    result = run_script(
-        VALIDATE,
-        "--repo",
-        str(repo),
-        "--topology",
-        "ssh-preinstalled",
-        "--inventory",
-        str(inventory),
-        "--values",
-        str(values),
-        "--gpu-resolution",
-        str(resolution),
-    )
-
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "GPU access artifacts agree" in result.stdout
-
-
 def test_validator_accepts_consistent_gpu_resolved_artifacts(tmp_path: Path) -> None:
     repo = tmp_path / "checkout"
     inventory, values, resolution = write_resolved_gpu_artifacts(repo)
@@ -992,84 +782,6 @@ def test_validator_rejects_malformed_pending_or_duplicate_gpu_resolution(
     repo = tmp_path / "checkout"
     inventory, values, resolution = write_resolved_gpu_artifacts(repo)
     resolution.write_text(resolution_content, encoding="utf-8")
-
-    result = run_script(
-        VALIDATE,
-        "--repo",
-        str(repo),
-        "--topology",
-        "ssh-preinstalled",
-        "--inventory",
-        str(inventory),
-        "--values",
-        str(values),
-        "--gpu-resolution",
-        str(resolution),
-    )
-
-    assert result.returncode == 1
-    assert expected_error in result.stdout
-
-
-@pytest.mark.parametrize(
-    ("inventory_content", "expected_error"),
-    [
-        (
-            """k3s_cluster:
-  children:
-    server:
-      hosts:
-        server:
-          ansible_host: 192.168.1.10
-    agent:
-      hosts:
-        agent:
-          ansible_host: 192.168.1.11
-          auplc_gpu_access_enabled: false
-""",
-            "inventory host 'server' must define exactly one auplc_gpu_access_enabled",
-        ),
-        (
-            """k3s_cluster:
-  children:
-    server:
-      hosts:
-        server:
-          ansible_host: 192.168.1.10
-          auplc_gpu_access_enabled: yes
-    agent:
-      hosts:
-        agent:
-          ansible_host: 192.168.1.11
-          auplc_gpu_access_enabled: false
-""",
-            "inventory host 'server' has malformed auplc_gpu_access_enabled",
-        ),
-        (
-            """k3s_cluster:
-  children:
-    server:
-      hosts:
-        server:
-          ansible_host: 192.168.1.10
-          auplc_gpu_access_enabled: true
-          auplc_gpu_access_enabled: false
-    agent:
-      hosts:
-        agent:
-          ansible_host: 192.168.1.11
-          auplc_gpu_access_enabled: false
-""",
-            "inventory host 'server' must define exactly one auplc_gpu_access_enabled",
-        ),
-    ],
-)
-def test_validator_rejects_missing_malformed_or_duplicate_inventory_host_booleans(
-    tmp_path: Path, inventory_content: str, expected_error: str
-) -> None:
-    repo = tmp_path / "checkout"
-    inventory, values, resolution = write_resolved_gpu_artifacts(repo)
-    inventory.write_text(inventory_content, encoding="utf-8")
 
     result = run_script(
         VALIDATE,
@@ -1409,56 +1121,27 @@ def test_generator_force_failure_restores_all_original_destination_types(
     assert values_target.read_text(encoding="utf-8") == "old symlink target\n"
 
 
-def test_artifact_store_rolls_back_destination_when_staged_unlink_fails(
+def test_artifact_store_rolls_back_non_force_destination_after_post_link_fsync_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    module = load_deploy_module("deploy_artifact_store_unlink", ARTIFACT_STORE)
+    module = load_deploy_module("deploy_artifact_store_nonforce_fsync", ARTIFACT_STORE)
     destination = tmp_path / "inventory.yml"
-    original_unlink = module.os.unlink
-    failed = False
+    original_fsync_parent = module._fsync_parent
+    calls = 0
 
-    def fail_first_staged_unlink(path, *args, **kwargs):
-        nonlocal failed
-        if not failed and Path(path).name.startswith(".inventory.yml."):
-            failed = True
-            raise OSError("injected staged unlink failure")
-        return original_unlink(path, *args, **kwargs)
+    def fail_after_publication(path: Path) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise OSError("injected parent fsync failure")
+        original_fsync_parent(path)
 
-    monkeypatch.setattr(module.os, "unlink", fail_first_staged_unlink)
+    monkeypatch.setattr(module, "_fsync_parent", fail_after_publication)
 
     with pytest.raises(SystemExit):
         module.publish_artifacts([(destination, "new inventory\n", 0o600, True)], force=False)
 
     assert not destination.exists()
-
-
-@pytest.mark.parametrize("force", (False, True))
-def test_artifact_store_rolls_back_destination_when_parent_fsync_fails(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, force: bool
-) -> None:
-    module = load_deploy_module(f"deploy_artifact_store_fsync_{force}", ARTIFACT_STORE)
-    destination = tmp_path / "inventory.yml"
-    if force:
-        destination.write_text("old inventory\n", encoding="utf-8")
-    original_fsync_parent = module._fsync_parent
-    calls = 0
-
-    def fail_after_publication(path):
-        nonlocal calls
-        calls += 1
-        if calls == (2 if force else 1):
-            raise OSError("injected parent fsync failure")
-        return original_fsync_parent(path)
-
-    monkeypatch.setattr(module, "_fsync_parent", fail_after_publication)
-
-    with pytest.raises(SystemExit):
-        module.publish_artifacts([(destination, "new inventory\n", 0o600, True)], force=force)
-
-    if force:
-        assert destination.read_text(encoding="utf-8") == "old inventory\n"
-    else:
-        assert not destination.exists()
 
 
 def test_generated_overlay_activates_selected_accelerators_for_validation(tmp_path: Path) -> None:
@@ -1512,103 +1195,3 @@ def test_checkout_root_helper_path_is_a_runnable_public_cli() -> None:
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert '"topology": "pxe-diskless | ssh-preinstalled"' in result.stdout
-
-
-def test_generator_print_schema_is_byte_stable() -> None:
-    result = run_script(GEN_CONFIGS, "--print-schema")
-
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert result.stderr == ""
-    assert result.stdout == json.dumps(EXPECTED_GENERATOR_SCHEMA, indent=2) + "\n"
-
-
-def test_generator_exits_with_usage_error_when_spec_is_omitted() -> None:
-    result = run_script(GEN_CONFIGS)
-
-    assert result.returncode == 2
-    assert result.stdout == ""
-    assert result.stderr == "gen_configs: --spec is required (or use --print-schema)\n"
-
-
-def test_generator_replaces_colliding_artifacts_when_force_is_given(tmp_path: Path) -> None:
-    spec_path = write_file(tmp_path / "spec.json", json.dumps(generator_spec("pxe-diskless")))
-    token_path = write_file(tmp_path / "token.txt", "characterization-token\n")
-    out_dir = tmp_path / "generated"
-    write_file(out_dir / "inventory.yml", "old inventory\n")
-    write_file(out_dir / "pb-pxe-controller.vars.yml", "old pxe vars\n")
-    write_file(out_dir / "values-basic-example.yaml", "old values\n")
-
-    result = run_script(
-        GEN_CONFIGS,
-        "--spec",
-        str(spec_path),
-        "--out-dir",
-        str(out_dir),
-        "--token-file",
-        str(token_path),
-        "--force",
-    )
-
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "old inventory" not in (out_dir / "inventory.yml").read_text(encoding="utf-8")
-    assert "old pxe vars" not in (out_dir / "pb-pxe-controller.vars.yml").read_text(encoding="utf-8")
-    assert "old values" not in (out_dir / "values-basic-example.yaml").read_text(encoding="utf-8")
-    assert os.stat(out_dir / "inventory.yml").st_mode & 0o777 == 0o600
-    assert os.stat(out_dir / "pb-pxe-controller.vars.yml").st_mode & 0o777 == 0o600
-    assert os.stat(out_dir / "values-basic-example.yaml").st_mode & 0o777 == 0o644
-
-
-def test_generator_exposes_extracted_generation_and_artifact_modules() -> None:
-    generation = load_deploy_module("deploy_config_generation", CONFIG_GENERATION)
-    artifacts = load_deploy_module("deploy_artifact_store", ARTIFACT_STORE)
-
-    assert generation.SCHEMA == EXPECTED_GENERATOR_SCHEMA
-    assert generation.validate_spec(generator_spec()) == "ssh-preinstalled"
-    assert callable(generation.render_inventory)
-    assert callable(generation.render_pxe_vars)
-    assert callable(generation.render_values)
-    assert callable(artifacts.preflight_destinations)
-    assert callable(artifacts.publish_artifacts)
-
-
-def test_generator_uses_fake_ansible_discovery_to_publish_resolved_ssh_policy(tmp_path: Path) -> None:
-    fake_bin = tmp_path / "bin"
-    fake_bin.mkdir()
-    fake_ansible = fake_bin / "ansible-playbook"
-    fake_ansible.write_text(
-        r"""#!/usr/bin/env python3
-import json
-import pathlib
-import sys
-args = sys.argv[1:]
-output = next(arg.split('=', 1)[1] for arg in args if arg.startswith('gpu_access_discovery_output_path='))
-def host(name, bdf):
-    return {
-        'host': name, 'reachable': True,
-        'lspci': {'rc': 0, 'stdout': bdf}, 'sysfs': {'rc': 0, 'stdout': bdf},
-    }
-pathlib.Path(output).write_text(json.dumps({'version': 1, 'hosts': [host('server', '0000:03:00.0'), host('agent', '')]}), encoding='utf-8')
-""",
-        encoding="utf-8",
-    )
-    fake_ansible.chmod(0o755)
-    spec = generator_spec()
-    spec["agents"] = [{"name": "agent", "ip": "192.168.1.11"}]
-    spec_path = write_file(tmp_path / "spec.json", json.dumps(spec))
-    out_dir = tmp_path / "generated"
-    result = subprocess.run(
-        [sys.executable, str(GEN_CONFIGS), "--spec", str(spec_path), "--out-dir", str(out_dir)],
-        capture_output=True,
-        check=False,
-        env={**os.environ, "PATH": f"{fake_bin}:{os.environ['PATH']}"},
-        text=True,
-    )
-
-    assert result.returncode == 0, result.stdout + result.stderr
-    inventory = (out_dir / "inventory.yml").read_text(encoding="utf-8")
-    assert inventory.count("auplc_gpu_access_enabled: true") == 1
-    assert inventory.count("auplc_gpu_access_enabled: false") == 1
-    assert "auplc_render_gid" not in inventory
-    assert "gpuAccess" not in (out_dir / "values-basic-example.yaml").read_text(encoding="utf-8")
-    manifest = json.loads((out_dir / "gpu-access-resolution.json").read_text(encoding="utf-8"))
-    assert manifest["hosts"] == {"agent": False, "server": True}

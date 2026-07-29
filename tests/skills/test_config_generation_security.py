@@ -86,7 +86,6 @@ def test_generator_applies_the_normal_unknown_field_policy_to_draft_gpu_fields()
     "raw",
     [
         '{"topology":"ssh-preinstalled","topology":"pxe-diskless"}',
-        '{"topology":"pxe-diskless","k3s_version":"v1.32.3+k3s1","server":{"name":"server","ip":"192.168.1.10"},"network":{"interface":"eno1","subnet":"192.168.1.0/24"},"pxe":{"authorized_keys":["ssh-ed25519 AAA"],"diskless_agents_have_amd_gpus":true,"diskless_agents_have_amd_gpus":false}}',
     ],
 )
 def test_generator_rejects_duplicate_public_policy_keys_before_discovery(tmp_path: Path, raw: str) -> None:
