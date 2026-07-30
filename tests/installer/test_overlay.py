@@ -113,6 +113,8 @@ def test_resource_images_use_primary_tag() -> None:
     assert images["code-gpu"] == "ghcr.io/amdresearch/auplc-code-gpu:v1.0-gfx1151"
     assert images["Course-CV"] == "ghcr.io/amdresearch/auplc-cv:v1.0-gfx1151"
     assert images["Course-PhySim"] == "ghcr.io/amdresearch/auplc-physim:v1.0-gfx1151"
+    assert images["Course-Finetuning"] == "ghcr.io/amdresearch/auplc-finetuning:v1.0-gfx1151"
+    assert images["Course-LocalInference"] == "ghcr.io/amdresearch/auplc-localinference:v1.0-gfx1151"
 
 
 def test_curated_sku_with_product_name_emits_node_selector() -> None:

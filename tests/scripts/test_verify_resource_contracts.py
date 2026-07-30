@@ -34,6 +34,8 @@ DEFAULT_PATHS = {
     "Course-DL": "/opt/workspace/DL",
     "Course-LLM": "/opt/workspace/LLM",
     "Course-PhySim": "/opt/workspace/PhySim",
+    "Course-Finetuning": "/ryzers/notebooks",
+    "Course-LocalInference": "/ryzers/notebooks",
 }
 
 

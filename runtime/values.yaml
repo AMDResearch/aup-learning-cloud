@@ -284,12 +284,15 @@ custom:
       Course-DL: "ghcr.io/amdresearch/auplc-dl:latest"
       Course-LLM: "ghcr.io/amdresearch/auplc-llm:latest"
       Course-PhySim: "ghcr.io/amdresearch/auplc-physim:latest"
+      Course-Finetuning: "ghcr.io/amdresearch/auplc-finetuning:latest"
+      Course-LocalInference: "ghcr.io/amdresearch/auplc-localinference:latest"
       # Custom-URL: "ghcr.io/amdresearch/auplc-cv:latest"
 
     # Optional spawn/Home group display order. Groups not listed here are shown
     # after these entries using the default alphabetical order.
     # Example: move DEVELOPMENT before COURSE by listing DEVELOPMENT first.
     groupOrder:
+      - ROSCON 2026
       - TEACHING LABS
       - DEVELOPMENT ENVIRONMENTS
       - TUTORIALS
@@ -325,6 +328,14 @@ custom:
         memory: "0Gi"
         amd.com/gpu: "1"
       Course-PhySim:
+        cpu: "0"
+        memory: "0Gi"
+        amd.com/gpu: "1"
+      Course-Finetuning:
+        cpu: "0"
+        memory: "0Gi"
+        amd.com/gpu: "1"
+      Course-LocalInference:
         cpu: "0"
         memory: "0Gi"
         amd.com/gpu: "1"
@@ -420,6 +431,24 @@ custom:
           - strix-halo
         defaultPath: "/opt/workspace/PhySim"
         resourceType: "notebook"
+      Course-Finetuning:
+        group: "ROSCON 2026"
+        description: "VLA Finetuning (MolmoAct2)"
+        subDescription: "Fine-tune MolmoAct2 policies with ROCm"
+        accelerator: "GPU"
+        acceleratorKeys:
+          - strix-halo
+        defaultPath: "/ryzers/notebooks"
+        resourceType: "notebook"
+      Course-LocalInference:
+        group: "ROSCON 2026"
+        description: "Local Robot Inference (RAI + Lemonade)"
+        subDescription: "Run local models with ROS 2 and RAI"
+        accelerator: "GPU"
+        acceleratorKeys:
+          - strix-halo
+        defaultPath: "/ryzers/notebooks"
+        resourceType: "notebook"
 
   # ============================================================================
   # Team Permission Configuration
@@ -436,6 +465,8 @@ custom:
         - Course-DL
         - Course-LLM
         - Course-PhySim
+        - Course-Finetuning
+        - Course-LocalInference
       official:
         - cpu
         - gpu
@@ -445,11 +476,15 @@ custom:
         - Course-DL
         - Course-LLM
         - Course-PhySim
+        - Course-Finetuning
+        - Course-LocalInference
       AUP:
         - Course-CV
         - Course-DL
         - Course-LLM
         - Course-PhySim
+        - Course-Finetuning
+        - Course-LocalInference
       native-users:
         - code-cpu
         - code-gpu
@@ -457,6 +492,8 @@ custom:
         - Course-DL
         - Course-LLM
         - Course-PhySim
+        - Course-Finetuning
+        - Course-LocalInference
         - cpu
         - gpu
       github-users:
@@ -468,6 +505,8 @@ custom:
         - Course-DL
         - Course-LLM
         - Course-PhySim
+        - Course-Finetuning
+        - Course-LocalInference
 
   # ============================================================================
   # Quota Management
@@ -588,7 +627,7 @@ singleuser:
     securityContext:
       fsGroup: 100
       supplementalGroups:
-        - 993 # render group for ROCm GPU access
+        - 990 # render group for ROCm GPU access
 
   storage:
     dynamic:

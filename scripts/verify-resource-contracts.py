@@ -27,6 +27,8 @@ OFFICIAL_RESOURCE_KEYS = (
     "Course-DL",
     "Course-LLM",
     "Course-PhySim",
+    "Course-Finetuning",
+    "Course-LocalInference",
 )
 CODE_SERVER_START_SCRIPT = "/usr/local/bin/start-code-server.sh"
 

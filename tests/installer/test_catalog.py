@@ -103,8 +103,8 @@ def test_gpu_image_basenames_only_returns_gpu_required() -> None:
 
 
 def test_make_targets_includes_every_selected_course() -> None:
-    sel = CourseSelection(picks=["cpu", "code-cpu", "Course-DL"])
-    assert sel.make_targets() == ["base-cpu", "code-cpu", "dl"]
+    sel = CourseSelection(picks=["cpu", "code-cpu", "Course-DL", "Course-Finetuning", "Course-LocalInference"])
+    assert sel.make_targets() == ["base-cpu", "code-cpu", "dl", "finetuning", "local-inference"]
 
 
 def test_description_default() -> None:
