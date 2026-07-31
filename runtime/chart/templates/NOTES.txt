@@ -42,7 +42,7 @@ SOFTWARE.
 {{- if and .Values.custom .Values.custom.adminUser .Values.custom.adminUser.enabled }}
 ### Admin Credentials (auto-generated)
 
-  Admin username: admin
+  Admin username: {{ .Values.custom.adminUser.username }}
 
   Get admin password:
     kubectl -n {{ .Release.Namespace }} get secret jupyterhub-admin-credentials -o go-template='{{"{{index .data \"admin-password\" | base64decode}}"}}'

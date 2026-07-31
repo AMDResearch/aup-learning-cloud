@@ -31,4 +31,32 @@ def test_local_chart_render_uses_existing_secret_only_for_hub_bootstrap() -> Non
     assert "key: admin-username" in result.stdout
     assert "name: JUPYTERHUB_ADMIN_PASSWORD" in result.stdout
     assert "key: admin-password" in result.stdout
+    assert "name: JUPYTERHUB_API_TOKEN" in result.stdout
+    assert "key: api-token" in result.stdout
     assert "kind: Secret\nmetadata:\n  name: jupyterhub-admin-credentials" not in result.stdout
+
+
+def test_local_chart_schema_rejects_uppercase_admin_username() -> None:
+    result = subprocess.run(
+        [
+            "helm",
+            "template",
+            "jupyterhub",
+            "runtime/chart",
+            "--set",
+            "custom.authMode=local",
+            "--set",
+            "custom.adminUser.enabled=true",
+            "--set",
+            "custom.adminUser.username=Operator",
+            "--set",
+            "custom.adminUser.existingSecret=jupyterhub-admin-credentials",
+        ],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "does not match pattern" in result.stderr

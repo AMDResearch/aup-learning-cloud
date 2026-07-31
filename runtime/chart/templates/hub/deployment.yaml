@@ -228,6 +228,11 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.custom.adminUser.existingSecret | default "jupyterhub-admin-credentials" }}
                   key: admin-password
+            - name: JUPYTERHUB_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.custom.adminUser.existingSecret | default "jupyterhub-admin-credentials" }}
+                  key: api-token
             {{- end }}
             {{- with .Values.hub.extraEnv }}
             {{- include "jupyterhub.extraEnv" . | nindent 12 }}
