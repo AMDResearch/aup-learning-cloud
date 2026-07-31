@@ -53,9 +53,20 @@ def _helm_install_args(paths: RuntimePaths, *, dev: bool = False) -> list[str]:
     return args
 
 
+def _ensure_namespace() -> None:
+    existing = run(["kubectl", "get", "namespace", "jupyterhub"], check=False)
+    if existing.returncode == 0:
+        return
+    created = run(["kubectl", "create", "namespace", "jupyterhub"], check=False)
+    if created.returncode == 0 or "AlreadyExists" in (created.stdout or ""):
+        return
+    raise InstallerError("Failed to create jupyterhub namespace")
+
+
 def ensure_local_admin_secret(admin_username: str) -> str | None:
     """Create the local admin credentials Secret, returning only a new password."""
     secret_name = "jupyterhub-admin-credentials"
+    _ensure_namespace()
     existing = run(
         ["kubectl", "get", "secret", secret_name, "--namespace", "jupyterhub"],
         check=False,
