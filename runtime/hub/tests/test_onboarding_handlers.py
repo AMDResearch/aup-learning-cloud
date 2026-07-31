@@ -27,6 +27,20 @@ if "jupyterhub.apihandlers" not in sys.modules:
     sys.modules["jupyterhub.orm"] = orm_module
     sys.modules["jupyterhub.scopes"] = scopes_module
 
+if "jupyterhub.roles" not in sys.modules:
+    roles_module = types.ModuleType("jupyterhub.roles")
+    roles_module.assign_default_roles = lambda *_args, **_kwargs: None
+    sys.modules["jupyterhub.roles"] = roles_module
+
+if "jupyterhub.utils" not in sys.modules:
+    utils_module = types.ModuleType("jupyterhub.utils")
+
+    async def maybe_future(value):
+        return value
+
+    utils_module.maybe_future = maybe_future
+    sys.modules["jupyterhub.utils"] = utils_module
+
 if "multiauthenticator" not in sys.modules:
     multiauthenticator_module = types.ModuleType("multiauthenticator")
     multiauthenticator_module.MultiAuthenticator = type("MultiAuthenticator", (), {})
@@ -144,6 +158,7 @@ UserOnboardingState = models.UserOnboardingState
 DismissMyOnboardingHandler = handlers.DismissMyOnboardingHandler
 GetMyOnboardingHandler = handlers.GetMyOnboardingHandler
 AdminResetPasswordHandler = handlers.AdminResetPasswordHandler
+AdminAPIProvisionUsersHandler = handlers.AdminAPIProvisionUsersHandler
 
 
 class DummyUser:
@@ -253,6 +268,47 @@ def test_admin_reset_listing_excludes_all_administrators() -> None:
     asyncio.run(handler.get())
 
     assert rendered["native_users"] == ["learner"]
+
+
+def test_admin_provisioning_rejects_username_that_local_login_would_reject(monkeypatch) -> None:
+    class FakeAuthenticator:
+        def __init__(self):
+            self.validated_usernames = []
+
+        def validate_username(self, username):
+            self.validated_usernames.append(username)
+            return username == username.lower() and ":" not in username
+
+    class FakeFirstUseAuthenticator:
+        def normalize_username(self, username):
+            return username.lower()
+
+        def _check_password_strength(self, _password):
+            return None
+
+        def set_password(self, *_args, **_kwargs):
+            raise AssertionError("invalid username must not set a password")
+
+    authenticator = FakeAuthenticator()
+    handler = object.__new__(AdminAPIProvisionUsersHandler)
+    handler.current_user = DummyUser("operator", admin=True)
+    handler.authenticator = authenticator
+    handler.request = types.SimpleNamespace(
+        body=json.dumps({"users": [{"username": "Admin", "password": "Password1!"}]}).encode("utf-8")
+    )
+    handler.find_user = lambda _username: None
+    captured = {}
+    handler.set_header = lambda key, value: captured.setdefault("headers", {}).__setitem__(key, value)
+    handler.finish = lambda payload: captured.setdefault("body", payload)
+    handler.log = types.SimpleNamespace(error=lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(handlers, "_find_firstuse_authenticator", lambda _authenticator: FakeFirstUseAuthenticator())
+
+    asyncio.run(handler.post())
+
+    payload = json.loads(captured["body"])
+    assert authenticator.validated_usernames == ["Admin"]
+    assert payload["failed"] == 1
+    assert payload["results"][0]["error"] == "Invalid username: Admin"
 
 
 def test_get_my_onboarding_returns_visible_when_no_state_exists(monkeypatch):

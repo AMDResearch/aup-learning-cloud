@@ -689,8 +689,8 @@ class AdminAPIProvisionUsersHandler(APIHandler):
                     results["failed"] += 1
                     results["results"].append(result)
                     continue
-                if not self.authenticator.validate_username(username):
-                    result["error"] = f"Invalid username: {username}"
+                if not self.authenticator.validate_username(requested_username):
+                    result["error"] = f"Invalid username: {requested_username}"
                     results["failed"] += 1
                     results["results"].append(result)
                     continue

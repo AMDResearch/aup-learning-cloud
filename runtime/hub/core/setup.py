@@ -49,6 +49,32 @@ if TYPE_CHECKING:
     pass
 
 
+def _bootstrap_admin_password(admin_username: str, admin_password: str) -> None:
+    from core.authenticators.models import UserPassword
+    from core.database import session_scope
+
+    with session_scope() as session:
+        user_pw = session.query(UserPassword).filter_by(username=admin_username).first()
+        if user_pw:
+            print(f"[SETUP] Admin '{admin_username}' password already set")
+            return
+        password_hash = bcrypt.hashpw(admin_password.encode(), bcrypt.gensalt())
+        session.add(
+            UserPassword(
+                username=admin_username,
+                password_hash=password_hash,
+                force_change=False,
+            )
+        )
+        print(f"[SETUP] Admin '{admin_username}' password set automatically")
+
+
+def _configure_api_token(c: Any, api_token: str | None, admin_username: str) -> None:
+    if api_token:
+        c.JupyterHub.api_tokens = {api_token: admin_username}
+        print(f"[SETUP] API token loaded for administrator '{admin_username}'")
+
+
 def setup_hub(c: Any) -> None:
     """
     Set up JupyterHub with business logic from core.
@@ -329,22 +355,6 @@ def setup_hub(c: Any) -> None:
             print(f"[QUOTA] Warning: Failed to run quota migration: {e}")
 
     # =========================================================================
-    # API Token
-    # =========================================================================
-
-    api_token = os.environ.get("JUPYTERHUB_API_TOKEN")
-    if api_token:
-        c.JupyterHub.api_tokens = {api_token: "admin"}
-        print("[SETUP] API token loaded for admin user")
-
-    # =========================================================================
-    # Template Paths
-    # =========================================================================
-
-    template_path = os.environ.get("JUPYTERHUB_TEMPLATE_PATH", "/tmp/custom_templates")
-    c.JupyterHub.template_paths = [template_path]
-
-    # =========================================================================
     # Auto-Create Admin User
     # =========================================================================
 
@@ -356,28 +366,23 @@ def setup_hub(c: Any) -> None:
     if config.auth_mode == "local" and not os.environ.get("JUPYTERHUB_ADMIN_USERNAME"):
         raise RuntimeError("Local authentication requires JUPYTERHUB_ADMIN_USERNAME")
 
+    # =========================================================================
+    # API Token
+    # =========================================================================
+
+    api_token = os.environ.get("JUPYTERHUB_API_TOKEN")
+    _configure_api_token(c, api_token, admin_username)
+
+    # =========================================================================
+    # Template Paths
+    # =========================================================================
+
+    template_path = os.environ.get("JUPYTERHUB_TEMPLATE_PATH", "/tmp/custom_templates")
+    c.JupyterHub.template_paths = [template_path]
+
     if admin_password:
         try:
-            from core.authenticators.models import UserPassword
-            from core.database import session_scope
-
-            with session_scope() as session:
-                user_pw = session.query(UserPassword).filter_by(username=admin_username).first()
-                if user_pw:
-                    if config.auth_mode == "local" and not bcrypt.checkpw(
-                        admin_password.encode(), user_pw.password_hash
-                    ):
-                        raise RuntimeError("Local administrator password does not match the credentials Secret")
-                    print(f"[SETUP] Admin '{admin_username}' password already set")
-                else:
-                    password_hash = bcrypt.hashpw(admin_password.encode(), bcrypt.gensalt())
-                    user_pw = UserPassword(
-                        username=admin_username,
-                        password_hash=password_hash,
-                        force_change=False,
-                    )
-                    session.add(user_pw)
-                    print(f"[SETUP] Admin '{admin_username}' password set automatically")
+            _bootstrap_admin_password(admin_username, admin_password)
         except Exception as e:
             if config.auth_mode == "local":
                 raise RuntimeError("Failed to bootstrap local administrator credentials") from e
