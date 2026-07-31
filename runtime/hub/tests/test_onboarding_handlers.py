@@ -15,11 +15,17 @@ if "jupyterhub.apihandlers" not in sys.modules:
     jupyterhub_module = types.ModuleType("jupyterhub")
     apihandlers_module = types.ModuleType("jupyterhub.apihandlers")
     handlers_module = types.ModuleType("jupyterhub.handlers")
+    orm_module = types.ModuleType("jupyterhub.orm")
     apihandlers_module.APIHandler = type("APIHandler", (), {})
     handlers_module.BaseHandler = type("BaseHandler", (), {})
+    orm_module.User = type("User", (), {})
+    scopes_module = types.ModuleType("jupyterhub.scopes")
+    scopes_module.needs_scope = lambda _scope: lambda handler: handler
     sys.modules["jupyterhub"] = jupyterhub_module
     sys.modules["jupyterhub.apihandlers"] = apihandlers_module
     sys.modules["jupyterhub.handlers"] = handlers_module
+    sys.modules["jupyterhub.orm"] = orm_module
+    sys.modules["jupyterhub.scopes"] = scopes_module
 
 if "multiauthenticator" not in sys.modules:
     multiauthenticator_module = types.ModuleType("multiauthenticator")
@@ -35,6 +41,7 @@ if "core.authenticators" not in sys.modules:
     auth_module = types.ModuleType("core.authenticators")
     auth_module.__path__ = [str(AUTHENTICATORS)]
     auth_module.CustomFirstUseAuthenticator = type("CustomFirstUseAuthenticator", (), {})
+    auth_module.GITHUB_USERNAME_PREFIX = "github:"
     sys.modules["core.authenticators"] = auth_module
 
 if "sqlalchemy" not in sys.modules:
@@ -136,11 +143,13 @@ database = sys.modules["core.database"]
 UserOnboardingState = models.UserOnboardingState
 DismissMyOnboardingHandler = handlers.DismissMyOnboardingHandler
 GetMyOnboardingHandler = handlers.GetMyOnboardingHandler
+AdminResetPasswordHandler = handlers.AdminResetPasswordHandler
 
 
 class DummyUser:
-    def __init__(self, name: str):
+    def __init__(self, name: str, admin: bool = False):
         self.name = name
+        self.admin = admin
 
 
 class FakeQuery:
@@ -156,6 +165,9 @@ class FakeQuery:
 
     def first(self):
         return self._filtered[0] if self._filtered else None
+
+    def all(self):
+        return self._filtered
 
     def one_or_none(self):
         return self.first()
@@ -215,6 +227,32 @@ def make_handler(handler_cls, username: str):
     handler.set_header = lambda key, value: captured.setdefault("headers", {}).__setitem__(key, value)
     handler.finish = lambda payload: captured.setdefault("body", payload)
     return handler, captured
+
+
+def test_admin_reset_listing_excludes_all_administrators() -> None:
+    handler = object.__new__(AdminResetPasswordHandler)
+    handler.current_user = DummyUser("operator", admin=True)
+    handler.db = FakeDb(
+        [
+            DummyUser("operator", admin=True),
+            DummyUser("admin", admin=True),
+            DummyUser("learner"),
+            DummyUser("github:member"),
+        ]
+    )
+    handler.get_argument = lambda _name, default="": default
+    rendered = {}
+
+    async def render_template(_name, **kwargs):
+        rendered.update(kwargs)
+        return "html"
+
+    handler.render_template = render_template
+    handler.finish = lambda _html: None
+
+    asyncio.run(handler.get())
+
+    assert rendered["native_users"] == ["learner"]
 
 
 def test_get_my_onboarding_returns_visible_when_no_state_exists(monkeypatch):

@@ -327,7 +327,7 @@ class AdminResetPasswordHandler(BaseHandler):
         from jupyterhub.orm import User
 
         for user in self.db.query(User).all():
-            if not user.name.startswith(GITHUB_USERNAME_PREFIX) and user.name != "admin":
+            if not user.name.startswith(GITHUB_USERNAME_PREFIX) and not user.admin:
                 native_users.append(user.name)
 
         html = await self.render_template(
