@@ -81,16 +81,18 @@ sudo apt install python3-questionary python3-prompt-toolkit
   ✓ [8/8] Deploying JupyterHub runtime (helm install + wait)
 
   Open in your browser: http://localhost:30890
-  (auto-logged-in as 'student' — no login needed)
+  Sign in with the selected local administrator credentials.
 ```
 
 ## Default deployment facts
 
-The checked-in defaults describe a local deployment: NodePort **30890**,
-`local-path` storage, ingress **disabled**, prePuller **disabled**, and
-`custom.authMode: auto-login`. To change auth, courses, or accelerators, layer
-a values overlay (see configure-aup-learning-cloud-courses) and
-`./auplc-installer rt upgrade`.
+The checked-in chart defaults use `custom.authMode: auto-login`, while the
+interactive installer defaults to `local` and creates `jupyterhub-admin-credentials`
+with `admin-username`, `admin-password`, and `api-token`. Scripted installs keep
+the `personal` compatibility default unless `--access-mode=local` is supplied.
+The single-node NodePort is not a TLS or LAN exposure boundary; use local mode only
+on a trusted host/network. To change generated installer values, run
+`./auplc-installer rt upgrade`; it preserves and validates an existing local Secret.
 
 ## Offline / air-gapped (pack)
 
@@ -124,6 +126,7 @@ installation verifies and installs it from the bundle.
 | `localhost:30890` refused | Proxy not up or NodePort changed | `kubectl get svc -n jupyterhub`, `kubectl get pods -n jupyterhub` |
 | `docker` permission denied | User not in docker group | re-run `usermod -aG docker $USER` then re-login / `newgrp docker` |
 | Need to re-apply values only | Changed the overlay, not images | `./auplc-installer rt upgrade` (don't reinstall k3s) |
+| Local administrator password unavailable | Existing Secret is intentionally preserved | `kubectl -n jupyterhub get secret jupyterhub-admin-credentials -o jsonpath='{.data.admin-password}' | base64 -d && echo` |
 
 ## Out of scope
 

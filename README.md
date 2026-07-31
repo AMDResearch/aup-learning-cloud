@@ -94,7 +94,9 @@ For scripted installs, `personal` remains the compatibility default. Select loca
 ./auplc-installer install --access-mode=local --admin-username=admin
 ```
 
-The installer generates the administrator password only when it creates `jupyterhub-admin-credentials` and displays it once after a successful deployment. Re-running against an existing Secret reuses the credentials without rotating or redisplaying them. Local users are created and assigned passwords through the Admin UI.
+The installer generates the administrator password and API token only when it creates `jupyterhub-admin-credentials`. It displays the password once after a successful interactive deployment. Re-running against an existing Secret reuses the credentials without rotating them; recover credentials with `kubectl -n jupyterhub get secret jupyterhub-admin-credentials -o jsonpath='{.data.admin-password}' | base64 -d && echo`. Local users are created and assigned passwords through the Admin UI.
+
+Local mode is an installer MVP for `http://localhost:30890` on a trusted single-node host. It does not configure TLS or restrict the K3s NodePort from LAN reachability; do not treat local credentials as a network exposure control.
 
 A successful install looks like this:
 
@@ -119,7 +121,8 @@ This operation needs root privileges. Requesting sudo password...
     You have successfully installed AUP Learning Cloud!
 
     Open in your browser: http://localhost:30890
-    (auto-logged-in as 'student' — no login needed)
+    Sign in with the selected local administrator credentials.
+    (Use `--access-mode=personal` for the compatibility shared student session.)
 
     kubectl is configured at $HOME/.kube/config; try `kubectl get nodes`
 ```

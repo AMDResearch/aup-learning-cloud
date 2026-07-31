@@ -17,13 +17,15 @@ source of truth; verify keys against them.
 
 ```yaml
 custom:
-  authMode: "auto-login"   # auto-login | dummy | github | multi
+  authMode: "auto-login"   # auto-login | dummy | github | local | multi
 ```
 
 - `auto-login` — shared, no credentials. Quota auto-disables unless explicitly
   enabled. Checked-in single-node default.
 - `dummy` — accepts any username/password. Testing only.
 - `github` — GitHub App only. `oauth_callback_url` ends in `/hub/oauth_callback`.
+- `local` — closed, administrator-managed local accounts. Requires an existing
+  credentials Secret with `admin-username`, `admin-password`, and `api-token`.
 - `multi` — GitHub App + native accounts on one page. `oauth_callback_url` ends
   in `/hub/github/oauth_callback`.
 
@@ -35,8 +37,8 @@ custom:
     enabled: true
 ```
 
-The chart creates the `jupyterhub-admin-credentials` secret and bootstraps the
-`admin` user. Retrieve:
+The chart or installer creates `jupyterhub-admin-credentials` and bootstraps the
+configured administrator. Retrieve:
 
 ```bash
 kubectl -n jupyterhub get secret jupyterhub-admin-credentials \
