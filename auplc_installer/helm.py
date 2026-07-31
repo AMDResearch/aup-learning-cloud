@@ -85,7 +85,15 @@ def ensure_local_admin_secret(admin_username: str) -> str | None:
         if encoded_username is None:
             run(
                 [
-                    "kubectl", "patch", "secret", secret_name, "--namespace", "jupyterhub", "--type", "merge", "--patch",
+                    "kubectl",
+                    "patch",
+                    "secret",
+                    secret_name,
+                    "--namespace",
+                    "jupyterhub",
+                    "--type",
+                    "merge",
+                    "--patch",
                     json.dumps({"stringData": {"admin-username": admin_username}}, separators=(",", ":")),
                 ]
             )
@@ -97,7 +105,9 @@ def ensure_local_admin_secret(admin_username: str) -> str | None:
         except (ValueError, UnicodeDecodeError) as exc:
             raise InstallerError("Existing local admin credentials Secret has an invalid admin-username") from exc
         if stored_username != admin_username:
-            raise InstallerError("Existing local admin credentials Secret belongs to a different administrator username")
+            raise InstallerError(
+                "Existing local admin credentials Secret belongs to a different administrator username"
+            )
         return None
     if "NotFound" not in (existing.stdout or ""):
         raise InstallerError("Unable to inspect local admin credentials Secret; verify Kubernetes access and RBAC")

@@ -14,7 +14,9 @@ def test_creates_local_admin_secret_through_stdin_without_leaking_credentials(mo
     def fake_run(command, *, check=True, input_text=None):
         calls.append((command, input_text))
         if len(calls) == 3:
-            return subprocess.CompletedProcess(command, 1, 'Error from server (NotFound): secrets "jupyterhub-admin-credentials" not found')
+            return subprocess.CompletedProcess(
+                command, 1, 'Error from server (NotFound): secrets "jupyterhub-admin-credentials" not found'
+            )
         return subprocess.CompletedProcess(command, 1 if len(calls) == 1 else 0, "")
 
     monkeypatch.setattr("auplc_installer.helm.run", fake_run)
@@ -76,7 +78,9 @@ def test_deploy_orders_namespace_secret_and_helm_without_printing_new_password(m
     def fake_run(command, *, check=True, input_text=None):
         calls.append(("run", command, input_text))
         if len(calls) == 3:
-            return subprocess.CompletedProcess(command, 1, 'Error from server (NotFound): secrets "jupyterhub-admin-credentials" not found')
+            return subprocess.CompletedProcess(
+                command, 1, 'Error from server (NotFound): secrets "jupyterhub-admin-credentials" not found'
+            )
         return subprocess.CompletedProcess(command, 1 if len(calls) == 1 else 0, "")
 
     def failing_stream(command, **_kwargs):
@@ -152,9 +156,7 @@ def test_existing_secret_requires_complete_matching_contract(monkeypatch) -> Non
             return subprocess.CompletedProcess(
                 command,
                 0,
-                json.dumps(
-                    {"data": {"admin-username": "b3RoZXI=", "admin-password": "cGFzc3dvcmQ="}}
-                ),
+                json.dumps({"data": {"admin-username": "b3RoZXI=", "admin-password": "cGFzc3dvcmQ="}}),
             )
         return subprocess.CompletedProcess(command, 0, "")
 
@@ -200,7 +202,11 @@ def test_local_upgrade_ensures_secret_and_waits_for_hub(monkeypatch) -> None:
     monkeypatch.setattr("auplc_installer.helm.run", fake_run)
     monkeypatch.setattr("auplc_installer.helm.run_streaming", lambda command, **_kwargs: calls.append(command))
 
-    upgrade_runtime(RuntimePaths(Path("chart"), Path("values.yaml"), Path("values.local.yaml")), access_mode="local", admin_username="operator")
+    upgrade_runtime(
+        RuntimePaths(Path("chart"), Path("values.yaml"), Path("values.local.yaml")),
+        access_mode="local",
+        admin_username="operator",
+    )
 
     assert calls[1][:3] == ["kubectl", "get", "secret"]
     assert any(command[:2] == ["helm", "upgrade"] for command in calls)

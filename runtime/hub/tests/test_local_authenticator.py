@@ -69,7 +69,10 @@ def test_local_authenticator_rejects_noncanonical_usernames() -> None:
     authenticator = module.CustomLocalAuthenticator()
 
     for username in ("EXISTING", "existing:admin", 'existing"', "existing\n"):
-        assert asyncio.run(authenticator.authenticate(None, {"username": username, "password": "correct-password"})) is None
+        assert (
+            asyncio.run(authenticator.authenticate(None, {"username": username, "password": "correct-password"}))
+            is None
+        )
 
 
 def test_authenticator_factory_rejects_unknown_mode() -> None:

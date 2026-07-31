@@ -514,9 +514,13 @@ def _print_created_admin_password(admin_password: str | None) -> None:
 
         log("    " + bold("Temporary admin password (shown once): ") + bold_green(admin_password))
     elif admin_password is not None:
-        log("    Retrieve credentials safely: kubectl -n jupyterhub get secret jupyterhub-admin-credentials -o jsonpath='{.data.admin-password}' | base64 -d && echo")
+        log(
+            "    Retrieve credentials safely: kubectl -n jupyterhub get secret jupyterhub-admin-credentials -o jsonpath='{.data.admin-password}' | base64 -d && echo"
+        )
     else:
-        log("    Existing credentials were preserved. Retrieve the password: kubectl -n jupyterhub get secret jupyterhub-admin-credentials -o jsonpath='{.data.admin-password}' | base64 -d && echo")
+        log(
+            "    Existing credentials were preserved. Retrieve the password: kubectl -n jupyterhub get secret jupyterhub-admin-credentials -o jsonpath='{.data.admin-password}' | base64 -d && echo"
+        )
 
 
 def cmd_uninstall(state: InstallerState) -> None:
@@ -765,7 +769,9 @@ def _preserve_access_settings_for_upgrade(state: InstallerState, overlay_path: P
     if previous is None and overlay_path.is_file():
         text = overlay_path.read_text(encoding="utf-8")
         if re.search(r"^\s*authMode:\s*(github|multi|dummy)\s*$", text, re.MULTILINE):
-            raise InstallerError("Existing overlay uses an advanced authMode; use operator-managed Helm values instead of installer upgrade")
+            raise InstallerError(
+                "Existing overlay uses an advanced authMode; use operator-managed Helm values instead of installer upgrade"
+            )
     if state.access_mode:
         if state.access_mode == "local" and not state.admin_username and previous and previous[0] == "local":
             state.admin_username = previous[1]
