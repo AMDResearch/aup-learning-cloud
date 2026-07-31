@@ -2,7 +2,7 @@
 name: configure-aup-learning-cloud-auth
 description: >-
   Group: Maintain AUP Learning Cloud. Configures authentication for AUP Learning
-  Cloud: auth modes (auto-login/dummy/github/multi), GitHub App / OAuth, GitHub
+  Cloud: auth modes (auto-login/dummy/github/local/multi), GitHub App / OAuth, GitHub
   team-to-group sync, native local accounts, password policy and forced
   first-login change, and admin bootstrap. Use when the user wants to set or
   switch custom.authMode, enable GitHub login, create or migrate a GitHub
@@ -43,6 +43,7 @@ GitHub App walkthrough, value blocks, and troubleshooting are in
 | `auto-login` | Local demo / single dev box | No credentials; quota auto-disabled unless forced. The checked-in default. |
 | `dummy` | Throwaway testing only | Accepts any user/password; not for real use; its login can 404 in normal setups. |
 | `github` | Org-backed SSO | GitHub App only; team membership syncs into Hub groups. |
+| `local` | Closed single-node or standalone local auth | Administrator-managed local accounts only; no GitHub setup. |
 | `multi` | GitHub + local accounts | Combined login page; native accounts for users without GitHub. |
 
 `custom.authMode` is the single switch. Confirm the target mode with the user
@@ -68,13 +69,15 @@ login blip).
    teams are intersected with `custom.teams.mapping`. Mapping *which resource* a
    group sees stays in the configure-courses skill — this skill only makes the
    groups exist.
-5. **Native accounts (multi).** The first-use authenticator has
+5. **Native accounts (local/multi).** The first-use authenticator has
    `create_users = False`, so accounts must be created by an admin before login
    (see manage-users skill). Password policy: ≥8 chars with upper, lower, digit,
    and special; users can be forced to change on first login.
-6. **Admin bootstrap (optional).** Set `custom.adminUser.enabled: true` to have
-   the chart mint the `jupyterhub-admin-credentials` secret and the `admin`
-   user.
+6. **Admin bootstrap (optional).** Set `custom.adminUser.enabled: true` with a
+   canonical `custom.adminUser.username`. Without `existingSecret`, the chart
+   creates `jupyterhub-admin-credentials`; with `existingSecret`, it uses the
+   named external Secret and never rotates it. The single-node installer creates
+   and validates its lifecycle Secret before Helm runs.
 7. **Pre-flight the render.** `helm template jupyterhub ./runtime/chart -f
    runtime/values.yaml -f <overlay>` must succeed.
 8. **Apply.** Single-node: `./auplc-installer rt upgrade`. Multi/manual:
@@ -83,6 +86,11 @@ login blip).
 9. **Verify.** Load the Hub: the expected login page appears, a GitHub user
    lands in the right groups, and (if bootstrapped) the admin can log in. Read
    the secret with the commands in [reference.md](reference.md).
+
+If a Helm install/upgrade fails, inspect `helm status jupyterhub -n jupyterhub`
+before retrying. On a single-node install, `./auplc-installer rt upgrade` or
+`./auplc-installer rt reinstall` preserves `jupyterhub-admin-credentials`; do
+not delete that Secret unless intentionally resetting credentials.
 
 ## Safety
 

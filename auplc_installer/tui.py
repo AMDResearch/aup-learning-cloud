@@ -791,6 +791,7 @@ def _flow_dev(state: InstallerState) -> None:
         if sub == "deploy":
             while True:
                 if _flow_select_envs(state, allow_back=True):
+                    _flow_select_access(state)
                     cmd_dev_deploy(state)
                     return
                 break
@@ -800,6 +801,7 @@ def _flow_dev(state: InstallerState) -> None:
                 raise _CancelledError
             while True:
                 if _flow_select_envs(state, allow_back=True):
+                    _flow_select_access(state)
                     cmd_dev_reinstall(state)
                     return
                 break
@@ -836,6 +838,7 @@ def _flow_rt(state: InstallerState) -> None:
         if sub == "install":
             while True:
                 if _flow_select_envs(state, allow_back=True):
+                    _flow_select_access(state)
                     cmd_rt_install(state)
                     return
                 break
@@ -848,6 +851,7 @@ def _flow_rt(state: InstallerState) -> None:
                 raise _CancelledError
             while True:
                 if _flow_select_envs(state, allow_back=True):
+                    _flow_select_access(state)
                     cmd_rt_reinstall(state)
                     return
                 break

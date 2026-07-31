@@ -50,6 +50,10 @@ table, offline flow, and troubleshooting are in **[reference.md](reference.md)**
    (local from `dockerfiles/`). For a quick demo prefer `pull`.
 4. **Online or offline**: a normal machine with internet, or an air-gapped one
    that needs a `pack` bundle (see reference).
+5. **Access mode**: interactive installs default to `local` and prompt for a
+   canonical administrator username. Use `personal` only for the compatibility
+   shared student session; scripted installs remain `personal` unless passed
+   `--access-mode=local --admin-username=<name>`.
 
 ## Phase 2 — Verify the environment
 
@@ -84,9 +88,16 @@ kubectl get nodes                       # the node is Ready
 kubectl get pods -n jupyterhub          # hub + proxy Running, no CrashLoop/ImagePull
 ```
 
-Open `http://localhost:30890` — the default values auto-log-in as `student`
-(NodePort 30890, `local-path` storage, ingress disabled). Spawn a CPU notebook,
-then a GPU notebook, and confirm the GPU pod schedules.
+Open `http://localhost:30890` — local interactive installs display a login form;
+sign in with the configured administrator credentials. Scripted `personal`
+installs retain the compatibility shared student session. The NodePort is 30890,
+storage is `local-path`, and ingress is disabled. Spawn a CPU notebook, then a
+GPU notebook, and confirm the GPU pod schedules.
+
+If Helm fails, inspect `helm status jupyterhub -n jupyterhub` before retrying.
+For a Hub-only retry, use `./auplc-installer rt upgrade` or
+`./auplc-installer rt reinstall`; both retain `jupyterhub-admin-credentials`.
+Do not delete the Secret unless intentionally resetting local credentials.
 
 ## Safety
 
@@ -99,6 +110,10 @@ Stop and get explicit confirmation before:
 
 Never commit changes to the checkout. The installer writes a local values
 overlay (e.g. `values.local.yaml`); do not commit it.
+
+Local mode remains localhost-oriented MVP guidance only. It does not configure
+TLS or restrict NodePort LAN reachability, so credentials are not a network
+authorization boundary.
 
 ## Reference
 

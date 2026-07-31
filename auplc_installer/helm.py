@@ -10,7 +10,9 @@ plus the dev-mode helpers (``dev_deploy``, ``dev_upgrade``, ``dev_quick``).
 
 from __future__ import annotations
 
+import base64
 import json
+import re
 import secrets
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,6 +21,7 @@ from auplc_installer.auth import validate_local_admin_username
 from auplc_installer.util import InstallerError, log, run, run_streaming
 
 DEV_VALUES_PATH = "runtime/values-dev.yaml"
+_KUBECTL_ERROR_CATEGORY_RE = re.compile(r"\(([^()]+)\):")
 
 
 @dataclass
@@ -64,6 +67,41 @@ def _ensure_namespace() -> None:
     raise InstallerError("Failed to create jupyterhub namespace")
 
 
+def _decode_secret_value(data: dict[str, object], key: str) -> str:
+    encoded_value = data.get(key)
+    if not isinstance(encoded_value, str) or not encoded_value:
+        raise InstallerError(f"Existing local admin credentials Secret has an invalid {key}")
+    try:
+        value = base64.b64decode(encoded_value, validate=True).decode("utf-8")
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise InstallerError(f"Existing local admin credentials Secret has an invalid {key}") from exc
+    if not value:
+        raise InstallerError(f"Existing local admin credentials Secret has an invalid {key}")
+    return value
+
+
+def _parse_existing_local_admin_secret(secret_json: str) -> tuple[str | None, str, str]:
+    try:
+        payload = json.loads(secret_json)
+    except json.JSONDecodeError as exc:
+        raise InstallerError("Unable to inspect existing local admin credentials Secret") from exc
+    if not isinstance(payload, dict) or not isinstance(payload.get("data"), dict):
+        raise InstallerError("Existing local admin credentials Secret has an invalid data object")
+    data = payload["data"]
+    password = _decode_secret_value(data, "admin-password")
+    api_token = _decode_secret_value(data, "api-token")
+    if "admin-username" not in data:
+        return None, password, api_token
+    return _decode_secret_value(data, "admin-username"), password, api_token
+
+
+def _kubectl_error_category(output: str | None) -> str:
+    if not output:
+        return "unknown kubectl error"
+    match = _KUBECTL_ERROR_CATEGORY_RE.search(output)
+    return match.group(1) if match else "unknown kubectl error"
+
+
 def ensure_local_admin_secret(admin_username: str) -> str | None:
     """Create the local admin credentials Secret, returning only a new password."""
     secret_name = "jupyterhub-admin-credentials"
@@ -74,15 +112,8 @@ def ensure_local_admin_secret(admin_username: str) -> str | None:
         check=False,
     )
     if existing.returncode == 0:
-        try:
-            data = json.loads(existing.stdout).get("data", {})
-        except json.JSONDecodeError as exc:
-            raise InstallerError("Unable to inspect existing local admin credentials Secret") from exc
-        missing = {"admin-password", "api-token"}.difference(data)
-        if missing:
-            raise InstallerError(f"Existing local admin credentials Secret is missing {', '.join(sorted(missing))}")
-        encoded_username = data.get("admin-username")
-        if encoded_username is None:
+        stored_username, _, _ = _parse_existing_local_admin_secret(existing.stdout)
+        if stored_username is None:
             run(
                 [
                     "kubectl",
@@ -98,19 +129,17 @@ def ensure_local_admin_secret(admin_username: str) -> str | None:
                 ]
             )
             return None
-        import base64
-
-        try:
-            stored_username = base64.b64decode(encoded_username).decode("utf-8")
-        except (ValueError, UnicodeDecodeError) as exc:
-            raise InstallerError("Existing local admin credentials Secret has an invalid admin-username") from exc
+        validate_local_admin_username(stored_username)
         if stored_username != admin_username:
             raise InstallerError(
                 "Existing local admin credentials Secret belongs to a different administrator username"
             )
         return None
     if "NotFound" not in (existing.stdout or ""):
-        raise InstallerError("Unable to inspect local admin credentials Secret; verify Kubernetes access and RBAC")
+        category = _kubectl_error_category(existing.stdout)
+        raise InstallerError(
+            f"Unable to inspect local admin credentials Secret ({category}); verify Kubernetes access and RBAC"
+        )
 
     password = secrets.token_urlsafe(24)
     api_token = secrets.token_urlsafe(32)

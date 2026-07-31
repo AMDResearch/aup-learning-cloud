@@ -173,6 +173,19 @@ def test_install_dry_run_defaults_to_pull() -> None:
     assert "  Image source     : pull" in out
 
 
+@pytest.mark.parametrize("username", ["Admin", "admin:name", 'admin"name'])
+@patch("auplc_installer.cli._resolve_source_root")
+@patch("auplc_installer.cli.InstallerState.from_environment")
+def test_main_install_dry_run_rejects_unsafe_local_admin_username(mock_from_env, mock_root, username: str) -> None:
+    mock_root.return_value = Path("/repo")
+    mock_from_env.return_value = InstallerState()
+
+    with pytest.raises(SystemExit) as exc_info:
+        main(["install", "--dry-run", "--access-mode=local", f"--admin-username={username}"])
+
+    assert exc_info.value.code == 1
+
+
 def test_help_flag_prints_usage() -> None:
     buf = io.StringIO()
     with redirect_stdout(buf):

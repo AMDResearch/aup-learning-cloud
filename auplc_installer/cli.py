@@ -315,6 +315,7 @@ def _install_pull_and_label(
 
 def cmd_install_plan(state: InstallerState, *, legacy_pull: bool = False) -> None:
     """Print the install Configuration summary without side effects."""
+    _resolve_access_settings(state)
     _, label = _install_pull_and_label(state, legacy_pull=legacy_pull)
     sys.stdout.write(format_configuration_summary(state, image_source_label=label) + "\n")
 
@@ -694,6 +695,7 @@ def cmd_dev_upgrade(state: InstallerState) -> None:
 
 
 def cmd_dev_reinstall(state: InstallerState) -> None:
+    _preserve_access_settings_for_upgrade(state, state.runtime_paths().overlay_path)
     _provision_gpu_access_for_local_hardware(offline_mode=state.offline_mode, bundle_dir=state.bundle_dir)
     with contextlib.suppress(InstallerError):
         remove_runtime()
@@ -765,13 +767,17 @@ def _preserve_courses_for_upgrade(state: InstallerState, overlay_path: Path) -> 
 
 
 def _preserve_access_settings_for_upgrade(state: InstallerState, overlay_path: Path) -> None:
-    previous = try_load_access_settings_from_overlay(overlay_path)
-    if previous is None and overlay_path.is_file():
+    if overlay_path.is_file():
         text = overlay_path.read_text(encoding="utf-8")
-        if re.search(r"^\s*authMode:\s*(github|multi|dummy)\s*$", text, re.MULTILINE):
+        if re.search(
+            r"^\s*authMode\s*:\s*(?:\"(?:github|multi|dummy)\"|'(?:github|multi|dummy)'|github|multi|dummy)\s*(?:#.*)?$",
+            text,
+            re.MULTILINE,
+        ):
             raise InstallerError(
                 "Existing overlay uses an advanced authMode; use operator-managed Helm values instead of installer upgrade"
             )
+    previous = try_load_access_settings_from_overlay(overlay_path)
     if state.access_mode:
         if state.access_mode == "local" and not state.admin_username and previous and previous[0] == "local":
             state.admin_username = previous[1]
@@ -797,6 +803,7 @@ def cmd_rt_remove(state: InstallerState) -> None:
 
 
 def cmd_rt_reinstall(state: InstallerState) -> None:
+    _preserve_access_settings_for_upgrade(state, state.runtime_paths().overlay_path)
     _provision_gpu_access_for_local_hardware(offline_mode=state.offline_mode, bundle_dir=state.bundle_dir)
     with contextlib.suppress(InstallerError):
         remove_runtime()

@@ -24,8 +24,11 @@ custom:
   enabled. Checked-in single-node default.
 - `dummy` — accepts any username/password. Testing only.
 - `github` — GitHub App only. `oauth_callback_url` ends in `/hub/oauth_callback`.
-- `local` — closed, administrator-managed local accounts. Requires an existing
-  credentials Secret with `admin-username`, `admin-password`, and `api-token`.
+- `local` — closed, administrator-managed local accounts. It requires
+  `custom.adminUser.enabled: true` and a canonical username. The chart can
+  create credentials or use an external Secret with `admin-password` and an
+  optional `api-token`; the username always comes from
+  `custom.adminUser.username`.
 - `multi` — GitHub App + native accounts on one page. `oauth_callback_url` ends
   in `/hub/github/oauth_callback`.
 
@@ -37,8 +40,12 @@ custom:
     enabled: true
 ```
 
-The chart or installer creates `jupyterhub-admin-credentials` and bootstraps the
-configured administrator. Retrieve:
+Without `existingSecret`, the chart creates `jupyterhub-admin-credentials` and
+bootstraps the configured administrator. The installer creates and validates the
+same Secret for its local lifecycle. With `existingSecret`, the external Secret
+is never created or rotated by the chart and must contain `admin-password`; an
+`api-token` is optional for legacy two-key Secrets. Retrieve chart-created
+credentials:
 
 ```bash
 kubectl -n jupyterhub get secret jupyterhub-admin-credentials \
@@ -142,6 +149,16 @@ helm upgrade --install jupyterhub ./runtime/chart -n jupyterhub \
 kubectl rollout status -n jupyterhub deploy/hub
 kubectl logs -n jupyterhub deployment/hub | grep -i -E 'admin|github|oauth'
 ```
+
+If Helm reports a failed release, inspect it before retrying:
+
+```bash
+helm status jupyterhub -n jupyterhub
+```
+
+On a single-node host, `rt upgrade` and `rt reinstall` retain the installer
+Secret. Do not delete it unless intentionally resetting the local administrator
+credentials.
 
 ## Troubleshooting
 

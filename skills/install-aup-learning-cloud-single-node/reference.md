@@ -93,6 +93,9 @@ the `personal` compatibility default unless `--access-mode=local` is supplied.
 The single-node NodePort is not a TLS or LAN exposure boundary; use local mode only
 on a trusted host/network. To change generated installer values, run
 `./auplc-installer rt upgrade`; it preserves and validates an existing local Secret.
+If a release fails, run `helm status jupyterhub -n jupyterhub` before retrying.
+`rt upgrade` and `rt reinstall` retain `jupyterhub-admin-credentials`; do not
+delete it unless intentionally resetting local credentials.
 
 ## Offline / air-gapped (pack)
 

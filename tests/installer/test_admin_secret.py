@@ -174,8 +174,33 @@ def test_secret_lookup_fails_closed_for_non_not_found_errors(monkeypatch) -> Non
 
     monkeypatch.setattr("auplc_installer.helm.run", fake_run)
 
-    with pytest.raises(InstallerError, match="Unable to inspect"):
+    with pytest.raises(InstallerError, match=r"Unable to inspect.*\(Forbidden\)"):
         ensure_local_admin_secret("operator")
+
+
+@pytest.mark.parametrize(
+    "secret_data",
+    [
+        [],
+        {"data": []},
+        {"data": {"admin-username": "b3BlcmF0b3I=", "admin-password": "!!!", "api-token": "dG9rZW4="}},
+        {"data": {"admin-username": "b3BlcmF0b3I=", "admin-password": "", "api-token": "dG9rZW4="}},
+        {"data": {"admin-username": "b3BlcmF0b3I=", "admin-password": "cGFzc3dvcmQ=", "api-token": ""}},
+    ],
+)
+def test_existing_secret_rejects_invalid_json_data_without_exposing_values(monkeypatch, secret_data) -> None:
+    def fake_run(command, *, check=True, input_text=None):
+        if command[2] == "secret":
+            return subprocess.CompletedProcess(command, 0, json.dumps(secret_data))
+        return subprocess.CompletedProcess(command, 0, "")
+
+    monkeypatch.setattr("auplc_installer.helm.run", fake_run)
+
+    with pytest.raises(InstallerError) as exc_info:
+        ensure_local_admin_secret("operator")
+
+    assert "!!!" not in str(exc_info.value)
+    assert "cGFzc3dvcmQ=" not in str(exc_info.value)
 
 
 def test_local_upgrade_ensures_secret_and_waits_for_hub(monkeypatch) -> None:
