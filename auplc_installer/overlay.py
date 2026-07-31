@@ -46,7 +46,9 @@ def emit_overlay(
     image_registry: str,
     image_tag: str,
     courses: CourseSelection,
-    offline_mode: bool,
+    access_mode: str = "personal",
+    admin_username: str = "admin",
+    offline_mode: bool = False,
 ) -> str:
     """Render the overlay as a string. Pure function — no I/O."""
     buf = StringIO()
@@ -64,8 +66,17 @@ def emit_overlay(
         targets = " ".join(s.gpu_target for s in cfg.skus)
         buf.write(f"# Mixed gfx targets: {targets}\n")
     buf.write(f"# Env selection : {courses.description()}\n")
+    buf.write(f"# Access mode   : {access_mode}\n")
+    buf.write(f"# Admin username: {admin_username}\n")
     buf.write("# Regenerated on install/upgrade.\n")
     buf.write("custom:\n")
+    auth_mode = "local" if access_mode == "local" else "auto-login"
+    buf.write(f"  authMode: {auth_mode}\n")
+    buf.write("  adminUser:\n")
+    buf.write(f"    enabled: {'true' if access_mode == 'local' else 'false'}\n")
+    buf.write(f'    username: "{admin_username}"\n')
+    if access_mode == "local":
+        buf.write('    existingSecret: "jupyterhub-admin-credentials"\n')
 
     # --- accelerators ---
     any_accel_emitted = False
@@ -163,7 +174,9 @@ def generate_values_overlay(
     image_registry: str,
     image_tag: str,
     courses: CourseSelection,
-    offline_mode: bool,
+    access_mode: str = "personal",
+    admin_username: str = "admin",
+    offline_mode: bool = False,
     overlay_path: Path,
 ) -> Path:
     """Render the overlay and write it to ``overlay_path``. Returns the path."""
@@ -174,6 +187,8 @@ def generate_values_overlay(
         image_registry=image_registry,
         image_tag=image_tag,
         courses=courses,
+        access_mode=access_mode,
+        admin_username=admin_username,
         offline_mode=offline_mode,
     )
     overlay_path.write_text(text, encoding="utf-8")
@@ -185,6 +200,8 @@ def generate_values_overlay(
 # ``rt upgrade`` (no ``--courses=`` flag) preserves whatever the user
 # originally installed with instead of silently expanding to "all".
 _COURSE_HEADER_RE = re.compile(r"^# (?:Env selection|Course selection)\s*:\s*(.+?)\s*$")
+_ACCESS_MODE_HEADER_RE = re.compile(r"^# Access mode\s*:\s*(local|personal)\s*$")
+_ADMIN_USERNAME_HEADER_RE = re.compile(r"^# Admin username\s*:\s*(.+?)\s*$")
 
 
 def try_load_courses_from_overlay(overlay_path: Path) -> CourseSelection | None:
@@ -224,12 +241,35 @@ def try_load_courses_from_overlay(overlay_path: Path) -> CourseSelection | None:
     return None
 
 
+def try_load_access_settings_from_overlay(overlay_path: Path) -> tuple[str, str] | None:
+    if not overlay_path.is_file():
+        return None
+    try:
+        text = overlay_path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    access_mode = ""
+    admin_username = ""
+    for line in text.splitlines():
+        mode_match = _ACCESS_MODE_HEADER_RE.match(line)
+        if mode_match:
+            access_mode = mode_match.group(1)
+            continue
+        username_match = _ADMIN_USERNAME_HEADER_RE.match(line)
+        if username_match:
+            admin_username = username_match.group(1)
+    if access_mode == "" or admin_username == "":
+        return None
+    return access_mode, admin_username
+
+
 # Re-exported so callers can import ``NONE_SENTINEL`` from a single module
 # without dipping into the lower-level catalog module.
 __all__ = [
     "emit_overlay",
     "generate_values_overlay",
     "try_load_courses_from_overlay",
+    "try_load_access_settings_from_overlay",
     "GPU_RESOURCE_KEYS",
     "NONE_SENTINEL",
 ]
