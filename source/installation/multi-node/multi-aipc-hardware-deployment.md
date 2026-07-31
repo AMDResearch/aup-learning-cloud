@@ -49,6 +49,12 @@ Per-machine requirements:
 - **Agents**: a working **in-kernel** network driver (this role ships no vendor drivers — add the module to `pxe_initramfs_modules` if needed), and a local disk if you want persistent K3s state across reboots.
 - **All machines**: UEFI Secure Boot **disabled** in firmware (the UEFI path boots GRUB directly without a Microsoft-signed shim), and the ability to network-boot (PXE) from firmware.
 
+::::::{danger}
+Decide how each agent will handle local storage before you expose it to this netboot image. The generated `mount-local-disk` script selects the first existing whole-device candidate in this order: `/dev/sda`, `/dev/vda`, then `/dev/nvme0n1`. If that device isn't already ext4, the script runs `mkfs.ext4 -F` on the whole device. This can erase its partition table and all existing data. There is no interactive confirmation.
+
+For persistent K3s state, expose only a dedicated blank disk, or a disk whose contents have a verified, restorable backup and whose erasure you have explicitly approved. Check the agent's device mapping outside this boot flow before continuing. If persistence isn't wanted, make an explicit decision not to expose a local disk to the agent, for example by disconnecting it or removing it from the VM hardware. With none of the three candidates present, the script uses tmpfs for K3s data instead.
+::::::
+
 ::::::{warning}
 No site values (IPs, subnet, SSH keys, passwords, tokens) ship in this repo. You set them in the inventory and the playbook, and the role **fails fast** if a required value is empty. Keep real secrets out of version control.
 ::::::
@@ -134,7 +140,13 @@ Keep `k3s_version` here in sync with `pxe_k3s_version` in the PXE playbook (Step
 
 ## Step 3 — Configure The PXE Controller Playbook
 
-Edit the `vars:` block in `deploy/ansible/playbooks/pb-pxe-controller.yml`. The required values are empty by default — set them all:
+Edit the `vars:` block in this playbook:
+
+```text
+deploy/ansible/playbooks/pb-pxe-controller.yml
+```
+
+The required values are empty by default — set them all:
 
 ```yaml
 pxe_rootfs_force_rebuild: true        # true for the first build
@@ -217,6 +229,12 @@ The netbooted agents are diskless and are intentionally **not** in the `agent` i
 
 At boot, each agent's `k3s-auto-join.sh` fetches `http://<SERVICE_IP>:8080/k3s/token` and `http://<SERVICE_IP>:8080/k3s/kubeconfig`. Publish both through Apache:
 
+::::::{danger}
+Use this design only on an isolated, trusted provisioning network. These files are served over plain HTTP and the Apache ACL makes them readable to reachable members of the configured `pxe_subnet`. The token allows a node to join the cluster, and the published server kubeconfig is an administrative kubeconfig. Anyone on that subnet who can reach the endpoint can read those credentials, and HTTP doesn't protect them in transit.
+
+Before publishing, restrict the provisioning subnet with network isolation and ACLs so only intended agents and operators can reach port 8080. Review the subnet before each run. After provisioning, rotate the node-join token and administrative kubeconfig, then update or withdraw the published copies according to the site's agent reboot requirements.
+::::::
+
 ```bash
 sudo install -d -m 0755 /var/www/html/k3s
 
@@ -257,7 +275,7 @@ The screenshots below use a virtual machine as the example agent (here a Proxmox
 
 ![Agent console login prompt after netboot (VM example)](../../_static/agent-login-prompt.png)
 
-After boot, each agent mounts `/srv/nfs/rootfs`, sets its hostname to `agent-<MAC>`, mounts its local K3s persistence disk, fetches the token, and joins the server.
+After boot, each agent mounts `/srv/nfs/rootfs`, sets its hostname to `agent-<MAC>`, runs `mount-local-disk`, fetches the token, and joins the server. `mount-local-disk` either mounts the first candidate device for K3s data or, when no candidate exists, creates a temporary in-memory mount as described in the storage warning above.
 
 Watch node registration from AIPC 1:
 
@@ -267,15 +285,19 @@ watch kubectl get nodes -o wide
 
 Expected: AIPC 1 is `Ready`, and each netbooted agent shows up as an `agent-<MAC>` node and becomes `Ready`.
 
-## Step 9 — Validate Agent Persistence
+## Step 9 — Validate Agent State Across Reboots
 
-Reboot one agent and confirm it rejoins with the same node identity rather than as a new node:
+Choose the validation branch that matches the local-storage decision made before netboot.
+
+### Dedicated-disk branch
+
+Use this branch only when the agent exposes an approved dedicated disk. Reboot one agent and confirm it rejoins with the same node identity rather than as a new node:
 
 ```bash
 kubectl get nodes -o wide
 ```
 
-On the agent, confirm the persistent K3s data mount and node password exist:
+On the agent, confirm the dedicated K3s data mount and saved node password exist:
 
 ```bash
 mount | grep /var/lib/rancher/k3s
@@ -283,6 +305,14 @@ test -f /var/lib/rancher/k3s/node-password && echo node-password-ok
 systemctl status mount-local-disk --no-pager
 systemctl status k3s-agent --no-pager
 ```
+
+These reboot, mount, and saved-password checks are required acceptance checks for the dedicated-disk branch.
+
+### No-candidate-disk branch
+
+Use this branch when none of `/dev/sda`, `/dev/vda`, or `/dev/nvme0n1` is exposed to the agent. The script mounts tmpfs at the K3s data directory. Node-local K3s state, the saved node password, container images, and container runtime state are therefore ephemeral and are lost across a reboot. Don't claim local persistence or apply the dedicated-disk reboot and saved-password acceptance checks to this branch. After every reboot, validate the agent's boot and cluster registration as a fresh node-local state cycle.
+
+Notebook data has a separate persistence boundary. After Step 11 configures `nfs-client` and the AUP site values select it, notebook PVC data is stored on the dedicated NFS export and can persist across agent reboot or rescheduling. That NFS-backed PVC persistence does not make the agent's tmpfs-backed K3s or container state persistent.
 
 If an agent reboots but cannot rejoin, inspect the boot services on the agent:
 
@@ -347,6 +377,12 @@ Labels:             amd.com/gpu.cu-count=40
 
 The PXE NFS rootfs is not the notebook storage backend. Create a separate NFS export for Kubernetes PVCs; it can run on AIPC 1 for a small lab.
 
+::::::{danger}
+Choose a new, dedicated `<NFS_EXPORT>` directory for notebook PVCs. Don't use `/srv/nfs/rootfs`, and don't continue if the chosen path already contains data unless you have a verified, restorable backup. Back up `/etc/exports`, review `<CLUSTER_SUBNET>` so the export isn't open to a broader network, and confirm that an equivalent export entry doesn't already exist before appending one.
+
+The recursive ownership and mode commands below change every existing item under `<NFS_EXPORT>`, and mode `0777` permits all local users to write there. The `no_root_squash` option gives remote root broad access to the export. Continue only if the dedicated path, subnet boundary, permissions, and remote-root risk are approved by the site's storage and security policy.
+::::::
+
 ```bash
 sudo mkdir -p <NFS_EXPORT>
 sudo chown -R nobody:nogroup <NFS_EXPORT>
@@ -383,100 +419,53 @@ kubectl get storageclass
 kubectl get pods -n nfs-provisioner
 ```
 
-## Step 12 — Configure JupyterHub Values
+## Step 12: Apply The PXE Topology Deltas
 
-Create a deployment-specific values file from the multi-node example:
-
-```bash
-cd ~/aup-learning-cloud/runtime
-cp values-multi-nodes.yaml.example values-basic-example.yaml
-# edit values-basic-example.yaml
-```
-
-At minimum set the auth mode, the GPU node selector to match your real labels, the notebook images, and the storage class. A NodePort proxy keeps the example simple:
-
-```yaml
-custom:
-  authMode: "auto-login"
-  accelerators:
-    strix-halo:
-      nodeSelector:
-        amd.com/gpu.product-name: "<GPU_PRODUCT_LABEL>"
-      quotaRate: 3
-  resources:
-    images:
-      cpu: "<CPU_NOTEBOOK_IMAGE>"
-      gpu: "<GPU_NOTEBOOK_IMAGE>"
-
-hub:
-  db:
-    pvc:
-      storageClassName: nfs-client
-
-singleuser:
-  storage:
-    dynamic:
-      storageClass: nfs-client
-
-proxy:
-  service:
-    type: NodePort
-    nodePorts:
-      http: 30890
-```
-
-::::::{note}
-Use `authMode: "auto-login"` for this single-machine example — it is the chart's intended single-node default (see the comments in `runtime/chart/values.yaml`) and drops you straight in as the `student` user. Avoid `authMode: "dummy"` here: its login form posts to `/hub/native/login`, which is not loaded in dummy mode, so the login returns `404` and you cannot sign in.
-::::::
-
-::::::{warning}
-Do not reuse a site-specific values override as-is. It may contain real hostnames, OAuth settings, image tags, or registry credentials that must be replaced. For a private registry, create the image pull secret in the `jupyterhub` namespace before installing the chart.
-::::::
-
-## Step 13 — Deploy AUP Learning Cloud
+First, from the deployment repository root, create `runtime/values-basic-example.yaml`. The guarded sequence stops without overwriting an existing site file:
 
 ```bash
-cd ~/aup-learning-cloud
-helm upgrade --install jupyterhub ./runtime/chart \
-  --namespace jupyterhub --create-namespace \
-  -f runtime/values.yaml \
-  -f runtime/values-basic-example.yaml
+(
+  set -e
+  if test -e runtime/values-basic-example.yaml; then
+    printf '%s\n' 'Refusing to overwrite runtime/values-basic-example.yaml; review the existing site file.' >&2
+    exit 1
+  fi
+  umask 077
+  cp --no-clobber runtime/values-multi-nodes.yaml.example runtime/values-basic-example.yaml
+  chmod 600 runtime/values-basic-example.yaml
+)
 ```
 
-Wait for the pods, then open the Hub. For the NodePort example, browse to `http://<SERVICE_IP>:30890`:
+After creating the file, complete the {ref}`K3s readiness checklist <multi-node-k3s-ready>`. For this PXE topology, `runtime/values-basic-example.yaml` substitutes for the checklist's normal `runtime/values-multi-nodes.yaml` site-values gate. Require the PXE file to exist as a reviewed site file that wasn't created by overwriting prior configuration. All other checklist gates remain unchanged. The Ready-node gate includes AIPC 1 and every netbooted `agent-<MAC>` node intended for notebook workloads. The GPU discovery gate must use the labels and allocatable resources observed on those agents in Step 10.
 
-```bash
-kubectl get pods -n jupyterhub -o wide
-kubectl get svc -n jupyterhub
-```
+Then follow the {ref}`canonical Kubernetes preflight and deployment flow <existing-kubernetes-preflight>` for values review, manifest inspection, installation, and infrastructure validation. Use `runtime/values-basic-example.yaml` as this topology's site values file when following those canonical steps.
 
-## Step 14 — End-To-End Validation
+Keep these PXE-specific choices in the site values:
 
-Validate the infrastructure first:
+- Point both the Hub database PVC and dynamic notebook PVCs at the `nfs-client` StorageClass from Step 11. Confirm that its provisioner still targets `<NFS_EXPORT>`, not the read-only PXE rootfs at `/srv/nfs/rootfs`.
+- Set each GPU resource's node selector from labels observed on a netbooted agent. Do not copy a product label from another cluster.
+- For this isolated lab example, expose the proxy with a NodePort and reserve HTTP port `30890`. Use the canonical exposure gate before making the service reachable from an untrusted network.
+- Select authentication and notebook images through the canonical values review. Keep credentials and private-registry secrets out of the values file and version control.
 
-```bash
-kubectl get nodes -o wide
-kubectl get pods -A
-kubectl get storageclass
-kubectl describe node <AGENT_NODE_NAME> | grep amd.com/gpu
-```
+## Step 13: Install Through The Canonical Flow
 
-Expected: AIPC 1 and both netbooted agents are `Ready`; no platform pod is stuck in `CrashLoopBackOff`, `Pending`, or `ImagePullBackOff`; `nfs-client` exists; and AMD GPU resources/labels appear on the agent nodes.
+Complete the canonical render, inspection, install, and infrastructure-validation steps linked in Step 12, substituting `runtime/values-basic-example.yaml` for the canonical guide's example site values filename. Do not omit the explicit site values file from any Helm operation.
 
-Then validate the user path. Open AUP Learning Cloud in a browser — for the NodePort example from Step 13 that is `http://<SERVICE_IP>:30890` (use your ingress host instead if you configured one):
+After the canonical infrastructure checks pass, the lab NodePort URL is:
 
 ```text
 http://<SERVICE_IP>:30890
 ```
 
-![AUP Learning Cloud home page after login](../../_static/aup-learning-cloud-home.png)
+## Step 14: Validate The PXE Deployment Deltas
 
-Log in, spawn a CPU notebook, create a file in the notebook home, restart the notebook and confirm the file persists, then spawn a GPU notebook and confirm its pod lands on a netbooted agent:
+Run the complete {ref}`canonical end-to-end acceptance <existing-kubernetes-end-to-end-acceptance>`. In addition to those checks, require the following PXE-specific results:
 
-```bash
-kubectl get pods -n jupyterhub -o wide
-kubectl describe pod <USER_POD_NAME> -n jupyterhub
-```
+- AIPC 1 and every intended `agent-<MAC>` node are `Ready` after a netboot cycle.
+- The `nfs-client` provisioner uses the separate notebook export `<NFS_EXPORT>`; it does not store notebook PVC data in `/srv/nfs/rootfs`.
+- The CPU notebook's persisted test file survives a server restart because it is backed by its notebook PVC, not by the agent's volatile rootfs overlay.
+- The GPU notebook pod lands on a netbooted `agent-<MAC>` node with the selected GPU label and a non-zero `amd.com/gpu` allocation.
+- The NodePort URL `http://<SERVICE_IP>:30890` reaches the Hub from the intended lab network.
 
 ## Troubleshooting
 
@@ -505,6 +494,6 @@ This is a minimal teaching/lab example, not a production reference. To keep it t
 - **No high availability.** There is one K3s server with embedded SQLite, no HA control plane, and no external database.
 - **Shared resource contention.** PXE/NFS/Apache/K3s-server and the notebook storage compete for the same CPU, memory, disk, and network on one box.
 - **Storage durability.** The example NFS export lives on AIPC 1's local disk with no replication or backup; treat notebook data as disposable unless you add your own backups.
-- **Agents are volatile.** Netboot agents run from a read-only NFS rootfs with a tmpfs overlay; only the local K3s data dir persists across reboots.
+- **Agents are volatile.** Netboot agents run from a read-only NFS rootfs with a tmpfs overlay. With an approved dedicated disk, only the local K3s data directory persists across reboots. Without a candidate disk, that directory also uses tmpfs, so all node-local K3s and container state is ephemeral. Notebook PVC persistence remains separate and depends on the configured NFS StorageClass.
 
 For a longer-running or production deployment, split these roles onto separate hosts, use an HA K3s control plane with an external/replicated datastore, and back the storage with a dedicated, redundant NFS (or other) backend.
