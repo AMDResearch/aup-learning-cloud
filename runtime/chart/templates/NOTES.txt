@@ -40,7 +40,20 @@ SOFTWARE.
   - Hub image:            Custom AUP Learning Cloud Hub (based on Z2JH {{ .Chart.Version }})
 
 {{- if and .Values.custom .Values.custom.adminUser .Values.custom.adminUser.enabled }}
-### Admin Credentials (auto-generated)
+{{- $admin_secret := .Values.custom.adminUser.existingSecret | default "jupyterhub-admin-credentials" }}
+{{- if .Values.custom.adminUser.existingSecret }}
+### Admin Credentials (external Secret)
+
+  Administrator username: {{ .Values.custom.adminUser.username }}
+  Credential Secret: {{ $admin_secret }}
+
+  Get admin password:
+    kubectl -n {{ .Release.Namespace }} get secret {{ $admin_secret }} -o go-template='{{"{{index .data \"admin-password\" | base64decode}}"}}'
+
+  This chart does not create or rotate the external Secret. If it includes an
+  `api-token` key, retrieve it from {{ $admin_secret }} for scripts.
+{{- else }}
+### Admin Credentials (chart-created Secret)
 
   Admin username: {{ .Values.custom.adminUser.username }}
 
@@ -50,6 +63,7 @@ SOFTWARE.
   Get API token (for scripts):
     export JUPYTERHUB_TOKEN=$(kubectl -n {{ .Release.Namespace }} get secret jupyterhub-admin-credentials -o go-template='{{"{{index .data \"api-token\" | base64decode}}"}}')
 
+{{- end }}
 {{- end }}
 ### Followup links
 
@@ -104,7 +118,7 @@ SOFTWARE.
     The k8s Service {{ $proxy_service }} is exposed via NodePorts. That means
     that all the k8s cluster's nodes are exposing the k8s Service via those
     ports.
-    {{- if and .Values.custom .Values.custom.authMode (eq .Values.custom.authMode "auto-login") }}
+    {{- if and .Values.custom .Values.custom.authMode (or (eq .Values.custom.authMode "auto-login") (eq .Values.custom.authMode "local")) }}
 
     Single-node mode detected. To get your node's IP address, run:
 

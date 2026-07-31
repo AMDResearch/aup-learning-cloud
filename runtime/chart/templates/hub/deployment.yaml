@@ -219,10 +219,7 @@ spec:
                    key: hub.config.ConfigurableHTTPProxy.auth_token
             {{- if and .Values.custom .Values.custom.adminUser .Values.custom.adminUser.enabled }}
             - name: JUPYTERHUB_ADMIN_USERNAME
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.custom.adminUser.existingSecret | default "jupyterhub-admin-credentials" }}
-                  key: admin-username
+              value: {{ .Values.custom.adminUser.username | quote }}
             - name: JUPYTERHUB_ADMIN_PASSWORD
               valueFrom:
                 secretKeyRef:
@@ -233,6 +230,9 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.custom.adminUser.existingSecret | default "jupyterhub-admin-credentials" }}
                   key: api-token
+                  {{- if .Values.custom.adminUser.existingSecret }}
+                  optional: true
+                  {{- end }}
             {{- end }}
             {{- with .Values.hub.extraEnv }}
             {{- include "jupyterhub.extraEnv" . | nindent 12 }}

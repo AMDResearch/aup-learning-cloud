@@ -3798,14 +3798,26 @@ properties:
           required: [adminUser]
           properties:
             adminUser:
-              required: [enabled, username, existingSecret]
+              required: [enabled, username]
               properties:
                 enabled:
                   const: true
                 username:
                   minLength: 1
+
+      - if:
+          required: [adminUser]
+          properties:
+            adminUser:
+              required: [existingSecret]
+              properties:
                 existingSecret:
                   minLength: 1
+        then:
+          required: [authMode]
+          properties:
+            authMode:
+              const: local
 
   cull:
     type: object
