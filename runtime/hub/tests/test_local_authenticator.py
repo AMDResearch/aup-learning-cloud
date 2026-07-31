@@ -29,11 +29,16 @@ def test_local_authenticator_rejects_first_use_and_accepts_existing_password() -
     authenticators = types.ModuleType("core.authenticators")
     firstuse = types.ModuleType("core.authenticators.firstuse")
     firstuse.CustomFirstUseAuthenticator = FakeFirstUseAuthenticator
+    jupyterhub = types.ModuleType("jupyterhub")
+    orm = types.ModuleType("jupyterhub.orm")
+    orm.User = type("User", (), {})
     sys.modules.update(
         {
             "core": core,
             "core.authenticators": authenticators,
             "core.authenticators.firstuse": firstuse,
+            "jupyterhub": jupyterhub,
+            "jupyterhub.orm": orm,
         }
     )
     spec = importlib.util.spec_from_file_location("core.authenticators.local", LOCAL_AUTHENTICATOR)
@@ -42,6 +47,19 @@ def test_local_authenticator_rejects_first_use_and_accepts_existing_password() -
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     authenticator = module.CustomLocalAuthenticator()
+
+    class ExistingUserQuery:
+        def filter_by(self, **_kwargs):
+            return self
+
+        def first(self):
+            return object()
+
+    class ExistingUserDb:
+        def query(self, _model):
+            return ExistingUserQuery()
+
+    authenticator.db = ExistingUserDb()
 
     assert (
         asyncio.run(authenticator.authenticate(None, {"username": "existing", "password": "correct-password"}))
@@ -101,7 +119,54 @@ def test_local_authenticator_validate_username_matches_login_policy() -> None:
         assert not authenticator.validate_username(username)
 
 
-def test_bootstrap_admin_password_preserves_a_password_changed_after_first_start(monkeypatch) -> None:
+def test_local_authenticator_fails_closed_without_a_working_hub_database() -> None:
+    class DatabaseAgnosticFirstUseAuthenticator:
+        def _user_exists(self, _username):
+            return True
+
+        def check_password(self, _username, _password):
+            return True
+
+    core = types.ModuleType("core")
+    authenticators = types.ModuleType("core.authenticators")
+    firstuse = types.ModuleType("core.authenticators.firstuse")
+    firstuse.CustomFirstUseAuthenticator = DatabaseAgnosticFirstUseAuthenticator
+    jupyterhub = types.ModuleType("jupyterhub")
+    orm = types.ModuleType("jupyterhub.orm")
+    orm.User = type("User", (), {})
+    sys.modules.update(
+        {
+            "core": core,
+            "core.authenticators": authenticators,
+            "core.authenticators.firstuse": firstuse,
+            "jupyterhub": jupyterhub,
+            "jupyterhub.orm": orm,
+        }
+    )
+    spec = importlib.util.spec_from_file_location("core.authenticators.local", LOCAL_AUTHENTICATOR)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    unavailable_db = module.CustomLocalAuthenticator()
+    unavailable_db.db = None
+    unavailable_db.parent = types.SimpleNamespace(db=None)
+
+    class FailingDb:
+        def query(self, _model):
+            raise RuntimeError("database unavailable")
+
+    failing_db = module.CustomLocalAuthenticator()
+    failing_db.db = FailingDb()
+
+    assert (
+        asyncio.run(unavailable_db.authenticate(None, {"username": "existing", "password": "correct-password"})) is None
+    )
+    assert asyncio.run(failing_db.authenticate(None, {"username": "existing", "password": "correct-password"})) is None
+
+
+def test_bootstrap_admin_password_rejects_secret_mismatch_for_existing_hash(monkeypatch) -> None:
     bcrypt = types.ModuleType("bcrypt")
     bcrypt.gensalt = lambda: b"salt"
     bcrypt.hashpw = lambda password, _salt: b"hash:" + password
@@ -154,10 +219,11 @@ def test_bootstrap_admin_password_preserves_a_password_changed_after_first_start
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
 
-    module._bootstrap_admin_password("operator", "InitialPassword1!")
+    module._bootstrap_admin_password("operator", "InitialPassword1!", require_match=True)
     session.rows[0].password_hash = bcrypt.hashpw(b"ChangedPassword1!", bcrypt.gensalt())
-    module._bootstrap_admin_password("operator", "InitialPassword1!")
 
+    with pytest.raises(RuntimeError, match="does not match"):
+        module._bootstrap_admin_password("operator", "InitialPassword1!", require_match=True)
     assert bcrypt.checkpw(b"ChangedPassword1!", session.rows[0].password_hash)
     assert not bcrypt.checkpw(b"InitialPassword1!", session.rows[0].password_hash)
 

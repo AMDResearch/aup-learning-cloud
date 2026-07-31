@@ -49,13 +49,17 @@ if TYPE_CHECKING:
     pass
 
 
-def _bootstrap_admin_password(admin_username: str, admin_password: str) -> None:
+def _bootstrap_admin_password(admin_username: str, admin_password: str, *, require_match: bool = False) -> None:
     from core.authenticators.models import UserPassword
     from core.database import session_scope
 
     with session_scope() as session:
         user_pw = session.query(UserPassword).filter_by(username=admin_username).first()
         if user_pw:
+            if require_match and not bcrypt.checkpw(admin_password.encode(), user_pw.password_hash):
+                raise RuntimeError(
+                    "Existing administrator password hash does not match the configured credentials Secret"
+                )
             print(f"[SETUP] Admin '{admin_username}' password already set")
             return
         password_hash = bcrypt.hashpw(admin_password.encode(), bcrypt.gensalt())
@@ -382,7 +386,7 @@ def setup_hub(c: Any) -> None:
 
     if admin_password:
         try:
-            _bootstrap_admin_password(admin_username, admin_password)
+            _bootstrap_admin_password(admin_username, admin_password, require_match=config.auth_mode == "local")
         except Exception as e:
             if config.auth_mode == "local":
                 raise RuntimeError("Failed to bootstrap local administrator credentials") from e

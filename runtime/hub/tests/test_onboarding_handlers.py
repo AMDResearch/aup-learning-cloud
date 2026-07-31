@@ -158,6 +158,8 @@ UserOnboardingState = models.UserOnboardingState
 DismissMyOnboardingHandler = handlers.DismissMyOnboardingHandler
 GetMyOnboardingHandler = handlers.GetMyOnboardingHandler
 AdminResetPasswordHandler = handlers.AdminResetPasswordHandler
+AdminAPISetPasswordHandler = handlers.AdminAPISetPasswordHandler
+ChangePasswordHandler = handlers.ChangePasswordHandler
 AdminAPIProvisionUsersHandler = handlers.AdminAPIProvisionUsersHandler
 
 
@@ -309,6 +311,80 @@ def test_admin_provisioning_rejects_username_that_local_login_would_reject(monke
     assert authenticator.validated_usernames == ["Admin"]
     assert payload["failed"] == 1
     assert payload["results"][0]["error"] == "Invalid username: Admin"
+
+
+def test_password_management_rejects_the_secret_managed_local_administrator(monkeypatch) -> None:
+    class FakeFirstUseAuthenticator:
+        async def authenticate(self, *_args):
+            raise AssertionError("bootstrap administrator password must not be authenticated for a change")
+
+        def set_password(self, *_args, **_kwargs):
+            raise AssertionError("bootstrap administrator password must not be changed")
+
+    monkeypatch.setitem(handlers._handler_config, "auth_mode", "local")
+    monkeypatch.setenv("JUPYTERHUB_ADMIN_USERNAME", "operator")
+    monkeypatch.setattr(handlers, "_find_firstuse_authenticator", lambda _authenticator: FakeFirstUseAuthenticator())
+
+    change = object.__new__(ChangePasswordHandler)
+    change.current_user = DummyUser("operator")
+    change.authenticator = object()
+    change.hub = types.SimpleNamespace(base_url="/hub/")
+    change.get_body_argument = lambda name, default=None: {
+        "current_password": "OldPassword1!",
+        "new_password": "NewPassword1!",
+        "confirm_password": "NewPassword1!",
+    }.get(name, default)
+    change.set_status = lambda status: setattr(change, "status", status)
+    change.finish = lambda payload: setattr(change, "body", payload)
+
+    async def render_template(_name, **kwargs):
+        return kwargs["error_message"]
+
+    change.render_template = render_template
+    asyncio.run(change.post())
+
+    assert change.status == 403
+    assert "managed by the Kubernetes Secret" in change.body
+
+    admin_api = object.__new__(AdminAPISetPasswordHandler)
+    admin_api.current_user = DummyUser("manager", admin=True)
+    admin_api.authenticator = object()
+    admin_api.request = types.SimpleNamespace(
+        body=json.dumps({"username": "operator", "password": "NewPassword1!"}).encode("utf-8")
+    )
+    admin_api.set_status = lambda status: setattr(admin_api, "status", status)
+    admin_api.set_header = lambda *_args: None
+    admin_api.finish = lambda payload: setattr(admin_api, "body", payload)
+    admin_api.log = types.SimpleNamespace(error=lambda *_args, **_kwargs: None)
+    asyncio.run(admin_api.post())
+
+    assert admin_api.status == 403
+    assert "managed by the Kubernetes Secret" in json.loads(admin_api.body)["error"]
+
+
+def test_admin_password_management_keeps_other_local_users_changeable(monkeypatch) -> None:
+    class FakeFirstUseAuthenticator:
+        def set_password(self, username, password, force_change=True):
+            assert (username, password, force_change) == ("learner", "NewPassword1!", True)
+            return "Password set for learner (force change on next login)"
+
+    monkeypatch.setitem(handlers._handler_config, "auth_mode", "local")
+    monkeypatch.setenv("JUPYTERHUB_ADMIN_USERNAME", "operator")
+    monkeypatch.setattr(handlers, "_find_firstuse_authenticator", lambda _authenticator: FakeFirstUseAuthenticator())
+
+    handler = object.__new__(AdminAPISetPasswordHandler)
+    handler.current_user = DummyUser("manager", admin=True)
+    handler.authenticator = object()
+    handler.request = types.SimpleNamespace(
+        body=json.dumps({"username": "learner", "password": "NewPassword1!"}).encode("utf-8")
+    )
+    handler.set_header = lambda *_args: None
+    handler.finish = lambda payload: setattr(handler, "body", payload)
+    handler.log = types.SimpleNamespace(error=lambda *_args, **_kwargs: None)
+
+    asyncio.run(handler.post())
+
+    assert json.loads(handler.body)["message"].startswith("Password set for learner")
 
 
 def test_get_my_onboarding_returns_visible_when_no_state_exists(monkeypatch):

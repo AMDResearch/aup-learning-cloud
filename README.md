@@ -94,7 +94,7 @@ For scripted installs, `personal` remains the compatibility default. Select loca
 ./auplc-installer install --access-mode=local --admin-username=admin
 ```
 
-The installer generates the administrator password and API token only when it creates `jupyterhub-admin-credentials`. It displays the password once after a successful interactive deployment. Re-running against an existing Secret reuses the credentials without rotating them; recover credentials with `kubectl -n jupyterhub get secret jupyterhub-admin-credentials -o jsonpath='{.data.admin-password}' | base64 -d && echo`. Local users are created and assigned passwords through the Admin UI.
+The installer generates the administrator password and API token only when it creates `jupyterhub-admin-credentials`. It displays the password once after a successful interactive deployment. Re-running against an existing Secret reuses the credentials without rotating them; recover credentials with `kubectl -n jupyterhub get secret jupyterhub-admin-credentials -o jsonpath='{.data.admin-password}' | base64 -d && echo`. The configured bootstrap administrator remains Secret-managed and cannot change or reset its password through the UI. Other local users are created and assigned passwords through the Admin UI.
 
 Local mode is an installer MVP for `http://localhost:30890` on a trusted single-node host. It does not configure TLS or restrict the K3s NodePort from LAN reachability; do not treat local credentials as a network exposure control.
 
