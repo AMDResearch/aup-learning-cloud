@@ -10,10 +10,12 @@ plus the dev-mode helpers (``dev_deploy``, ``dev_upgrade``, ``dev_quick``).
 
 from __future__ import annotations
 
+import json
+import secrets
 from dataclasses import dataclass
 from pathlib import Path
 
-from auplc_installer.util import log, run_streaming
+from auplc_installer.util import InstallerError, log, run, run_streaming
 
 DEV_VALUES_PATH = "runtime/values-dev.yaml"
 
@@ -51,12 +53,51 @@ def _helm_install_args(paths: RuntimePaths, *, dev: bool = False) -> list[str]:
     return args
 
 
-def deploy_runtime(paths: RuntimePaths, *, dev: bool = False) -> None:
+def ensure_local_admin_secret(admin_username: str) -> str | None:
+    """Create the local admin credentials Secret, returning only a new password."""
+    secret_name = "jupyterhub-admin-credentials"
+    existing = run(
+        ["kubectl", "get", "secret", secret_name, "--namespace", "jupyterhub"],
+        check=False,
+    )
+    if existing.returncode == 0:
+        return None
+
+    password = secrets.token_urlsafe(24)
+    payload = json.dumps(
+        {
+            "apiVersion": "v1",
+            "kind": "Secret",
+            "metadata": {"name": secret_name, "namespace": "jupyterhub"},
+            "type": "Opaque",
+            "stringData": {"admin-username": admin_username, "admin-password": password},
+        }
+    )
+    created = run(
+        ["kubectl", "create", "--namespace", "jupyterhub", "--filename=-"],
+        check=False,
+        input_text=payload,
+    )
+    if created.returncode == 0:
+        return password
+    if "AlreadyExists" in (created.stdout or ""):
+        return None
+    raise InstallerError("Failed to create local admin credentials Secret")
+
+
+def deploy_runtime(
+    paths: RuntimePaths,
+    *,
+    dev: bool = False,
+    access_mode: str = "personal",
+    admin_username: str = "admin",
+) -> str | None:
     """Initial Helm install of JupyterHub. Waits for hub/proxy/scheduler ready."""
     msg = "Deploying AUP Learning Cloud Runtime"
     if dev:
         msg += " (dev mode)"
     log(msg + "...")
+    admin_password = ensure_local_admin_secret(admin_username) if access_mode == "local" else None
     cmd = [
         "helm",
         "install",
@@ -86,6 +127,7 @@ def deploy_runtime(paths: RuntimePaths, *, dev: bool = False) -> None:
     if dev:
         log("")
         log("Dev deployment ready.  Admin UI: http://localhost:30890/hub/admin/users")
+    return admin_password
 
 
 def upgrade_runtime(paths: RuntimePaths, *, dev: bool = False) -> None:
