@@ -42,7 +42,7 @@ SOFTWARE.
 {{- if and .Values.custom .Values.custom.adminUser .Values.custom.adminUser.enabled }}
 {{- $admin_secret := .Values.custom.adminUser.existingSecret | default "jupyterhub-admin-credentials" }}
 {{- if .Values.custom.adminUser.existingSecret }}
-### Admin Credentials (external Secret)
+### Admin Credentials (local mode external Secret)
 
   Administrator username: {{ .Values.custom.adminUser.username }}
   Credential Secret: {{ $admin_secret }}
@@ -50,10 +50,11 @@ SOFTWARE.
   Get admin password:
     kubectl -n {{ .Release.Namespace }} get secret {{ $admin_secret }} -o go-template='{{"{{index .data \"admin-password\" | base64decode}}"}}'
 
-  This chart does not create or rotate the external Secret. If it includes an
-  `api-token` key, retrieve it from {{ $admin_secret }} for scripts.
+  Local mode requires `custom.adminUser.existingSecret`; this chart does not
+  create or rotate that Secret. If it includes an `api-token` key, retrieve it
+  from {{ $admin_secret }} for scripts.
 {{- else }}
-### Admin Credentials (chart-created Secret)
+### Admin Credentials (chart-created Secret for non-local auth)
 
   Admin username: {{ .Values.custom.adminUser.username }}
 

@@ -74,15 +74,18 @@ login blip).
    (see manage-users skill). Password policy: ≥8 chars with upper, lower, digit,
    and special; users can be forced to change on first login.
 6. **Admin bootstrap (optional).** Set `custom.adminUser.enabled: true` with a
-   canonical `custom.adminUser.username`. Without `existingSecret`, the chart
-   creates `jupyterhub-admin-credentials`; with `existingSecret`, it uses the
-   named external Secret and never rotates it. The single-node installer creates
-   and validates its lifecycle Secret before Helm runs.
+   canonical `custom.adminUser.username`. Direct Helm local mode requires a
+   nonempty `custom.adminUser.existingSecret`; create that Secret before Helm
+   runs. The single-node installer creates and validates its lifecycle Secret
+   before Helm runs. Chart-managed credentials remain available for non-local
+   authentication modes.
 7. **Pre-flight the render.** `helm template jupyterhub ./runtime/chart -f
    runtime/values.yaml -f <overlay>` must succeed.
-8. **Apply.** Single-node: `./auplc-installer rt upgrade`. Multi/manual:
+8. **Apply.** Single-node: `./auplc-installer rt upgrade`. For a direct Helm
+   local deployment, first create the configured existing Secret, then run
    `helm upgrade --install jupyterhub ./runtime/chart -n jupyterhub -f
-   runtime/values.yaml -f <overlay>`.
+   runtime/values.yaml -f <overlay>`. Multi/manual non-local deployments can
+   use chart-managed credentials when no existing Secret is configured.
 9. **Verify.** Load the Hub: the expected login page appears, a GitHub user
    lands in the right groups, and (if bootstrapped) the admin can log in. Read
    the secret with the commands in [reference.md](reference.md).

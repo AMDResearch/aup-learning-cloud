@@ -63,7 +63,7 @@ def test_local_chart_schema_rejects_uppercase_admin_username() -> None:
     assert "does not match pattern" in result.stderr
 
 
-def test_local_chart_render_allows_chart_managed_credentials() -> None:
+def test_local_chart_schema_requires_a_nonempty_existing_secret() -> None:
     result = subprocess.run(
         [
             "helm",
@@ -78,13 +78,36 @@ def test_local_chart_render_allows_chart_managed_credentials() -> None:
             "custom.adminUser.username=operator",
         ],
         cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "existingSecret" in result.stderr
+
+
+def test_nonlocal_chart_render_retains_chart_managed_credentials() -> None:
+    result = subprocess.run(
+        [
+            "helm",
+            "template",
+            "jupyterhub",
+            "runtime/chart",
+            "--set",
+            "custom.authMode=multi",
+            "--set",
+            "custom.adminUser.enabled=true",
+            "--set",
+            "custom.adminUser.username=operator",
+        ],
+        cwd=ROOT,
         check=True,
         capture_output=True,
         text=True,
     )
 
     assert "kind: Secret\nmetadata:\n  name: jupyterhub-admin-credentials" in result.stdout
-    assert 'name: JUPYTERHUB_ADMIN_USERNAME\n              value: "operator"' in result.stdout
 
 
 def test_chart_schema_rejects_existing_secret_outside_local_mode() -> None:

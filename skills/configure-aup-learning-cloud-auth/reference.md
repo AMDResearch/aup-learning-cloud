@@ -25,10 +25,10 @@ custom:
 - `dummy` — accepts any username/password. Testing only.
 - `github` — GitHub App only. `oauth_callback_url` ends in `/hub/oauth_callback`.
 - `local` — closed, administrator-managed local accounts. It requires
-  `custom.adminUser.enabled: true` and a canonical username. The chart can
-  create credentials or use an external Secret with `admin-password` and an
-  optional `api-token`; the username always comes from
-  `custom.adminUser.username`.
+  `custom.adminUser.enabled: true`, a canonical username, and a nonempty
+  `custom.adminUser.existingSecret` containing `admin-password`. The username
+  always comes from `custom.adminUser.username`; `api-token` remains optional
+  for direct Helm startup.
 - `multi` — GitHub App + native accounts on one page. `oauth_callback_url` ends
   in `/hub/github/oauth_callback`.
 
@@ -40,12 +40,13 @@ custom:
     enabled: true
 ```
 
-Without `existingSecret`, the chart creates `jupyterhub-admin-credentials` and
-bootstraps the configured administrator. The installer creates and validates the
-same Secret for its local lifecycle. With `existingSecret`, the external Secret
-is never created or rotated by the chart and must contain `admin-password`; an
-`api-token` is optional for legacy two-key Secrets. Retrieve chart-created
-credentials:
+Direct Helm local mode requires `existingSecret`; create the external Secret
+before Helm runs. The installer creates and validates
+`jupyterhub-admin-credentials` for its local lifecycle. With `existingSecret`,
+the external Secret is never created or rotated by the chart and must contain
+`admin-password`; an `api-token` is optional for direct Helm startup.
+Chart-managed credentials remain available for non-local authentication modes.
+Retrieve chart-created credentials:
 
 ```bash
 kubectl -n jupyterhub get secret jupyterhub-admin-credentials \

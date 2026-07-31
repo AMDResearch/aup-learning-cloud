@@ -3798,11 +3798,13 @@ properties:
           required: [adminUser]
           properties:
             adminUser:
-              required: [enabled, username]
+              required: [enabled, username, existingSecret]
               properties:
                 enabled:
                   const: true
                 username:
+                  minLength: 1
+                existingSecret:
                   minLength: 1
 
       - if:
