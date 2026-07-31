@@ -148,7 +148,7 @@ This host permission policy is separate from Kubernetes allocation. The AMD
 device plugin remains the visibility boundary: only Pods that request
 `amd.com/gpu` receive allocated GPU devices, and the plugin does not change
 host inode ownership or mode. AUPLC Hub adds no GPU supplemental group. The
-tested ROCm compute path needs none: on both SHC GPU nodes, `rocminfo` succeeded
+tested ROCm compute path needs none: on representative GPU nodes, `rocminfo` succeeded
 as UID `12345` with only supplemental GID `100`, while card nodes remained
 inaccessible at mode `0660`. The reported agents were `gfx1151` and `gfx1200`.
 
@@ -218,6 +218,6 @@ rule. Rebuild or correct a retained rootfs separately if that safety check fails
 ## Deployment branch boundary
 
 This branch and these instructions do not modify or roll out any live
-deployment. SHC, FET, and other deployment branches or environments must
-backport the host permission and immediate artifact publication changes before
-their own reviewed rollout.
+deployment. Environment-specific deployment branches must backport the host
+permission and immediate artifact publication changes before their own reviewed
+rollout.

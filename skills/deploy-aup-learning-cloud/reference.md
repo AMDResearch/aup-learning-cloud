@@ -53,8 +53,8 @@ validation must finish before Ansible or Helm changes are made.
   ownership or mode.
 - `singleuser.fsGid: 100` controls shared storage ownership only.
 
-Operator evidence from SHC showed `rocminfo` reporting `gfx1151` and `gfx1200`
-on the two GPU nodes from UID `12345` Pods with only supplemental GID `100`.
+Operator evidence from representative GPU nodes showed `rocminfo` reporting
+`gfx1151` and `gfx1200` from UID `12345` Pods with only supplemental GID `100`.
 Their `card*` nodes remained inaccessible at mode `0660`.
 
 The infrastructure owner deploys and maintains the AMD device plugin and ROCm
