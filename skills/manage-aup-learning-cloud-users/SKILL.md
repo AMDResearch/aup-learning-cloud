@@ -42,7 +42,8 @@ in **[reference.md](reference.md)**.
   scripts.
 - `manage_users.py` requires `JUPYTERHUB_URL` and `JUPYTERHUB_TOKEN` for every
   subcommand. The bundled `scripts/hub-api-env.sh` derives both from the
-  `jupyterhub-admin-credentials` secret and checks reachability.
+  admin credentials Secret and checks reachability. Set `HUB_ADMIN_SECRET` when
+  `custom.adminUser.existingSecret` uses a non-default name.
 - Quota subcommands use the Hub admin API. `kubectl` is only needed to bootstrap
   an API token from `jupyterhub-admin-credentials` or inspect scheduled quota
   refresh CronJobs.
@@ -80,8 +81,8 @@ current admin are protected from deletion.
    ```
 
    (Or export `JUPYTERHUB_URL`/`JUPYTERHUB_TOKEN` yourself — see reference.)
-   Use `HUB_URL="https://hub.example.com"` and `HUB_NAMESPACE=<namespace>` when
-   the Hub is not the default local NodePort in namespace `jupyterhub`.
+   Use `HUB_URL="https://hub.example.com"`, `HUB_NAMESPACE=<namespace>`, and
+   `HUB_ADMIN_SECRET=<secret-name>` when the deployment uses non-default values.
 3. **Generate a roster template**:
 
    ```bash
