@@ -38,6 +38,9 @@ def test_local_authenticator_rejects_first_use_and_accepts_existing_password() -
     spec.loader.exec_module(module)
     authenticator = module.CustomLocalAuthenticator()
 
-    assert asyncio.run(authenticator.authenticate(None, {"username": "EXISTING", "password": "correct-password"})) == "existing"
+    assert (
+        asyncio.run(authenticator.authenticate(None, {"username": "EXISTING", "password": "correct-password"}))
+        == "existing"
+    )
     assert asyncio.run(authenticator.authenticate(None, {"username": "existing", "password": "wrong-password"})) is None
     assert asyncio.run(authenticator.authenticate(None, {"username": "new", "password": "valid-password"})) is None

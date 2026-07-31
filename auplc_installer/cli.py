@@ -657,7 +657,9 @@ def cmd_dev_deploy(state: InstallerState) -> None:
         offline_mode=state.offline_mode,
         overlay_path=paths.overlay_path,
     )
-    _print_created_admin_password(deploy_runtime(paths, dev=True, access_mode=access_mode, admin_username=admin_username))
+    _print_created_admin_password(
+        deploy_runtime(paths, dev=True, access_mode=access_mode, admin_username=admin_username)
+    )
 
 
 def cmd_dev_upgrade(state: InstallerState) -> None:
