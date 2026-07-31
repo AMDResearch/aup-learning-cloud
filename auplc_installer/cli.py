@@ -15,6 +15,7 @@ import sys
 import time
 from collections.abc import Sequence
 from pathlib import Path
+from typing import NoReturn
 
 from auplc_installer import __version__
 from auplc_installer.catalog import parse_selection_spec
@@ -22,6 +23,8 @@ from auplc_installer.gpu import (
     detect_and_configure_gpu,
     refine_gpu_config_from_node_labels,
 )
+from auplc_installer.gpu_access import provision_gpu_access
+from auplc_installer.gpu_hardware import GpuHardware, classify_gpu_hardware
 from auplc_installer.helm import (
     deploy_runtime,
     dev_quick_rollout,
@@ -319,6 +322,22 @@ def cmd_install(state: InstallerState, *, pull: bool) -> None:
         keepalive.stop()
 
 
+def _raise_unreachable_gpu_hardware(hardware: GpuHardware) -> NoReturn:
+    raise AssertionError(f"Unhandled GPU hardware classification: {hardware!r}")
+
+
+def _provision_gpu_access_for_local_hardware(*, offline_mode: bool, bundle_dir: Path | None) -> None:
+    match classify_gpu_hardware():
+        case GpuHardware.GPU:
+            provision_gpu_access(offline_mode=offline_mode, bundle_dir=bundle_dir)
+        case GpuHardware.CPU:
+            return
+        case GpuHardware.UNKNOWN:
+            raise InstallerError("Could not determine local AMD GPU hardware; refusing to modify installer state")
+        case unreachable:
+            _raise_unreachable_gpu_hardware(unreachable)
+
+
 def _cmd_install_inner(state: InstallerState, *, pull: bool) -> None:
     """Body of ``cmd_install`` after sudo session has been primed."""
     # Pre-compute the image-stage label so the user knows up-front which path
@@ -330,13 +349,16 @@ def _cmd_install_inner(state: InstallerState, *, pull: bool) -> None:
     else:
         image_stage_label = "Pulling external images & building custom images"
 
-    total = 8
+    total = 9
 
     with stage("Detecting GPU", idx=1, total=total):
         detect_and_configure_gpu(state.gpu, gpu_type_override=state.gpu_type)
+
+    with stage("Provisioning GPU device access", idx=2, total=total):
+        _provision_gpu_access_for_local_hardware(offline_mode=state.offline_mode, bundle_dir=state.bundle_dir)
     paths = state.runtime_paths()
 
-    with stage("Generating values overlay (initial)", idx=2, total=total):
+    with stage("Generating values overlay (initial)", idx=3, total=total):
         # First pass: use local detection so image pulls / builds get the
         # right GPU_TARGET. Overlay is regenerated again below from
         # labeller-published labels.
@@ -349,10 +371,10 @@ def _cmd_install_inner(state: InstallerState, *, pull: bool) -> None:
             overlay_path=paths.overlay_path,
         )
 
-    with stage("Installing helm + k9s", idx=3, total=total):
+    with stage("Installing helm + k9s", idx=4, total=total):
         install_tools(offline_mode=state.offline_mode, bundle_dir=state.bundle_dir)
 
-    with stage("Installing K3s (single-node)", idx=4, total=total):
+    with stage("Installing K3s (single-node)", idx=5, total=total):
         install_k3s_single_node(
             offline_mode=state.offline_mode,
             bundle_dir=state.bundle_dir,
@@ -360,7 +382,7 @@ def _cmd_install_inner(state: InstallerState, *, pull: bool) -> None:
             mirror_prefix=state.mirror_prefix,
         )
 
-    with stage(image_stage_label, idx=5, total=total):
+    with stage(image_stage_label, idx=6, total=total):
         if state.offline_mode and state.bundle_dir is not None:
             load_offline_images(state.bundle_dir)
         elif pull:
@@ -397,13 +419,13 @@ def _cmd_install_inner(state: InstallerState, *, pull: bool) -> None:
                 k3s_images_dir=state.k3s_images_dir,
             )
 
-    with stage("Deploying ROCm GPU device plugin + node labeller", idx=6, total=total):
+    with stage("Deploying ROCm GPU device plugin + node labeller", idx=7, total=total):
         deploy_rocm_gpu_device_plugin(
             offline_mode=state.offline_mode,
             bundle_dir=state.bundle_dir,
         )
 
-    with stage("Refreshing values overlay from node labels", idx=7, total=total):
+    with stage("Refreshing values overlay from node labels", idx=8, total=total):
         refine_gpu_config_from_node_labels(state.gpu)
         generate_values_overlay(
             state.gpu,
@@ -414,7 +436,7 @@ def _cmd_install_inner(state: InstallerState, *, pull: bool) -> None:
             overlay_path=paths.overlay_path,
         )
 
-    with stage("Deploying JupyterHub runtime (helm install + wait)", idx=8, total=total):
+    with stage("Deploying JupyterHub runtime (helm install + wait)", idx=9, total=total):
         deploy_runtime(paths)
 
     _print_success_banner()
@@ -582,6 +604,7 @@ def cmd_dev_quick(state: InstallerState) -> None:
 
 
 def cmd_dev_deploy(state: InstallerState) -> None:
+    _provision_gpu_access_for_local_hardware(offline_mode=state.offline_mode, bundle_dir=state.bundle_dir)
     detect_and_configure_gpu(state.gpu, gpu_type_override=state.gpu_type)
     paths = state.runtime_paths()
     refine_gpu_config_from_node_labels(state.gpu)
@@ -597,6 +620,7 @@ def cmd_dev_deploy(state: InstallerState) -> None:
 
 
 def cmd_dev_upgrade(state: InstallerState) -> None:
+    _provision_gpu_access_for_local_hardware(offline_mode=state.offline_mode, bundle_dir=state.bundle_dir)
     detect_and_configure_gpu(state.gpu, gpu_type_override=state.gpu_type)
     paths = state.runtime_paths()
     refine_gpu_config_from_node_labels(state.gpu)
@@ -613,6 +637,7 @@ def cmd_dev_upgrade(state: InstallerState) -> None:
 
 
 def cmd_dev_reinstall(state: InstallerState) -> None:
+    _provision_gpu_access_for_local_hardware(offline_mode=state.offline_mode, bundle_dir=state.bundle_dir)
     with contextlib.suppress(InstallerError):
         remove_runtime()
     time.sleep(0.5)
@@ -623,6 +648,7 @@ def cmd_dev_reinstall(state: InstallerState) -> None:
 
 
 def cmd_rt_install(state: InstallerState) -> None:
+    _provision_gpu_access_for_local_hardware(offline_mode=state.offline_mode, bundle_dir=state.bundle_dir)
     detect_and_configure_gpu(state.gpu, gpu_type_override=state.gpu_type)
     paths = state.runtime_paths()
     refine_gpu_config_from_node_labels(state.gpu)
@@ -638,6 +664,7 @@ def cmd_rt_install(state: InstallerState) -> None:
 
 
 def cmd_rt_upgrade(state: InstallerState) -> None:
+    _provision_gpu_access_for_local_hardware(offline_mode=state.offline_mode, bundle_dir=state.bundle_dir)
     detect_and_configure_gpu(state.gpu, gpu_type_override=state.gpu_type)
     paths = state.runtime_paths()
     refine_gpu_config_from_node_labels(state.gpu)
@@ -678,6 +705,7 @@ def cmd_rt_remove(state: InstallerState) -> None:
 
 
 def cmd_rt_reinstall(state: InstallerState) -> None:
+    _provision_gpu_access_for_local_hardware(offline_mode=state.offline_mode, bundle_dir=state.bundle_dir)
     with contextlib.suppress(InstallerError):
         remove_runtime()
     time.sleep(0.5)

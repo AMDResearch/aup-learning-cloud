@@ -1,0 +1,212 @@
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+
+---
+- name: Validate GPU access configuration before target preflight
+  ansible.builtin.import_tasks: validate.yml
+
+- name: Inspect GPU access rootfs target
+  ansible.builtin.stat:
+    path: "{{ _auplc_target_root }}"
+    follow: false
+  register: _auplc_rootfs
+  when: _auplc_target_root | length > 0
+
+- name: Require regular GPU access rootfs directory
+  ansible.builtin.assert:
+    that:
+      - _auplc_rootfs.stat.isdir
+      - not _auplc_rootfs.stat.islnk
+    fail_msg: GPU access rootfs must be an existing non-symlink directory.
+  when: _auplc_target_root | length > 0
+
+- name: Inspect AMD udev rule destination parents
+  ansible.builtin.stat:
+    path: "{{ _auplc_target_root }}{{ item }}"
+    follow: false
+  loop:
+    - /etc
+    - /etc/udev
+    - /etc/udev/rules.d
+  register: _auplc_destination_parent_stats
+
+- name: Reject unsafe AMD udev rule destination parents
+  ansible.builtin.assert:
+    that:
+      - not item.stat.exists or (item.stat.isdir and not item.stat.islnk)
+    fail_msg: "Unsafe AMD udev rule destination parent: {{ item.item }}"
+  loop: "{{ _auplc_destination_parent_stats.results }}"
+
+- name: Define recognized project-owned legacy GPU rules
+  ansible.builtin.set_fact:
+    _auplc_legacy_gpu_rules:
+      - path: "{{ _auplc_target_root }}/etc/udev/rules.d/70-kfd.rules"
+        sha256:
+          - 79773871430cb63f5a28cf25666e0eccacf2bb27d4d9f48e10d0b05931650cf0
+      - path: "{{ _auplc_target_root }}/etc/udev/rules.d/70-amdgpu.rules"
+        sha256:
+          - 678b6a1084576de785b47fcfa0c0b3048117a3add62c1fb8dcff83947004005b
+          - cc5e78a7861477ac5169a4b84edd4e687c1f14b9a88a9557b0c986479ebbaccd
+      - path: "{{ _auplc_target_root }}/etc/udev/rules.d/70-rocm-devices.rules"
+        sha256:
+          - 951fb3d879d2d45b56cfd4cdb0f7ea061a4a0af77d93b9f2a4da9a8c36d20cad
+
+- name: Inspect AMD udev rule destination
+  ansible.builtin.stat:
+    path: "{{ _auplc_target_root }}{{ auplc_gpu_udev_rule_path }}"
+    follow: false
+  register: _auplc_destination_rule
+
+- name: Reject unsafe AMD udev rule destination
+  ansible.builtin.assert:
+    that:
+      - not _auplc_destination_rule.stat.exists or
+        (_auplc_destination_rule.stat.isreg and not _auplc_destination_rule.stat.islnk)
+    fail_msg: Unsafe AMD udev rule destination.
+
+- name: Query installed AMD udev package on live host
+  ansible.builtin.command:
+    argv:
+      - dpkg-query
+      - --showformat=${Status}\t${Version}
+      - --show
+      - "{{ auplc_gpu_udev_package_name }}"
+  register: _auplc_live_package
+  changed_when: false
+  failed_when: false
+  when: _auplc_target_root | length == 0
+
+- name: Query installed AMD udev package in PXE rootfs
+  ansible.builtin.command:
+    argv:
+      - chroot
+      - "{{ _auplc_target_root }}"
+      - dpkg-query
+      - --showformat=${Status}\t${Version}
+      - --show
+      - "{{ auplc_gpu_udev_package_name }}"
+  register: _auplc_rootfs_package
+  changed_when: false
+  failed_when: false
+  when: _auplc_target_root | length > 0
+
+- name: Record installed AMD udev package state on live host
+  ansible.builtin.set_fact:
+    _auplc_installed_package: "{{ _auplc_live_package }}"
+  when: _auplc_target_root | length == 0
+
+- name: Record installed AMD udev package state in PXE rootfs
+  ansible.builtin.set_fact:
+    _auplc_installed_package: "{{ _auplc_rootfs_package }}"
+  when: _auplc_target_root | length > 0
+
+- name: Record whether AMD udev package installation is needed
+  ansible.builtin.set_fact:
+    _auplc_gpu_udev_install_needed: >-
+      {{ _auplc_installed_package.rc != 0 or
+      _auplc_installed_package.stdout != 'install ok installed' ~ '\t' ~ auplc_gpu_udev_package_version }}
+
+- name: Query AMD udev rule package ownership on live host before admission
+  ansible.builtin.command:
+    argv:
+      - dpkg-query
+      - --search
+      - "{{ auplc_gpu_udev_rule_path }}"
+  register: _auplc_live_rule_owner
+  changed_when: false
+  failed_when: false
+  when: _auplc_target_root | length == 0
+
+- name: Query AMD udev rule package ownership in PXE rootfs before admission
+  ansible.builtin.command:
+    argv:
+      - chroot
+      - "{{ _auplc_target_root }}"
+      - dpkg-query
+      - --search
+      - "{{ auplc_gpu_udev_rule_path }}"
+  register: _auplc_rootfs_rule_owner
+  changed_when: false
+  failed_when: false
+  when: _auplc_target_root | length > 0
+
+- name: Record AMD udev rule owner on live host
+  ansible.builtin.set_fact:
+    _auplc_existing_rule_owner: "{{ _auplc_live_rule_owner }}"
+  when: _auplc_target_root | length == 0
+
+- name: Record AMD udev rule owner in PXE rootfs
+  ansible.builtin.set_fact:
+    _auplc_existing_rule_owner: "{{ _auplc_rootfs_rule_owner }}"
+  when: _auplc_target_root | length > 0
+
+- name: Record whether the AMD udev rule is package-owned
+  ansible.builtin.set_fact:
+    _auplc_rule_owned_by_amd_package: >-
+      {{ _auplc_existing_rule_owner.rc == 0 and
+      _auplc_existing_rule_owner.stdout == auplc_gpu_udev_package_name + ': ' + auplc_gpu_udev_rule_path }}
+
+- name: Read existing AMD udev rule
+  ansible.builtin.slurp:
+    src: "{{ _auplc_target_root }}{{ auplc_gpu_udev_rule_path }}"
+  register: _auplc_existing_rule
+  when: _auplc_destination_rule.stat.exists
+
+- name: Allow package-owned AMD udev rule convergence
+  ansible.builtin.set_fact:
+    _auplc_rule_content_admitted: >-
+      {{ (not _auplc_destination_rule.stat.exists) or
+      ((_auplc_existing_rule.content | b64decode) == auplc_gpu_udev_rule_content) or
+      ((_auplc_gpu_udev_install_needed | bool) and
+      (((_auplc_existing_rule.content | b64decode) | hash('sha256')) in _auplc_legacy_gpu_rules[1].sha256 or
+      (_auplc_rule_owned_by_amd_package | bool)) }}
+
+- name: Reject modified AMD udev rule before package installation
+  ansible.builtin.assert:
+    that: _auplc_rule_content_admitted | bool
+    fail_msg: Existing AMD udev rule is neither the package rule nor a recognized legacy rule.
+
+- name: Inspect recognized project-owned legacy GPU rules
+  ansible.builtin.stat:
+    path: "{{ item.path }}"
+    follow: false
+  loop: "{{ _auplc_legacy_gpu_rules }}"
+  register: _auplc_legacy_gpu_rule_stats
+
+- name: Reject legacy GPU rule symlinks and non-regular files
+  ansible.builtin.assert:
+    that:
+      - not item.stat.exists or (item.stat.isreg and not item.stat.islnk)
+    fail_msg: "Unexpected legacy GPU rule filesystem type: {{ item.item.path }}"
+  loop: "{{ _auplc_legacy_gpu_rule_stats.results }}"
+
+- name: Read recognized project-owned legacy GPU rules
+  ansible.builtin.slurp:
+    src: "{{ item.item.path }}"
+  loop: "{{ _auplc_legacy_gpu_rule_stats.results }}"
+  when: item.stat.exists
+  register: _auplc_legacy_gpu_rule_contents
+
+- name: Reject unexpected legacy GPU rule content
+  ansible.builtin.assert:
+    that:
+      - >-
+        (
+          item.item.item.path != _auplc_target_root + auplc_gpu_udev_rule_path and
+          ((item.content | b64decode) | hash('sha256')) in item.item.item.sha256
+        ) or
+        (
+          item.item.item.path == _auplc_target_root + auplc_gpu_udev_rule_path and
+          (
+            (item.content | b64decode) == auplc_gpu_udev_rule_content or
+            (
+              (_auplc_gpu_udev_install_needed | bool) and
+              (
+                ((item.content | b64decode) | hash('sha256')) in item.item.item.sha256 or
+                (_auplc_rule_owned_by_amd_package | bool)
+              )
+            )
+          )
+        )
+    fail_msg: "Unexpected legacy GPU rule content: {{ item.item.item.path }}"
+  loop: "{{ _auplc_legacy_gpu_rule_contents.results }}"
+  when: not item.skipped | default(false)

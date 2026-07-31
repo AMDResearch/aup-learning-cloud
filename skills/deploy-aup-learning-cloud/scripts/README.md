@@ -1,77 +1,140 @@
 # Helper scripts
 
-Deterministic helpers the deploy skill runs instead of generating commands ad
-hoc. They are dependency-light (`bash` + `python3`, plus the obvious system
-tools) and agent-agnostic, and follow the script conventions in
-[../../../CONTRIBUTING.md](../../../CONTRIBUTING.md). Each emits JSON or a clear
-report and uses exit codes the agent can branch on.
+These dependency-light helpers support the multi-node deployment skill. This
+file is the source of truth for the complete skill command sequences: artifact
+generation and installation, validation, Ansible, device plugin readiness, and
+Helm. For human direct-edit deployment, operational background, and
+troubleshooting, see [deploy/README.md](../../../deploy/README.md).
 
-| Script | Run when | What it does |
-| --- | --- | --- |
-| `detect_hardware.sh` | Phase 2, on the service machine | Detects the default-route NIC, IPv4 + subnet CIDR, gateway, DNS servers, and AMD GPUs (`lspci`, vendor `1002`) with their kernel driver. Emits JSON for filling PXE / network vars. Read-only. |
-| `detect_cluster.sh` | After k3s + the device plugin are up | `kubectl get` of nodes, real `amd.com/gpu.*` labels, storage classes, and whether the ROCm device plugin + labeller DaemonSets are running. Emits JSON. Read-only. |
-| `gen_configs.py` | Phase 3 | From a small cluster-spec (`--print-schema`), writes `inventory.yml`, `pb-pxe-controller.vars.yml` (PXE only), and `values-basic-example.yaml`. Generates the k3s token locally with `secrets` (never printed), `chmod 600` on the inventory, and pins `pxe_k3s_version == k3s_version`. |
-| `validate.py` | Before each `ansible-playbook` / `helm` run | For `pxe-diskless`, checks required PXE vars and `k3s_version == pxe_k3s_version`; for both topologies, checks GPU labels only for active resource `acceleratorKeys` (when given `detect_cluster.sh` output), and optionally runs a `helm template` dry-run. Exit 1 on any failure. |
+| Script | Purpose |
+| --- | --- |
+| `detect_hardware.sh` | Reports controller network details and local AMD PCI devices as JSON. |
+| `detect_cluster.sh` | Reports Kubernetes nodes, AMD GPU labels, storage classes, and GPU DaemonSet state as JSON. |
+| `gen_configs.py` | Prints the current spec schema, discovers live GPU state, and directly publishes canonical topology-specific deployment artifacts. |
+| `validate.py` | Checks the selected topology against canonical inventory, GPU resolution, values overlays, and PXE vars when applicable. |
 
-## Quick reference
+## Generator contract
 
-From any directory in a checkout, resolve helpers with:
+The SSH topology discovers GPU hosts from managed-host evidence. Users don't
+provide a GPU host list. The PXE topology has one GPU policy input:
+`pxe.diskless_agents_have_amd_gpus`.
+
+Generation resolves every host to `true` or `false`; it never writes `auto`.
+Generated inventory and GPU resolution entries are strict booleans so their
+consistency can be checked.
+
+Generate specs from fresh `--print-schema` output. Both topologies write their
+canonical artifacts immediately. For PXE, review and validate those files, then
+run the controller playbook with the generated `inventory.yml` and
+`pb-pxe-controller.vars.yml`. The files express desired inputs; their existence
+does not prove the PXE rootfs was provisioned successfully.
+
+## SSH-preinstalled commands
+
+Run these commands from a clean checkout. Fill the generated `spec.json` with
+the SSH topology, network settings, and every managed host. Don't add a GPU host
+list. The generator discovers GPU policy over passwordless root SSH.
 
 ```bash
-REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd /path/to/aup-learning-cloud
+REPO_ROOT="$(pwd)"
 DEPLOY_SCRIPTS="$REPO_ROOT/skills/deploy-aup-learning-cloud/scripts"
-```
-
-For an installed plugin, set `DEPLOY_SKILL_DIR` to the absolute directory
-containing the loaded `SKILL.md`, then use:
-
-```bash
-DEPLOY_SKILL_DIR="/absolute/path/to/deploy-aup-learning-cloud"
-DEPLOY_SCRIPTS="$DEPLOY_SKILL_DIR/scripts"
-```
-
-```bash
-# Phase 2 — discover the host
-"$DEPLOY_SCRIPTS/detect_hardware.sh"                 # JSON: nic, ip, subnet_cidr, gateway, dns, gpus[]
-
-# Phase 3 — generate config from a spec
-python3 "$DEPLOY_SCRIPTS/gen_configs.py" --print-schema > spec.json   # then edit spec.json
+python3 "$DEPLOY_SCRIPTS/gen_configs.py" --print-schema > spec.json
+# Edit spec.json: choose ssh-preinstalled and fill the node and network fields.
 GENERATED_DIR="$REPO_ROOT/generated"
 python3 "$DEPLOY_SCRIPTS/gen_configs.py" --spec spec.json --out-dir "$GENERATED_DIR"
+
 install -m 0600 "$GENERATED_DIR/inventory.yml" "$REPO_ROOT/deploy/ansible/inventory.yml"
 install -m 0644 "$GENERATED_DIR/values-basic-example.yaml" "$REPO_ROOT/runtime/values-basic-example.yaml"
-# PXE only: keep the generated secret in place and resolve its absolute path.
-PXE_VARS="$(realpath "$GENERATED_DIR/pb-pxe-controller.vars.yml")"
-chmod 0600 "$PXE_VARS"
-cd "$REPO_ROOT/deploy/ansible"
-ansible-playbook -i inventory.yml playbooks/pb-pxe-controller.yml -e @"$PXE_VARS"
 
-# Phase 5 — after k3s + device plugin are up
-"$DEPLOY_SCRIPTS/detect_cluster.sh" > cluster.json   # JSON: nodes[], gpu_product_names[], storage_classes[]
-
-# Before running playbooks / helm (set to the selected topology)
-DEPLOY_TOPOLOGY=pxe-diskless
-python3 "$DEPLOY_SCRIPTS/validate.py" --repo "$REPO_ROOT" --topology "$DEPLOY_TOPOLOGY" \
-  --values runtime/values.yaml --values runtime/values-basic-example.yaml \
-  --pxe-vars "$PXE_VARS" --cluster cluster.json --helm-dry-run
+python3 "$DEPLOY_SCRIPTS/validate.py" --repo "$REPO_ROOT" --topology ssh-preinstalled \
+  --inventory "$REPO_ROOT/deploy/ansible/inventory.yml" \
+  --gpu-resolution "$GENERATED_DIR/gpu-access-resolution.json" \
+  --values "$REPO_ROOT/runtime/values.yaml" \
+  --values "$REPO_ROOT/runtime/values-basic-example.yaml"
 ```
 
-Omit `--pxe-vars "$PXE_VARS"` for `ssh-preinstalled`. For `pxe-diskless`, the
-validator and Ansible must receive the same generated file.
+After validation passes, run Ansible, check the infrastructure-owned GPU
+components, and install the chart with the generated overlay:
 
-Generated `gpu.acceleratorKeys` wires the selected accelerators to the generic
-GPU resource. Use `configure-aup-learning-cloud-courses` to wire course
-resources separately.
+```bash
+cd "$REPO_ROOT/deploy/ansible"
+sudo ansible-playbook -i inventory.yml playbooks/pb-base.yml
+sudo ansible-playbook -i inventory.yml playbooks/pb-k3s-site.yml
+sudo ansible-playbook -i inventory.yml playbooks/pb-rocm.yml
+
+kubectl rollout status -n kube-system daemonset/amdgpu-device-plugin-daemonset --timeout=5m
+kubectl rollout status -n kube-system daemonset/amdgpu-labeller-daemonset --timeout=5m
+kubectl get nodes -o 'custom-columns=NAME:.metadata.name,AMD_GPU:.status.allocatable.amd\.com/gpu'
+
+cd "$REPO_ROOT"
+helm upgrade --install jupyterhub ./runtime/chart \
+  --namespace jupyterhub --create-namespace \
+  -f runtime/values.yaml \
+  -f runtime/values-basic-example.yaml
+```
+
+## PXE-diskless commands
+
+Fill the generated `spec.json` with the PXE topology and all controller,
+network, and rootfs fields. Set `pxe.diskless_agents_have_amd_gpus` explicitly.
+
+```bash
+cd /path/to/aup-learning-cloud
+REPO_ROOT="$(pwd)"
+DEPLOY_SCRIPTS="$REPO_ROOT/skills/deploy-aup-learning-cloud/scripts"
+python3 "$DEPLOY_SCRIPTS/gen_configs.py" --print-schema > spec.json
+# Edit spec.json: choose pxe-diskless and fill the node, network, and PXE fields.
+GENERATED_DIR="$REPO_ROOT/generated"
+python3 "$DEPLOY_SCRIPTS/gen_configs.py" --spec spec.json --out-dir "$GENERATED_DIR"
+
+install -m 0600 "$GENERATED_DIR/inventory.yml" "$REPO_ROOT/deploy/ansible/inventory.yml"
+install -m 0644 "$GENERATED_DIR/values-basic-example.yaml" "$REPO_ROOT/runtime/values-basic-example.yaml"
+
+python3 "$DEPLOY_SCRIPTS/validate.py" --repo "$REPO_ROOT" --topology pxe-diskless \
+  --inventory "$REPO_ROOT/deploy/ansible/inventory.yml" \
+  --gpu-resolution "$GENERATED_DIR/gpu-access-resolution.json" \
+  --values "$REPO_ROOT/runtime/values.yaml" \
+  --values "$REPO_ROOT/runtime/values-basic-example.yaml" \
+  --pxe-vars "$GENERATED_DIR/pb-pxe-controller.vars.yml"
+
+cd "$REPO_ROOT/deploy/ansible"
+sudo ansible-playbook \
+  -i "$GENERATED_DIR/inventory.yml" \
+  playbooks/pb-pxe-controller.yml \
+  -e @"$GENERATED_DIR/pb-pxe-controller.vars.yml"
+
+kubectl rollout status -n kube-system daemonset/amdgpu-device-plugin-daemonset --timeout=5m
+kubectl rollout status -n kube-system daemonset/amdgpu-labeller-daemonset --timeout=5m
+kubectl get nodes -o 'custom-columns=NAME:.metadata.name,AMD_GPU:.status.allocatable.amd\.com/gpu'
+
+cd "$REPO_ROOT"
+helm upgrade --install jupyterhub ./runtime/chart \
+  --namespace jupyterhub --create-namespace \
+  -f runtime/values.yaml \
+  -f runtime/values-basic-example.yaml
+```
+
+The controller playbook must finish successfully before the remaining cluster
+and Helm steps begin. A fresh rootfs receives the pinned GPU access package. A
+retained rootfs must pass the package version, package-owned rule, and legacy
+rule safety checks described in the deployment guide.
+
+## Validator contract
+
+The exact topology commands above pass `--repo`, `--topology`, `--inventory`,
+`--gpu-resolution`, two `--values` arguments, and `--pxe-vars` for PXE only.
+For direct validation, `--inventory` alone accepts exactly one unquoted `auto`,
+`true`, or `false` value for `auplc_gpu_access_enabled` on every managed host.
+`--gpu-resolution` requires `--inventory`; supplying both switches to generated
+consistency validation, where inventory and resolution values must be strict
+booleans. The generator-first skill workflow supplies both and never generates
+`auto`.
 
 ## Conventions
 
-- **JSON to stdout, diagnostics to stderr.** `detect_*.sh` always print a JSON
-  object; partial detection is reported via empty fields + a `warnings` array
-  rather than failing, so the agent can decide what to ask the operator.
-- **Exit codes mean something.** `0` success (warnings allowed), `1` a real
-  validation failure, `2` a usage / missing-tooling error.
-- **Secrets never touch stdout or VCS.** `gen_configs.py` mints the k3s token
-  with a CSPRNG, writes it only into `inventory.yml`, and `chmod 600`s it.
-- **No third-party Python.** `gen_configs.py` / `validate.py` use the stdlib
-  only (no PyYAML), so they run on a bare operator machine. YAML is emitted
-  from templates and parsed with targeted scanning.
+- Detection data goes to stdout as JSON. Diagnostics go to stderr.
+- Exit code `0` means success, `1` means validation failed, and `2` means usage
+  or required tooling is wrong.
+- Generated secrets stay off stdout and out of version control.
+- Python helpers use the standard library only.

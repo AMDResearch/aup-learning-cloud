@@ -12,6 +12,9 @@ failed spawn:
   * nodeSelectors for the accelerators actually referenced by effective
     custom.resources.metadata.*.acceleratorKeys, checked against
     detect_cluster.sh output when supplied;
+  * direct SSH inventory GPU access values are exact unquoted `auto`, `true`,
+    or `false`; generated inventory, GPU-resolution manifest, and PXE rootfs
+    policy agree when both artifacts are supplied;
   * (optional) the chart does not render: a `helm template` dry-run.
 
 This intentionally uses regex/line scanning rather than a YAML parser so it
@@ -20,9 +23,10 @@ validator: it reports what it can prove wrong, and says so when it cannot
 inspect something.
 
 Usage:
-    validate.py --repo ~/aup-learning-cloud --topology pxe-diskless
     validate.py --repo ~/aup-learning-cloud \
         --topology ssh-preinstalled \
+        --inventory generated/inventory.yml \
+        --gpu-resolution generated/gpu-access-resolution.json \
         --values runtime/values.yaml --values runtime/values-basic-example.yaml \
         --cluster cluster.json --helm-dry-run
 
@@ -30,19 +34,24 @@ Exit codes: 0 if every check passed (warnings allowed); 1 if any check failed;
 2 on a usage error.
 """
 
-from __future__ import annotations
-
 import argparse
 import json
 import re
-import shutil
-import subprocess
 import sys
 from pathlib import Path
 
+from config_common import DuplicateJsonKeyError, strict_json_loads
+from gpu_resolution_validation import (
+    GpuArtifactValidationRequest,
+    check_accelerator_labels,
+    check_gpu_artifacts,
+    check_gpu_inventory,
+)
+from helm_validation import HelmValidationReporter, check_helm
+from values_resolution_parsing import collect_effective_values
+
 PXE_PLAYBOOK = "deploy/ansible/playbooks/pb-pxe-controller.yml"
 INVENTORY = "deploy/ansible/inventory.yml"
-CHART = "runtime/chart"
 
 errors: list[str] = []
 warnings: list[str] = []
@@ -163,176 +172,6 @@ def check_version_sync(repo: Path, configured_path: str | None = None) -> None:
         )
 
 
-def yaml_scalar(value: str) -> str:
-    return value.strip().strip('"').strip("'")
-
-
-def yaml_optional_scalar(value: str) -> str:
-    scalar_value = yaml_scalar(value)
-    return "" if scalar_value in {"", "null", "~"} else scalar_value
-
-
-def yaml_indent(line: str) -> int:
-    return len(line) - len(line.lstrip())
-
-
-def parse_inline_list(value: str) -> list[str]:
-    items = value.strip()[1:-1].strip()
-    if not items:
-        return []
-    return [yaml_scalar(item) for item in items.split(",") if yaml_scalar(item)]
-
-
-def is_relevant_flow_path(path: tuple[str, ...]) -> bool:
-    return path == ("custom",) or path[:2] in {("custom", "accelerators"), ("custom", "resources")}
-
-
-def unsupported_yaml_syntax(value: str) -> bool:
-    return value.startswith(("&", "*", "!", "|", ">"))
-
-
-def parse_values_file(text: str) -> tuple[dict[str, str | None], dict[str, list[str]], list[str]]:
-    """Extract the deploy-relevant mappings from a fixed-shape values YAML file.
-
-    The helpers deliberately remain stdlib-only. This scanner handles the
-    mapping/list shapes used by values overlays, rather than pretending to be a
-    general YAML parser.
-    """
-    accelerators: dict[str, str | None] = {}
-    metadata: dict[str, list[str]] = {}
-    parse_errors: list[str] = []
-    stack: list[tuple[int, str]] = []
-
-    for raw_line in text.splitlines():
-        line = raw_line.split("#", 1)[0].rstrip()
-        if not line.strip():
-            continue
-        indent = yaml_indent(line)
-        stripped = line.strip()
-
-        while stack and indent <= stack[-1][0]:
-            stack.pop()
-        path = tuple(key for _, key in stack)
-
-        if stripped.startswith("- "):
-            if len(path) == 5 and path[:3] == ("custom", "resources", "metadata") and path[-1] == "acceleratorKeys":
-                metadata.setdefault(path[3], []).append(yaml_scalar(stripped[2:]))
-            continue
-
-        product_label_match = re.fullmatch(
-            r"(?:[\"']amd\.com/gpu\.product-name[\"']|amd\.com/gpu\.product-name):\s*(.*)", stripped
-        )
-        if product_label_match:
-            if len(path) == 4 and path[:2] == ("custom", "accelerators") and path[-1] == "nodeSelector":
-                value = product_label_match.group(1).strip()
-                if unsupported_yaml_syntax(value):
-                    parse_errors.append(
-                        f"unsupported YAML syntax at custom.accelerators.{path[2]}.nodeSelector.amd.com/gpu.product-name"
-                    )
-                else:
-                    accelerators[path[2]] = yaml_optional_scalar(value)
-            continue
-
-        mapping_match = re.fullmatch(r"(.+?):(?:\s*(.*))?", stripped)
-        if not mapping_match:
-            continue
-        key = mapping_match.group(1).strip("\"'")
-        value = (mapping_match.group(2) or "").strip()
-        candidate_path = path + (key,)
-        if value.startswith("{") and value != "{}" and is_relevant_flow_path(candidate_path):
-            parse_errors.append(f"unsupported non-empty flow-style mapping at {'.'.join(candidate_path)}")
-        if unsupported_yaml_syntax(value) and is_relevant_flow_path(candidate_path):
-            parse_errors.append(f"unsupported YAML syntax at {'.'.join(candidate_path)}")
-        if path == ("custom", "accelerators"):
-            accelerators.setdefault(key, None)
-        if len(path) == 4 and path[:3] == ("custom", "resources", "metadata") and key == "acceleratorKeys":
-            resource_key = path[3]
-            if unsupported_yaml_syntax(value):
-                parse_errors.append(f"unsupported YAML syntax at {'.'.join(candidate_path)}")
-            elif value.startswith("[") and value.endswith("]"):
-                metadata[resource_key] = parse_inline_list(value)
-            elif not value or value in {"null", "~"}:
-                metadata[resource_key] = []
-            else:
-                parse_errors.append(f"acceleratorKeys must be a list at {'.'.join(candidate_path)}")
-        stack.append((indent, key))
-    return accelerators, metadata, parse_errors
-
-
-def collect_effective_values(repo: Path, values: list[str]) -> tuple[dict[str, str], dict[str, list[str]], list[str]]:
-    paths = values or ["runtime/values.yaml"]
-    accelerators: dict[str, str] = {}
-    metadata: dict[str, list[str]] = {}
-    parse_errors: list[str] = []
-    for rel in paths:
-        p = (repo / rel) if not Path(rel).is_absolute() else Path(rel)
-        if p.exists():
-            parsed_accelerators, parsed_metadata, file_errors = parse_values_file(p.read_text(encoding="utf-8"))
-            for key, selector in parsed_accelerators.items():
-                if selector is not None or key not in accelerators:
-                    accelerators[key] = selector
-            metadata.update(parsed_metadata)
-            parse_errors.extend(file_errors)
-        else:
-            fail(f"values file not found: {rel}")
-    return accelerators, metadata, parse_errors
-
-
-def check_accelerator_labels(
-    accelerators: dict[str, str], metadata: dict[str, list[str]], cluster: dict | None
-) -> None:
-    active_keys = sorted({key for keys in metadata.values() for key in keys})
-    if not active_keys:
-        warn("no acceleratorKeys found in effective custom.resources.metadata")
-        return
-    declared: list[str] = []
-    for key in active_keys:
-        if key not in accelerators:
-            fail(f"active accelerator '{key}' is not defined under custom.accelerators")
-        elif not accelerators[key]:
-            fail(f"active accelerator '{key}' has no amd.com/gpu.product-name nodeSelector")
-        else:
-            declared.append(accelerators[key])
-    if not declared:
-        return
-    if cluster is None:
-        warn(
-            "no --cluster snapshot; cannot confirm nodeSelector labels match real "
-            f"nodes. Declared: {', '.join(declared)}"
-        )
-        return
-    real = set(cluster.get("gpu_product_names", []))
-    if not real:
-        fail("cluster snapshot has no GPU product labels for active accelerators")
-        return
-    for d in declared:
-        if d in real:
-            ok(f"nodeSelector '{d}' matches a real node label")
-        else:
-            fail(f"nodeSelector '{d}' matches no node label. Real labels: {', '.join(sorted(real))}")
-
-
-def check_helm(repo: Path, values: list[str]) -> None:
-    if not shutil.which("helm"):
-        warn("helm not on PATH; skipped chart dry-run")
-        return
-    chart = repo / CHART
-    if not chart.exists():
-        warn(f"chart not found at {CHART}; skipped dry-run")
-        return
-    cmd = ["helm", "template", "jupyterhub", str(chart)]
-    for rel in values or ["runtime/values.yaml"]:
-        p = (repo / rel) if not Path(rel).is_absolute() else Path(rel)
-        if p.exists():
-            cmd += ["-f", str(p)]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
-    if proc.returncode == 0:
-        ok("helm template rendered the chart successfully")
-    else:
-        tail = (proc.stderr or proc.stdout).strip().splitlines()[-5:]
-        fail("helm template failed:\n        " + "\n        ".join(tail))
-
-
 def main(argv=None) -> int:
     global errors, passed, warnings
     errors = []
@@ -353,6 +192,13 @@ def main(argv=None) -> int:
         "--pxe-vars",
         help="PXE vars file to validate instead of deploy/ansible/playbooks/pb-pxe-controller.yml",
     )
+    ap.add_argument(
+        "--inventory",
+        help="inventory.yml for direct ssh-preinstalled validation (auto/true/false) or generated checks; pxe requires --gpu-resolution",
+    )
+    ap.add_argument(
+        "--gpu-resolution", help="generated gpu-access-resolution.json; requires --inventory for consistency checks"
+    )
     ap.add_argument("--cluster", help="detect_cluster.sh JSON output to match labels against")
     ap.add_argument("--helm-dry-run", action="store_true", help="also run `helm template`")
     ap.add_argument("--json", action="store_true", help="emit a JSON report instead of text")
@@ -366,8 +212,8 @@ def main(argv=None) -> int:
     cluster = None
     if args.cluster:
         try:
-            cluster = json.loads(Path(args.cluster).read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
+            cluster = strict_json_loads(Path(args.cluster).read_text(encoding="utf-8"))
+        except (DuplicateJsonKeyError, OSError, json.JSONDecodeError) as exc:
             print(f"validate: cannot read --cluster: {exc}", file=sys.stderr)
             return 2
 
@@ -376,12 +222,46 @@ def main(argv=None) -> int:
         check_version_sync(repo, args.pxe_vars)
     else:
         ok("skipped PXE checks for ssh-preinstalled topology")
-    accelerators, metadata, parse_errors = collect_effective_values(repo, args.values)
-    for message in parse_errors:
+    values_result = collect_effective_values(repo, args.values)
+    for message in values_result.missing_files:
         fail(message)
-    check_accelerator_labels(accelerators, metadata, cluster)
+    for message in values_result.parse_errors:
+        fail(message)
+    accelerator_result = check_accelerator_labels(values_result.accelerators, values_result.metadata, cluster)
+    for message in accelerator_result.errors:
+        fail(message)
+    for message in accelerator_result.warnings:
+        warn(message)
+    for message in accelerator_result.passed:
+        ok(message)
+    if args.gpu_resolution and not args.inventory:
+        fail("--gpu-resolution requires --inventory")
+    elif args.inventory and not args.gpu_resolution:
+        if args.topology == "pxe-diskless":
+            fail("pxe-diskless inventory validation requires --gpu-resolution")
+        else:
+            inventory_result = check_gpu_inventory(repo, args.inventory)
+            for message in inventory_result.errors:
+                fail(message)
+            for message in inventory_result.passed:
+                ok(message)
+    elif args.inventory and args.gpu_resolution:
+        artifact_result = check_gpu_artifacts(
+            GpuArtifactValidationRequest(
+                repo=repo,
+                inventory_path=args.inventory,
+                resolution_path=args.gpu_resolution,
+                topology=args.topology,
+                pxe_vars_path=pxe_vars_path(repo, args.pxe_vars),
+                has_prior_errors=bool(errors),
+            )
+        )
+        for message in artifact_result.errors:
+            fail(message)
+        for message in artifact_result.passed:
+            ok(message)
     if args.helm_dry_run:
-        check_helm(repo, args.values)
+        check_helm(repo, args.values, HelmValidationReporter(ok=ok, warn=warn, fail=fail))
 
     if args.json:
         print(

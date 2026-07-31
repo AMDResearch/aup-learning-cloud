@@ -169,8 +169,8 @@ class RemoteLabKubeSpawner(KubeSpawner):
         # Extract code-server link protection settings
         cls.code_server_extra_trusted_domains = list(config.code_server.extraTrustedDomains)
 
-    async def get_user_resources(self) -> list[str]:
-        """Get available resources for the user based on their JupyterHub group memberships.
+    def _resolve_user_resources(self) -> list[str]:
+        """Resolve available resources for the current user from server-side policy.
 
         For auto-login/dummy modes, returns all configured resources.
         For all other users, resolves resources from JupyterHub groups
@@ -194,6 +194,43 @@ class RemoteLabKubeSpawner(KubeSpawner):
         )
         self.log.debug(f"User '{username}' resolved resources: {available_resources}")
         return available_resources
+
+    async def get_user_resources(self) -> list[str]:
+        """Get available resources for the user based on their JupyterHub group memberships."""
+        return self._resolve_user_resources()
+
+    def _resolve_accelerator_selection(self, resource_type: str, gpu_selection: Any) -> str | None:
+        """Validate or default the accelerator selection for a resource."""
+        requirements = self.resource_requirements[resource_type]
+        if gpu_selection is None:
+            selected_accelerator = ""
+        elif isinstance(gpu_selection, str):
+            selected_accelerator = gpu_selection.strip()
+        else:
+            raise RuntimeError("Accelerator selection must be a string")
+
+        if "amd.com/gpu" not in requirements:
+            if selected_accelerator:
+                raise RuntimeError(f"CPU resource '{resource_type}' does not allow GPU selection")
+            return None
+
+        resource_metadata = self._hub_config.get_resource_metadata(resource_type) if self._hub_config else None
+        allowed_accelerators = list(getattr(resource_metadata, "acceleratorKeys", []) or [])
+        if not allowed_accelerators:
+            raise RuntimeError(f"GPU resource '{resource_type}' has no authorized accelerators configured")
+
+        if not selected_accelerator:
+            if len(allowed_accelerators) == 1:
+                selected_accelerator = allowed_accelerators[0]
+            else:
+                raise RuntimeError(f"GPU resource '{resource_type}' requires selecting an accelerator")
+
+        if selected_accelerator not in allowed_accelerators:
+            raise RuntimeError(f"Accelerator '{selected_accelerator}' is not authorized for resource '{resource_type}'")
+        if selected_accelerator not in self.accelerator_options:
+            raise RuntimeError(f"Accelerator '{selected_accelerator}' is not configured")
+
+        return selected_accelerator
 
     async def options_form(self, _) -> str:
         """Generate the HTML form for resource selection.
@@ -291,13 +328,17 @@ class RemoteLabKubeSpawner(KubeSpawner):
         resource_type = resource_type_list[0]
         options["resource_type"] = resource_type
 
-        # Parse GPU selection if available
-        gpu_selection = formdata.get(f"gpu_selection_{resource_type}", [None])[0]
-        options["gpu_selection"] = gpu_selection
-
         # Validate resource type
         if resource_type not in self.resource_images:
             raise RuntimeError(f"Unknown Resource: {resource_type}")
+        if resource_type not in self._resolve_user_resources():
+            raise RuntimeError(f"Resource '{resource_type}' is not authorized for this user")
+
+        gpu_selection = self._resolve_accelerator_selection(
+            resource_type,
+            formdata.get(f"gpu_selection_{resource_type}", [None])[0],
+        )
+        options["gpu_selection"] = gpu_selection
 
         # Configure spawner based on selections
         self._configure_spawner(resource_type, gpu_selection)
@@ -758,6 +799,7 @@ class RemoteLabKubeSpawner(KubeSpawner):
                 "init_containers": copy.deepcopy(self.init_containers),
                 "extra_container_config": copy.deepcopy(self.extra_container_config),
                 "environment": copy.deepcopy(self.environment),
+                "supplemental_gids": copy.deepcopy(self.supplemental_gids),
             }
 
         for key, value in self._resource_baseline_state.items():
@@ -895,13 +937,25 @@ class RemoteLabKubeSpawner(KubeSpawner):
 
     async def start(self):
         """Start the spawner and schedule automatic shutdown."""
-        # Ensure pod fails immediately (not retried) when an init container fails.
-        # JupyterHub manages pod lifecycle; Kubernetes should not silently restart pods.
-        self.extra_pod_config = {"restartPolicy": "Never"}
-
         runtime_minutes = self.user_options.get("runtime_minutes", 20)
         resource_type = self.user_options.get("resource_type", "cpu")
-        gpu_selection = self.user_options.get("gpu_selection", None)
+        if resource_type not in self.resource_images:
+            raise RuntimeError(f"Unknown Resource: {resource_type}")
+        if resource_type not in self._resolve_user_resources():
+            raise RuntimeError(f"Resource '{resource_type}' is not authorized for this user")
+        gpu_selection = self._resolve_accelerator_selection(
+            resource_type,
+            self.user_options.get("gpu_selection"),
+        )
+        self.user_options["gpu_selection"] = gpu_selection
+        self._configure_spawner(resource_type, gpu_selection)
+
+        # Ensure pod fails immediately (not retried) when an init container fails.
+        # JupyterHub manages pod lifecycle; Kubernetes should not silently restart pods.
+        extra_pod_config = copy.deepcopy(self.extra_pod_config or {})
+        extra_pod_config["restartPolicy"] = "Never"
+        self.extra_pod_config = extra_pod_config
+
         username = self.user.name.lower()
 
         # Determine accelerator type for quota calculation
@@ -1099,7 +1153,6 @@ class RemoteLabKubeSpawner(KubeSpawner):
                     if hasattr(self, "_spawn_start_timestamp"):
                         duration = time.time() - self._spawn_start_timestamp
                         spawn_duration_seconds.observe(duration)
-                        accelerator_type = self.user_options.get("gpu_selection") or "cpu"
                         # active session count is derived from quota manager, not inc/dec
                 except Exception:
                     pass

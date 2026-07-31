@@ -22,7 +22,9 @@
 #   cp values-multi-nodes.yaml.example values-multi-nodes.yaml
 #
 # Prerequisites:
-#   - Install the AMD GPU device plugin and ROCm node labeller on GPU nodes.
+#   - The infrastructure owner must deploy and maintain the AMD GPU device plugin
+#     and ROCm node labeller outside AUPLC. Before Helm, run the readiness and
+#     capacity checks in deploy/README.md.
 #   - Install an RWX-capable StorageClass for user homes; this example uses the
 #     NFS provisioner from deploy/k8s/nfs-provisioner with class nfs-client.
 #   - Create registry pull secrets only if you use private images.
@@ -576,11 +578,9 @@ monitoring:
     enabled: false
 
 singleuser:
-  extraPodConfig:
-    securityContext:
-      fsGroup: 100
-      supplementalGroups:
-        - 993
+  # Storage ownership only. AUPLC runtime does not inject GPU groups.
+  # An amd.com/gpu request is the device-visibility boundary; injected nodes are 0666.
+  fsGid: 100
   storage:
     dynamic:
       storageClass: nfs-client

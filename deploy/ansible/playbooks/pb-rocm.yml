@@ -19,6 +19,25 @@
 
 - name: Install AMD GPU driver for ROCm 7.13.0
   hosts: all
+  any_errors_fatal: true
   become: yes
+  pre_tasks:
+    - name: Resolve GPU access enablement before ROCm mutation
+      ansible.builtin.include_role:
+        name: gpu_access
+        tasks_from: resolve
+
+    - name: Preflight enabled GPU access hosts before ROCm mutation
+      ansible.builtin.include_role:
+        name: gpu_access
+        tasks_from: preflight
+      when: _auplc_gpu_access_enabled_resolved
   roles:
-    - rocm
+    - role: rocm
+      when: _auplc_gpu_access_enabled_resolved
+  tasks:
+    - name: Apply GPU access after ROCm installation
+      ansible.builtin.include_role:
+        name: gpu_access
+        tasks_from: apply
+      when: _auplc_gpu_access_enabled_resolved

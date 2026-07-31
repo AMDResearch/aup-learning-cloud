@@ -22,34 +22,39 @@ SOFTWARE.
 
 # Ansible Playbooks
 
-K3s cluster setup playbooks based on [k3s-ansible](https://github.com/k3s-io/k3s-ansible/tree/master).
+K3s cluster setup playbooks based on [k3s-ansible](https://github.com/k3s-io/k3s-ansible).
 
-For full instructions, see [Multi-Node Cluster Deployment](https://amdresearch.github.io/aup-learning-cloud/installation/multi-node.html).
+For the human SSH-preinstalled workflow, edit `inventory.yml` directly and use
+the playbook commands in the [deployment guide](../README.md). Every server and
+agent host entry defaults to unquoted `auplc_gpu_access_enabled: auto`. On each
+host, `auto` uses Python 3 to scan `/sys/bus/pci/devices` for vendor `0x1002`
+and PCI class `0x03*`; it has no `lspci` or `pciutils` dependency. A match
+enables ROCm and the GPU access package, while a successful empty scan skips
+both. A scan failure aborts before mutation, and `any_errors_fatal` stops the
+play. Unquoted `true` and `false` force enablement or disablement and bypass
+detection.
 
-## Quick Reference
+Pass `--inventory` to validate direct values of `auto`, `true`, or `false`. A
+generated `--gpu-resolution` report is not required for the human workflow. If
+supplied, it requires `--inventory`, and both generated artifacts must use
+strict booleans. The deploy skill never generates `auto`.
 
-```bash
-# Configure inventory
-vim inventory.yml
+The deploy skill has a separate generator-first SSH workflow that discovers GPU
+hosts from managed-host evidence. PXE is always generator-based and uses only
+`pxe.diskless_agents_have_amd_gpus` as its GPU policy input. See the
+[skill scripts guide](../../skills/deploy-aup-learning-cloud/scripts/README.md)
+for the complete generator-first skill command sequences.
 
-# Base setup
-sudo ansible-playbook playbooks/pb-base.yml
+The GPU access role installs AMD's `amdgpu-insecure-instinct-udev-rules`
+package, pinned to `30.30.4.0-2341068.24.04`, on GPU hosts and GPU-enabled PXE
+root filesystems. The package sets mode `0666` only on `/dev/kfd` and DRM
+`renderD*` nodes. It does not change `card*` nodes, which retain normal system
+policy, observed as `root:video 0660`.
 
-# Deploy K3s cluster
-sudo ansible-playbook playbooks/pb-k3s-site.yml
-
-# Install ROCm GPU drivers
-sudo ansible-playbook playbooks/pb-rocm.yml
-
-# Add new nodes (update inventory.yml first)
-sudo ansible-playbook playbooks/pb-k3s-site.yml
-
-# Reset cluster
-sudo ansible-playbook playbooks/pb-k3s-reset.yml
-
-# Reset single node
-sudo ansible-playbook playbooks/pb-k3s-reset.yml --limit <node_name>
-```
+Device-plugin allocation is a separate layer and remains the visibility
+boundary for Pods requesting `amd.com/gpu`; it does not change host inode
+permissions. AUPLC Hub adds no GPU supplemental group. No GPU group was needed
+for the tested ROCm compute path.
 
 ## Prerequisites
 
@@ -57,3 +62,8 @@ sudo ansible-playbook playbooks/pb-k3s-reset.yml --limit <node_name>
 - **Python**: 3.12
 - **SSH**: Root login with key-based auth to all nodes
 - **Hosts**: Consistent `/etc/hosts` entries across all nodes
+- **GPU integration**: The infrastructure owner must deploy and maintain the AMD
+  device plugin and ROCm node labeller outside AUPLC. Use the pinned manual
+  installation in the [Kubernetes components guide](../k8s/README.md) when the
+  cluster does not already provide them. Before Helm, run the readiness and
+  capacity checks in the [deployment guide](../README.md).

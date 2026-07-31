@@ -1,0 +1,45 @@
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+
+---
+- name: Record PXE GPU admission disposition
+  ansible.builtin.set_fact:
+    _pxe_rootfs_disposition: "{{ 'fresh' if _pxe_rootfs_rebuilt_this_run | bool else 'retained' }}"
+
+- name: Assert PXE GPU admission phase
+  ansible.builtin.assert:
+    that: pxe_gpu_admission_phase in ['retained-read-only', 'final']
+    fail_msg: PXE GPU admission phase is invalid.
+
+- name: Verify retained PXE AMD udev package before lifecycle changes
+  ansible.builtin.include_role:
+    name: gpu_access
+    tasks_from: verify
+  vars:
+    auplc_rootfs_path: "{{ pxe_nfs_root }}"
+    auplc_rootfs_allowed_root: "{{ pxe_nfs_allowed_root }}"
+    auplc_reject_legacy_gpu_rules: true
+  when:
+    - pxe_gpu_access_enabled | bool
+    - _pxe_rootfs_disposition == 'retained'
+
+- name: Preflight GPU access after final PXE re-preflight
+  ansible.builtin.include_role:
+    name: gpu_access
+    tasks_from: preflight
+  vars:
+    auplc_rootfs_path: "{{ pxe_nfs_root }}"
+    auplc_rootfs_allowed_root: "{{ pxe_nfs_allowed_root }}"
+  when:
+    - pxe_gpu_access_enabled | bool
+    - pxe_gpu_admission_phase == 'final'
+
+- name: Apply GPU access after final PXE re-preflight
+  ansible.builtin.include_role:
+    name: gpu_access
+    tasks_from: apply
+  vars:
+    auplc_rootfs_path: "{{ pxe_nfs_root }}"
+    auplc_rootfs_allowed_root: "{{ pxe_nfs_allowed_root }}"
+  when:
+    - pxe_gpu_access_enabled | bool
+    - pxe_gpu_admission_phase == 'final'

@@ -40,17 +40,34 @@ which `runtime/values.yaml` uses as `nodeSelector`s. The installer pins the
 accelerator `nodeSelector` to the real `amd.com/gpu.product-name` detected on
 the host, so no manual labelling is needed on single-machine deployments.
 
-If you are deploying manually instead:
+For multi-node deployments, the AMD device plugin and ROCm node labeller are
+cluster infrastructure prerequisites owned outside AUPLC. The infrastructure
+owner must select, deploy, and maintain them according to the
+[official AMD Kubernetes device plugin project](https://github.com/ROCm/k8s-device-plugin).
+
+The device plugin allocates devices to Pods; it does not set host device-node
+permissions. Host provisioning separately installs the pinned
+`amdgpu-insecure-instinct-udev-rules` package at version
+`30.30.4.0-2341068.24.04`. That package sets mode `0666` only on `/dev/kfd` and
+DRM `renderD*` nodes and leaves `card*` under normal system policy. AUPLC adds
+no supplemental GPU group; none is required for the tested ROCm compute path.
+
+To install the same pinned manifests used by `auplc-installer`:
 
 ```bash
-# Deploy AMD GPU device plugin
-kubectl create -f https://raw.githubusercontent.com/ROCm/k8s-device-plugin/master/k8s-ds-amdgpu-dp.yaml
+ROCM_DEVICE_PLUGIN_COMMIT="dea1db13f05159e64d8114bca4c31f48c3cfcac6"
+kubectl apply -f \
+  "https://raw.githubusercontent.com/ROCm/k8s-device-plugin/$ROCM_DEVICE_PLUGIN_COMMIT/k8s-ds-amdgpu-dp.yaml"
+kubectl apply -f \
+  "https://raw.githubusercontent.com/ROCm/k8s-device-plugin/$ROCM_DEVICE_PLUGIN_COMMIT/k8s-ds-amdgpu-labeller.yaml"
+```
 
-# Deploy AMD GPU node labeller (publishes amd.com/gpu.* labels)
-kubectl create -f https://raw.githubusercontent.com/ROCm/k8s-device-plugin/master/k8s-ds-amdgpu-labeller.yaml
+Before deploying the AUPLC Helm release, verify the installation:
 
-# Verify GPU detection and labels
-kubectl describe node <node-name> | grep amd.com/gpu
+```bash
+kubectl rollout status -n kube-system daemonset/amdgpu-device-plugin-daemonset --timeout=5m
+kubectl rollout status -n kube-system daemonset/amdgpu-labeller-daemonset --timeout=5m
+kubectl get nodes -o 'custom-columns=NAME:.metadata.name,AMD_GPU:.status.allocatable.amd\.com/gpu'
 ```
 
 `runtime/values-multi-nodes.yaml.example` now follows `runtime/values.yaml` and

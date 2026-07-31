@@ -19,7 +19,22 @@
 
 - name: Configure ROCm udev rules
   hosts: all
+  any_errors_fatal: true
   become: yes
-  roles:
-    - udev-rocm
+  pre_tasks:
+    - name: Resolve GPU access enablement before GPU access mutation
+      ansible.builtin.include_role:
+        name: gpu_access
+        tasks_from: resolve
 
+    - name: Preflight enabled GPU access hosts
+      ansible.builtin.include_role:
+        name: gpu_access
+        tasks_from: preflight
+      when: _auplc_gpu_access_enabled_resolved
+  tasks:
+    - name: Apply GPU access on enabled hosts
+      ansible.builtin.include_role:
+        name: gpu_access
+        tasks_from: apply
+      when: _auplc_gpu_access_enabled_resolved
