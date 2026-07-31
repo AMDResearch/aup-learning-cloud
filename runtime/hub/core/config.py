@@ -330,7 +330,7 @@ class HubConfig:
         if single_node_mode is not None:
             instance.single_node_mode = single_node_mode
         else:
-            instance.single_node_mode = instance.auth_mode == "auto-login"
+            instance.single_node_mode = instance.auth_mode in ("auto-login", "local")
 
         # Parse structured configuration
         instance._config = ParsedConfig.from_dicts(

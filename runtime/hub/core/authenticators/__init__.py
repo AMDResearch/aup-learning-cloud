@@ -55,8 +55,7 @@ def create_authenticator(auth_mode: str, **kwargs):
     elif auth_mode == "multi":
         return CustomMultiAuthenticator
     else:
-        print(f"[WARN] Unknown auth mode: {auth_mode}, falling back to dummy")
-        return "dummy"
+        raise ValueError(f"Unknown authentication mode: {auth_mode}")
 
 
 __all__ = [

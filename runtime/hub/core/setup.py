@@ -357,9 +357,6 @@ def setup_hub(c: Any) -> None:
         raise RuntimeError("Local authentication requires JUPYTERHUB_ADMIN_USERNAME")
 
     if admin_password:
-        c.Authenticator.admin_users = {admin_username}
-        print(f"[SETUP] Admin user configured: {admin_username}")
-
         try:
             from core.authenticators.models import UserPassword
             from core.database import session_scope
@@ -367,6 +364,10 @@ def setup_hub(c: Any) -> None:
             with session_scope() as session:
                 user_pw = session.query(UserPassword).filter_by(username=admin_username).first()
                 if user_pw:
+                    if config.auth_mode == "local" and not bcrypt.checkpw(
+                        admin_password.encode(), user_pw.password_hash
+                    ):
+                        raise RuntimeError("Local administrator password does not match the credentials Secret")
                     print(f"[SETUP] Admin '{admin_username}' password already set")
                 else:
                     password_hash = bcrypt.hashpw(admin_password.encode(), bcrypt.gensalt())
@@ -378,7 +379,11 @@ def setup_hub(c: Any) -> None:
                     session.add(user_pw)
                     print(f"[SETUP] Admin '{admin_username}' password set automatically")
         except Exception as e:
+            if config.auth_mode == "local":
+                raise RuntimeError("Failed to bootstrap local administrator credentials") from e
             print(f"[SETUP] Warning: Failed to set admin password: {e}")
+        c.Authenticator.admin_users = {admin_username}
+        print(f"[SETUP] Admin user configured: {admin_username}")
 
     # =========================================================================
     # Template Vars

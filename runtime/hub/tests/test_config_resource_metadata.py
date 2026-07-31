@@ -96,3 +96,14 @@ def test_code_server_extra_trusted_domains_parse_from_config():
     )
 
     assert parsed_config.codeServer.extraTrustedDomains == ["docs.example.edu", "git.example.edu"]
+
+
+def test_local_auth_mode_defaults_to_single_node_runtime_behavior(tmp_path: Path):
+    config_path = tmp_path / "hub-config.yaml"
+    config_path.write_text("authMode: local\n", encoding="utf-8")
+    config.HubConfig._instance = None
+    config.HubConfig._initialized = False
+
+    hub_config = config.HubConfig.init(config_path)
+
+    assert hub_config.single_node_mode is True
