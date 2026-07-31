@@ -60,9 +60,13 @@ The checked-in default values in this repository currently describe a local depl
 - ingress disabled
 - prePuller disabled
 
-### Multi-Node
+### Existing Kubernetes
 
-Cluster deployments use the Ansible playbooks in `deploy/ansible/` plus Helm deployment with `runtime/values-multi-nodes.yaml.example` as the starting point.
+Deploy AUP Learning Cloud onto an existing Kubernetes cluster when the cluster, nodes, networking, and storage are already managed for you. This path uses Helm and does not provision the cluster or its nodes.
+
+### New Multi-Node K3s
+
+When each machine already has an operating system and SSH access, use the playbooks in `deploy/ansible/` to provision K3s and prepare the hosts. After the cluster is ready, deploy AUP Learning Cloud with Helm, using `runtime/values-multi-nodes.yaml.example` as the starting point.
 
 NFS storage, ingress, TLS, and other production-oriented components are deployment choices, not mandatory defaults.
 
