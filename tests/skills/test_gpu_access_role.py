@@ -1,6 +1,7 @@
 # Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
 """Contract tests for AMD's packaged GPU udev rules in Ansible."""
 
+import hashlib
 from pathlib import Path
 
 import yaml
@@ -18,6 +19,9 @@ SHA256 = "4be865985c7a13114c45925e77bc0b411b9fd47d5040ed35df44b9c411766162"
 RULE_PATH = "/etc/udev/rules.d/70-amdgpu.rules"
 RULE_CONTENT = (
     'KERNEL=="kfd", GROUP="render", MODE="0666"\nSUBSYSTEM=="drm", KERNEL=="renderD*", GROUP="render", MODE="0666"\n'
+)
+SHC_LEGACY_RULE_CONTENT = (
+    'KERNEL=="kfd", GROUP="render", MODE="0660"\nSUBSYSTEM=="drm", KERNEL=="renderD*", GROUP="render", MODE="0660"\n'
 )
 
 
@@ -172,3 +176,21 @@ def test_gpu_access_rejects_unknown_unowned_udev_content_before_deletion() -> No
     )
     assert cleanup.index("item.content | b64decode") < cleanup.index("state: absent")
     assert "in item.item.item.sha256" in cleanup
+
+
+def test_gpu_access_rule_admission_expression_has_balanced_parentheses() -> None:
+    tasks = yaml.safe_load(read(GPU_ACCESS_ROLE / "tasks" / "preflight.yml"))
+    admission_task = next(task for task in tasks if task["name"] == "Allow package-owned AMD udev rule convergence")
+    expression = admission_task["ansible.builtin.set_fact"]["_auplc_rule_content_admitted"]
+
+    assert expression.count("(") == expression.count(")")
+
+
+def test_gpu_access_admits_shc_legacy_render_group_rule() -> None:
+    tasks = yaml.safe_load(read(GPU_ACCESS_ROLE / "tasks" / "preflight.yml"))
+    legacy_task = next(task for task in tasks if task["name"] == "Define recognized project-owned legacy GPU rules")
+    rules = legacy_task["ansible.builtin.set_fact"]["_auplc_legacy_gpu_rules"]
+    amdgpu_rule = next(rule for rule in rules if rule["path"].endswith("/etc/udev/rules.d/70-amdgpu.rules"))
+    shc_rule_sha256 = hashlib.sha256(SHC_LEGACY_RULE_CONTENT.encode()).hexdigest()
+
+    assert shc_rule_sha256 in amdgpu_rule["sha256"]

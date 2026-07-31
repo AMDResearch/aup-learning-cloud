@@ -46,6 +46,7 @@
         sha256:
           - 678b6a1084576de785b47fcfa0c0b3048117a3add62c1fb8dcff83947004005b
           - cc5e78a7861477ac5169a4b84edd4e687c1f14b9a88a9557b0c986479ebbaccd
+          - a9782dc222d43fdeaa4df0dfb0cfa6898ff973309f6affb1327cda4b1e63f347
       - path: "{{ _auplc_target_root }}/etc/udev/rules.d/70-rocm-devices.rules"
         sha256:
           - 951fb3d879d2d45b56cfd4cdb0f7ea061a4a0af77d93b9f2a4da9a8c36d20cad
@@ -158,7 +159,7 @@
       ((_auplc_existing_rule.content | b64decode) == auplc_gpu_udev_rule_content) or
       ((_auplc_gpu_udev_install_needed | bool) and
       (((_auplc_existing_rule.content | b64decode) | hash('sha256')) in _auplc_legacy_gpu_rules[1].sha256 or
-      (_auplc_rule_owned_by_amd_package | bool)) }}
+      (_auplc_rule_owned_by_amd_package | bool))) }}
 
 - name: Reject modified AMD udev rule before package installation
   ansible.builtin.assert:
