@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import re
 import sys
 import time
 from collections.abc import Sequence
@@ -18,6 +19,7 @@ from pathlib import Path
 from typing import NoReturn
 
 from auplc_installer import __version__
+from auplc_installer.auth import validate_local_admin_username
 from auplc_installer.catalog import parse_selection_spec
 from auplc_installer.gpu import (
     detect_and_configure_gpu,
@@ -507,10 +509,14 @@ def _print_success_banner(*, access_mode: str, admin_username: str, admin_passwo
 
 
 def _print_created_admin_password(admin_password: str | None) -> None:
-    if admin_password is not None:
+    if admin_password is not None and sys.stdout.isatty():
         from auplc_installer.colors import bold, bold_green
 
         log("    " + bold("Temporary admin password (shown once): ") + bold_green(admin_password))
+    elif admin_password is not None:
+        log("    Retrieve credentials safely: kubectl -n jupyterhub get secret jupyterhub-admin-credentials -o jsonpath='{.data.admin-password}' | base64 -d && echo")
+    else:
+        log("    Existing credentials were preserved. Retrieve the password: kubectl -n jupyterhub get secret jupyterhub-admin-credentials -o jsonpath='{.data.admin-password}' | base64 -d && echo")
 
 
 def cmd_uninstall(state: InstallerState) -> None:
@@ -680,7 +686,7 @@ def cmd_dev_upgrade(state: InstallerState) -> None:
         offline_mode=state.offline_mode,
         overlay_path=paths.overlay_path,
     )
-    upgrade_runtime(paths, dev=True)
+    upgrade_runtime(paths, dev=True, access_mode=access_mode, admin_username=admin_username)
 
 
 def cmd_dev_reinstall(state: InstallerState) -> None:
@@ -731,7 +737,7 @@ def cmd_rt_upgrade(state: InstallerState) -> None:
         offline_mode=state.offline_mode,
         overlay_path=paths.overlay_path,
     )
-    upgrade_runtime(paths)
+    upgrade_runtime(paths, access_mode=access_mode, admin_username=admin_username)
 
 
 def _preserve_courses_for_upgrade(state: InstallerState, overlay_path: Path) -> None:
@@ -755,9 +761,15 @@ def _preserve_courses_for_upgrade(state: InstallerState, overlay_path: Path) -> 
 
 
 def _preserve_access_settings_for_upgrade(state: InstallerState, overlay_path: Path) -> None:
-    if state.access_mode:
-        return
     previous = try_load_access_settings_from_overlay(overlay_path)
+    if previous is None and overlay_path.is_file():
+        text = overlay_path.read_text(encoding="utf-8")
+        if re.search(r"^\s*authMode:\s*(github|multi|dummy)\s*$", text, re.MULTILINE):
+            raise InstallerError("Existing overlay uses an advanced authMode; use operator-managed Helm values instead of installer upgrade")
+    if state.access_mode:
+        if state.access_mode == "local" and not state.admin_username and previous and previous[0] == "local":
+            state.admin_username = previous[1]
+        return
     if previous is None:
         return
     state.access_mode, state.admin_username = previous
@@ -768,7 +780,10 @@ def _resolve_access_settings(state: InstallerState) -> tuple[str, str]:
     access_mode = state.access_mode or "personal"
     if access_mode not in ("local", "personal"):
         raise InstallerError("--access-mode must be local or personal")
-    return access_mode, state.admin_username or "admin"
+    admin_username = state.admin_username or "admin"
+    if access_mode == "local":
+        admin_username = validate_local_admin_username(admin_username)
+    return access_mode, admin_username
 
 
 def cmd_rt_remove(state: InstallerState) -> None:

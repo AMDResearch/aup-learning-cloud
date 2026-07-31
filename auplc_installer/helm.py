@@ -15,6 +15,7 @@ import secrets
 from dataclasses import dataclass
 from pathlib import Path
 
+from auplc_installer.auth import validate_local_admin_username
 from auplc_installer.util import InstallerError, log, run, run_streaming
 
 DEV_VALUES_PATH = "runtime/values-dev.yaml"
@@ -66,22 +67,50 @@ def _ensure_namespace() -> None:
 def ensure_local_admin_secret(admin_username: str) -> str | None:
     """Create the local admin credentials Secret, returning only a new password."""
     secret_name = "jupyterhub-admin-credentials"
+    admin_username = validate_local_admin_username(admin_username)
     _ensure_namespace()
     existing = run(
-        ["kubectl", "get", "secret", secret_name, "--namespace", "jupyterhub"],
+        ["kubectl", "get", "secret", secret_name, "--namespace", "jupyterhub", "-o", "json"],
         check=False,
     )
     if existing.returncode == 0:
+        try:
+            data = json.loads(existing.stdout).get("data", {})
+        except json.JSONDecodeError as exc:
+            raise InstallerError("Unable to inspect existing local admin credentials Secret") from exc
+        missing = {"admin-password", "api-token"}.difference(data)
+        if missing:
+            raise InstallerError(f"Existing local admin credentials Secret is missing {', '.join(sorted(missing))}")
+        encoded_username = data.get("admin-username")
+        if encoded_username is None:
+            run(
+                [
+                    "kubectl", "patch", "secret", secret_name, "--namespace", "jupyterhub", "--type", "merge", "--patch",
+                    json.dumps({"stringData": {"admin-username": admin_username}}, separators=(",", ":")),
+                ]
+            )
+            return None
+        import base64
+
+        try:
+            stored_username = base64.b64decode(encoded_username).decode("utf-8")
+        except (ValueError, UnicodeDecodeError) as exc:
+            raise InstallerError("Existing local admin credentials Secret has an invalid admin-username") from exc
+        if stored_username != admin_username:
+            raise InstallerError("Existing local admin credentials Secret belongs to a different administrator username")
         return None
+    if "NotFound" not in (existing.stdout or ""):
+        raise InstallerError("Unable to inspect local admin credentials Secret; verify Kubernetes access and RBAC")
 
     password = secrets.token_urlsafe(24)
+    api_token = secrets.token_urlsafe(32)
     payload = json.dumps(
         {
             "apiVersion": "v1",
             "kind": "Secret",
             "metadata": {"name": secret_name, "namespace": "jupyterhub"},
             "type": "Opaque",
-            "stringData": {"admin-username": admin_username, "admin-password": password},
+            "stringData": {"admin-username": admin_username, "admin-password": password, "api-token": api_token},
         }
     )
     created = run(
@@ -92,7 +121,7 @@ def ensure_local_admin_secret(admin_username: str) -> str | None:
     if created.returncode == 0:
         return password
     if "AlreadyExists" in (created.stdout or ""):
-        return None
+        return ensure_local_admin_secret(admin_username)
     raise InstallerError("Failed to create local admin credentials Secret")
 
 
@@ -141,8 +170,16 @@ def deploy_runtime(
     return admin_password
 
 
-def upgrade_runtime(paths: RuntimePaths, *, dev: bool = False) -> None:
+def upgrade_runtime(
+    paths: RuntimePaths,
+    *,
+    dev: bool = False,
+    access_mode: str = "personal",
+    admin_username: str = "admin",
+) -> None:
     """Helm upgrade. Used after values changes."""
+    if access_mode == "local":
+        ensure_local_admin_secret(admin_username)
     cmd = [
         "helm",
         "upgrade",
@@ -154,6 +191,7 @@ def upgrade_runtime(paths: RuntimePaths, *, dev: bool = False) -> None:
         *_helm_install_args(paths, dev=dev),
     ]
     run_streaming(cmd)
+    run_streaming(["kubectl", "rollout", "status", "deployment/hub", "--namespace", "jupyterhub", "--timeout=600s"])
 
 
 def remove_runtime() -> None:

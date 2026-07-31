@@ -15,6 +15,7 @@ import re
 from io import StringIO
 from pathlib import Path
 
+from auplc_installer.auth import validate_local_admin_username
 from auplc_installer.catalog import (
     BASE_TEAM_MAPPING,
     NONE_SENTINEL,
@@ -71,7 +72,10 @@ def emit_overlay(
     buf.write("# Regenerated on install/upgrade.\n")
     buf.write("custom:\n")
     auth_mode = "local" if access_mode == "local" else "auto-login"
+    if access_mode == "local":
+        admin_username = validate_local_admin_username(admin_username)
     buf.write(f"  authMode: {auth_mode}\n")
+    buf.write("  singleNodeMode: true\n")
     buf.write("  adminUser:\n")
     buf.write(f"    enabled: {'true' if access_mode == 'local' else 'false'}\n")
     buf.write(f'    username: "{admin_username}"\n')

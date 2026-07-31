@@ -1,7 +1,9 @@
 import json
 from pathlib import Path
 
-from auplc_installer.cli import _preserve_access_settings_for_upgrade
+import pytest
+
+from auplc_installer.cli import _preserve_access_settings_for_upgrade, _resolve_access_settings
 from auplc_installer.gpu import GpuConfig, append_product
 from auplc_installer.overlay import generate_values_overlay, try_load_access_settings_from_overlay
 from auplc_installer.state import InstallerState
@@ -69,3 +71,48 @@ def test_cli_defaults_to_personal_but_tui_defaults_to_local(monkeypatch) -> None
     assert InstallerState().access_mode == ""
     assert state.access_mode == "local"
     assert state.admin_username == "admin"
+
+
+@pytest.mark.parametrize("username", ["Admin", "admin:name", 'admin"name', "admin\nname", "-admin"])
+def test_local_admin_username_rejects_unsafe_values(username: str) -> None:
+    state = InstallerState(access_mode="local", admin_username=username)
+
+    with pytest.raises(Exception, match="lowercase ASCII"):
+        _resolve_access_settings(state)
+
+
+def test_explicit_local_upgrade_without_username_preserves_previous_username(tmp_path: Path) -> None:
+    overlay = tmp_path / "values.local.yaml"
+    overlay.write_text("# Access mode   : local\n# Admin username: operator\n", encoding="utf-8")
+    state = InstallerState(access_mode="local")
+
+    _preserve_access_settings_for_upgrade(state, overlay)
+
+    assert _resolve_access_settings(state) == ("local", "operator")
+
+
+def test_upgrade_rejects_unmanaged_advanced_auth_overlay(tmp_path: Path) -> None:
+    overlay = tmp_path / "values.local.yaml"
+    overlay.write_text("custom:\n  authMode: github\n", encoding="utf-8")
+
+    with pytest.raises(Exception, match="operator-managed Helm values"):
+        _preserve_access_settings_for_upgrade(InstallerState(), overlay)
+
+
+def test_local_overlay_retains_single_node_runtime_behavior(tmp_path: Path) -> None:
+    cfg = GpuConfig()
+    append_product(cfg, "AMD_Radeon_8060S_Graphics")
+    overlay = tmp_path / "values.local.yaml"
+
+    generate_values_overlay(
+        cfg,
+        image_registry="ghcr.io/amdresearch",
+        image_tag="latest",
+        courses=InstallerState().courses,
+        access_mode="local",
+        admin_username="operator",
+        overlay_path=overlay,
+    )
+
+    rendered = __import__("yaml").safe_load(overlay.read_text())
+    assert rendered["custom"]["singleNodeMode"] is True
