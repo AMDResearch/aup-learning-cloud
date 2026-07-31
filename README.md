@@ -84,6 +84,18 @@ cd aup-learning-cloud
 ./auplc-installer install
 ```
 
+### Single-Node Access
+
+The interactive installer defaults to `local` access, which creates a closed local administrator account. Choose `personal` for the shared student session used by earlier single-node installs.
+
+For scripted installs, `personal` remains the compatibility default. Select local access explicitly when credentials are required:
+
+```bash
+./auplc-installer install --access-mode=local --admin-username=admin
+```
+
+The installer generates the administrator password only when it creates `jupyterhub-admin-credentials` and displays it once after a successful deployment. Re-running against an existing Secret reuses the credentials without rotating or redisplaying them. Local users are created and assigned passwords through the Admin UI.
+
 A successful install looks like this:
 
 ```text
