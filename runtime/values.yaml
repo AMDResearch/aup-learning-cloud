@@ -46,6 +46,7 @@ custom:
   # - auto-login: No credentials required, auto-login as 'student' (for single-node dev)
   # - dummy: Accept any username/password (for testing)
   # - github: GitHub App authentication
+  # - local: Closed local accounts managed by an administrator
   # - multi: GitHub App + Local accounts
   authMode: "auto-login"
 
@@ -60,6 +61,8 @@ custom:
   # Auto-create admin user on first install
   adminUser:
     enabled: false
+    username: "admin"
+    existingSecret: ""
 
   # ============================================================================
   # Notifications

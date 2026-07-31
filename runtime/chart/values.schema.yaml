@@ -3173,13 +3173,14 @@ properties:
     properties:
       authMode:
         type: string
-        enum: [auto-login, dummy, github, multi]
+        enum: [auto-login, dummy, github, local, multi]
         description: |
           Authentication mode for the JupyterHub instance.
 
           - `auto-login`: No credentials required, auto-login as 'student' (for demos/single-node)
           - `dummy`: Accept any username/password (for testing)
           - `github`: GitHub App authentication only
+          - `local`: Closed local accounts managed by an administrator
           - `multi`: GitHub App + Local native accounts (recommended for production)
 
       adminUser:
@@ -3187,14 +3188,17 @@ properties:
         additionalProperties: false
         description: |
           Auto-create admin user configuration.
-          When enabled, Helm will generate random credentials and store them in a Secret.
+          Bootstrap configuration for an administrator account.
         properties:
           enabled:
             type: boolean
             description: |
               Enable auto-admin creation on first install.
               Credentials will be stored in `jupyterhub-admin-credentials` secret.
-
+          username:
+            type: string
+          existingSecret:
+            type: string
       notifications:
         type: object
         additionalProperties: false
@@ -3782,6 +3786,25 @@ properties:
               pullPolicy:
                 enum: ["", IfNotPresent, Always, Never, "null"]
                 description: Image pull policy.
+
+    allOf:
+      - if:
+          required: [authMode]
+          properties:
+            authMode:
+              const: local
+        then:
+          required: [adminUser]
+          properties:
+            adminUser:
+              required: [enabled, username, existingSecret]
+              properties:
+                enabled:
+                  const: true
+                username:
+                  minLength: 1
+                existingSecret:
+                  minLength: 1
 
   cull:
     type: object
