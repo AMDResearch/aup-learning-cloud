@@ -66,18 +66,37 @@ def test_bare_upgrade_restores_local_access_settings(tmp_path: Path) -> None:
     assert state.admin_username == "operator"
 
 
-def test_cli_defaults_to_personal_but_tui_defaults_to_local(monkeypatch) -> None:
+def test_cli_and_tui_default_to_personal(monkeypatch) -> None:
     state = InstallerState()
-    selections = iter(["local"])
-    names = iter(["admin"])
-    monkeypatch.setattr("auplc_installer.tui._ask_select", lambda *_args, **_kwargs: next(selections))
-    monkeypatch.setattr("auplc_installer.tui._ask_text", lambda *_args, **_kwargs: next(names))
+    selected_defaults = []
+
+    def select_default(*_args, **kwargs):
+        selected_defaults.append(kwargs["default_value"])
+        return kwargs["default_value"]
+
+    monkeypatch.setattr("auplc_installer.tui._ask_select", select_default)
+    monkeypatch.setattr(
+        "auplc_installer.tui._ask_text",
+        lambda *_args, **_kwargs: pytest.fail("personal mode must not prompt for an administrator"),
+    )
 
     _flow_select_access(state)
 
     assert InstallerState().access_mode == ""
+    assert selected_defaults == ["personal"]
+    assert state.access_mode == "personal"
+    assert state.admin_username == ""
+
+
+def test_tui_local_mode_remains_selectable(monkeypatch) -> None:
+    state = InstallerState()
+    monkeypatch.setattr("auplc_installer.tui._ask_select", lambda *_args, **_kwargs: "local")
+    monkeypatch.setattr("auplc_installer.tui._ask_text", lambda *_args, **_kwargs: "operator")
+
+    _flow_select_access(state)
+
     assert state.access_mode == "local"
-    assert state.admin_username == "admin"
+    assert state.admin_username == "operator"
 
 
 @pytest.mark.parametrize("username", ["Admin", "admin:name", 'admin"name', "admin\nname", "-admin"])

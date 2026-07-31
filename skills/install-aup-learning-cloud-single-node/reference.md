@@ -86,10 +86,10 @@ sudo apt install python3-questionary python3-prompt-toolkit
 
 ## Default deployment facts
 
-The checked-in chart defaults use `custom.authMode: auto-login`, while the
-interactive installer defaults to `local` and creates `jupyterhub-admin-credentials`
-with `admin-username`, `admin-password`, and `api-token`. Scripted installs keep
-the `personal` compatibility default unless `--access-mode=local` is supplied.
+The checked-in chart and interactive installer default to `personal` access via
+`custom.authMode: auto-login`. Selecting `--access-mode=local` creates
+`jupyterhub-admin-credentials` with `admin-username`, `admin-password`, and
+`api-token`.
 The single-node NodePort is not a TLS or LAN exposure boundary; use local mode only
 on a trusted host/network. To change generated installer values, run
 `./auplc-installer rt upgrade`; it preserves and validates an existing local Secret.

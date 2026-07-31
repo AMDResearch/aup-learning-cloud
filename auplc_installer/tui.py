@@ -634,10 +634,10 @@ def _flow_select_access(state: InstallerState) -> None:
     state.access_mode = _ask_select(
         "Access mode",
         (
-            Choice("local", "local    - sign in with managed local credentials (default)"),
-            Choice("personal", "personal - shared student session without a login"),
+            Choice("personal", "personal - shared student session without a login (default)"),
+            Choice("local", "local    - sign in with managed local credentials"),
         ),
-        default_value="local",
+        default_value="personal",
     )
     if state.access_mode == "local":
         state.admin_username = _ask_text("Administrator username", default=state.admin_username or "admin")

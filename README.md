@@ -86,9 +86,9 @@ cd aup-learning-cloud
 
 ### Single-Node Access
 
-The interactive installer defaults to `local` access, which creates a closed local administrator account. Choose `personal` for the shared student session used by earlier single-node installs.
+The interactive installer defaults to `personal` access, preserving the shared student session used by earlier single-node installs. Choose `local` when individual managed accounts are required.
 
-For scripted installs, `personal` remains the compatibility default. Select local access explicitly when credentials are required:
+Both interactive and scripted installs keep `personal` as the compatibility default. Select local access explicitly when credentials are required:
 
 ```bash
 ./auplc-installer install --access-mode=local --admin-username=admin

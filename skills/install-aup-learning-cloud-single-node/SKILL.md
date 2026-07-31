@@ -50,9 +50,8 @@ table, offline flow, and troubleshooting are in **[reference.md](reference.md)**
    (local from `dockerfiles/`). For a quick demo prefer `pull`.
 4. **Online or offline**: a normal machine with internet, or an air-gapped one
    that needs a `pack` bundle (see reference).
-5. **Access mode**: interactive installs default to `local` and prompt for a
-   canonical administrator username. Use `personal` only for the compatibility
-   shared student session; scripted installs remain `personal` unless passed
+5. **Access mode**: interactive and scripted installs default to the `personal`
+   shared student session. Select local managed accounts explicitly with
    `--access-mode=local --admin-username=<name>`.
 
 ## Phase 2 — Verify the environment
