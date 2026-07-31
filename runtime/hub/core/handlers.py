@@ -217,12 +217,8 @@ class CheckForcePasswordChangeHandler(BaseHandler):
         if ":" in username:
             username = username.split(":", 1)[1]
 
-        needs_change = False
-        if isinstance(self.authenticator, MultiAuthenticator):
-            for authenticator in self.authenticator._authenticators:
-                if isinstance(authenticator, CustomFirstUseAuthenticator):
-                    needs_change = authenticator.needs_password_change(username)
-                    break
+        firstuse_auth = _find_firstuse_authenticator(self.authenticator)
+        needs_change = firstuse_auth.needs_password_change(username) if firstuse_auth else False
 
         self.set_header("Content-Type", "application/json")
         self.finish(json.dumps({"needs_password_change": needs_change}))
@@ -243,12 +239,8 @@ class ChangePasswordHandler(BaseHandler):
         if ":" in username:
             username = username.split(":", 1)[1]
 
-        is_forced = False
-        if isinstance(self.authenticator, MultiAuthenticator):
-            for authenticator in self.authenticator._authenticators:
-                if isinstance(authenticator, CustomFirstUseAuthenticator):
-                    is_forced = authenticator.needs_password_change(username)
-                    break
+        firstuse_auth = _find_firstuse_authenticator(self.authenticator)
+        is_forced = firstuse_auth.needs_password_change(username) if firstuse_auth else False
 
         html = await self.render_template(
             "change-password.html", password_changed=password_changed, forced_change=is_forced or forced
@@ -288,12 +280,7 @@ class ChangePasswordHandler(BaseHandler):
             self.set_status(400)
             return self.finish(html)
 
-        firstuse_auth = None
-        if isinstance(self.authenticator, MultiAuthenticator):
-            for authenticator in self.authenticator._authenticators:
-                if isinstance(authenticator, CustomFirstUseAuthenticator):
-                    firstuse_auth = authenticator
-                    break
+        firstuse_auth = _find_firstuse_authenticator(self.authenticator)
 
         if not firstuse_auth:
             html = await _render_error("Password change not available")
@@ -380,12 +367,7 @@ class AdminResetPasswordHandler(BaseHandler):
                 + f"admin/reset-password?user={target_user}&error=Cannot+reset+password+for+GitHub+users"
             )
 
-        firstuse_auth = None
-        if isinstance(self.authenticator, MultiAuthenticator):
-            for authenticator in self.authenticator._authenticators:
-                if isinstance(authenticator, CustomFirstUseAuthenticator):
-                    firstuse_auth = authenticator
-                    break
+        firstuse_auth = _find_firstuse_authenticator(self.authenticator)
 
         if not firstuse_auth:
             return self.redirect(self.hub.base_url + "admin/reset-password?error=Password+reset+not+available")
@@ -461,12 +443,7 @@ class AdminAPISetPasswordHandler(APIHandler):
                 self.set_header("Content-Type", "application/json")
                 return self.finish(json.dumps({"error": "Cannot set password for GitHub users"}))
 
-            firstuse_auth = None
-            if isinstance(self.authenticator, MultiAuthenticator):
-                for authenticator in self.authenticator._authenticators:
-                    if isinstance(authenticator, CustomFirstUseAuthenticator):
-                        firstuse_auth = authenticator
-                        break
+            firstuse_auth = _find_firstuse_authenticator(self.authenticator)
 
             if not firstuse_auth:
                 self.set_status(500)
@@ -552,12 +529,7 @@ class AdminAPIBatchSetPasswordHandler(APIHandler):
                         json.dumps({"error": f"Cannot set password for GitHub user: {entry['username']}"})
                     )
 
-            firstuse_auth = None
-            if isinstance(self.authenticator, MultiAuthenticator):
-                for authenticator in self.authenticator._authenticators:
-                    if isinstance(authenticator, CustomFirstUseAuthenticator):
-                        firstuse_auth = authenticator
-                        break
+            firstuse_auth = _find_firstuse_authenticator(self.authenticator)
 
             if not firstuse_auth:
                 self.set_status(500)

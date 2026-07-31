@@ -175,7 +175,7 @@ def setup_hub(c: Any) -> None:
     # Set authenticator based on mode
     c.JupyterHub.authenticator_class = create_authenticator(config.auth_mode)
 
-    if config.auth_mode == "auto-login":
+    if config.auth_mode in ("auto-login", "local"):
         c.Authenticator.allow_all = True
     elif config.auth_mode == "multi":
         c.MultiAuthenticator.authenticators = [
@@ -349,7 +349,12 @@ def setup_hub(c: Any) -> None:
     # =========================================================================
 
     admin_password = os.environ.get("JUPYTERHUB_ADMIN_PASSWORD", "")
-    admin_username = "admin"
+    admin_username = os.environ.get("JUPYTERHUB_ADMIN_USERNAME", "admin")
+
+    if config.auth_mode == "local" and not admin_password:
+        raise RuntimeError("Local authentication requires JUPYTERHUB_ADMIN_PASSWORD")
+    if config.auth_mode == "local" and not os.environ.get("JUPYTERHUB_ADMIN_USERNAME"):
+        raise RuntimeError("Local authentication requires JUPYTERHUB_ADMIN_USERNAME")
 
     if admin_password:
         c.Authenticator.admin_users = {admin_username}

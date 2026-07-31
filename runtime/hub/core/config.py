@@ -282,6 +282,7 @@ class HubConfig:
         self.single_node_mode: bool = False
         self.github_org_name: str = ""
         self.cluster_name: str = ""
+        self.admin_username: str = "admin"
         self.quota_enabled: bool = False
 
         # Parsed configuration
@@ -320,6 +321,9 @@ class HubConfig:
         instance.auth_mode = raw_config.get("authMode", "auto-login")
         instance.github_org_name = raw_config.get("githubOrgName", "")
         instance.cluster_name = raw_config.get("clusterName", "")
+        admin_user = raw_config.get("adminUser", {})
+        if isinstance(admin_user, dict):
+            instance.admin_username = admin_user.get("username", "admin")
 
         # Single-node mode: from config or auto-enable for auto-login
         single_node_mode = raw_config.get("singleNodeMode")
@@ -345,8 +349,7 @@ class HubConfig:
         if instance._config.quota.enabled is not None:
             instance.quota_enabled = instance._config.quota.enabled
         else:
-            # Disable quota for auto-login and dummy modes by default
-            instance.quota_enabled = instance.auth_mode not in ("auto-login", "dummy")
+            instance.quota_enabled = instance.auth_mode not in ("auto-login", "dummy", "local")
             instance._config.quota.enabled = instance.quota_enabled
 
         cls._initialized = True

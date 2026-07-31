@@ -154,7 +154,7 @@ SOFTWARE.
                 <p class="login-error font-medium mb-4 text-center">{{ login_error }}</p>
                 {% endif %}
 
-                {% if authenticator_mode == 'dummy' %}
+                {% if authenticator_mode in ['dummy', 'local'] %}
                 <!-- Dummy Authenticator: Simple login form -->
                 <form action="{{ base_url }}login?next={{ next | urlencode }}" method="post" role="form" class="space-y-6">
                     <input type="hidden" name="_xsrf" value="{{ xsrf }}" />

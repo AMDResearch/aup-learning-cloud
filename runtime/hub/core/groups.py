@@ -709,7 +709,7 @@ def resolve_resources_for_user(
     """Resolve the resources visible to a user for UI and spawn flows."""
     username = user.name.strip()
 
-    if auth_mode in ["auto-login", "dummy"]:
+    if auth_mode in ["auto-login", "dummy", "local"]:
         return all_resources
 
     available_resources = get_resources_for_user(user, team_resource_mapping)

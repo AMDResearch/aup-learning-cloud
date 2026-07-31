@@ -27,6 +27,7 @@ from core.authenticators.auto_login import AutoLoginAuthenticator
 from core.authenticators.firstuse import CustomFirstUseAuthenticator
 from core.authenticators.github_app import GITHUB_USERNAME_PREFIX, CustomGitHubOAuthenticator
 from core.authenticators.jwt import RemoteLabAuthenticator
+from core.authenticators.local import CustomLocalAuthenticator
 from core.authenticators.multi import CustomMultiAuthenticator
 
 LOCAL_ACCOUNT_PREFIX = "LocalAccount"
@@ -37,7 +38,7 @@ def create_authenticator(auth_mode: str, **kwargs):
     Factory function to create the appropriate authenticator.
 
     Args:
-        auth_mode: Authentication mode ("auto-login", "dummy", "github", "multi")
+        auth_mode: Authentication mode ("auto-login", "dummy", "github", "local", "multi")
         **kwargs: Additional configuration options
 
     Returns:
@@ -49,6 +50,8 @@ def create_authenticator(auth_mode: str, **kwargs):
         return "dummy"
     elif auth_mode == "github":
         return CustomGitHubOAuthenticator
+    elif auth_mode == "local":
+        return CustomLocalAuthenticator
     elif auth_mode == "multi":
         return CustomMultiAuthenticator
     else:
@@ -61,6 +64,7 @@ __all__ = [
     "AutoLoginAuthenticator",
     "CustomGitHubOAuthenticator",
     "CustomFirstUseAuthenticator",
+    "CustomLocalAuthenticator",
     "CustomMultiAuthenticator",
     "create_authenticator",
     "LOCAL_ACCOUNT_PREFIX",
