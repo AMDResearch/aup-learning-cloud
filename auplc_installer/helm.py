@@ -58,13 +58,17 @@ def _helm_install_args(paths: RuntimePaths, *, dev: bool = False) -> list[str]:
 
 
 def _ensure_namespace() -> None:
-    existing = run(["kubectl", "get", "namespace", "jupyterhub"], check=False)
+    existing = _run_kubectl_inspection(["kubectl", "get", "namespace", "jupyterhub"])
     if existing.returncode == 0:
         return
     created = run(["kubectl", "create", "namespace", "jupyterhub"], check=False)
     if created.returncode == 0 or "AlreadyExists" in (created.stdout or ""):
         return
     raise InstallerError("Failed to create jupyterhub namespace")
+
+
+def _run_kubectl_inspection(command: list[str]):
+    return run(command, check=False, capture_output=True)
 
 
 def _decode_secret_value(data: dict[str, object], key: str) -> str:
@@ -107,9 +111,8 @@ def ensure_local_admin_secret(admin_username: str) -> str | None:
     secret_name = "jupyterhub-admin-credentials"
     admin_username = validate_local_admin_username(admin_username)
     _ensure_namespace()
-    existing = run(
+    existing = _run_kubectl_inspection(
         ["kubectl", "get", "secret", secret_name, "--namespace", "jupyterhub", "-o", "json"],
-        check=False,
     )
     if existing.returncode == 0:
         stored_username, _, _ = _parse_existing_local_admin_secret(existing.stdout)

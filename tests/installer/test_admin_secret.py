@@ -11,7 +11,7 @@ from auplc_installer.util import InstallerError
 def test_creates_local_admin_secret_through_stdin_without_leaking_credentials(monkeypatch, capsys) -> None:
     calls: list[tuple[list[str], str | None]] = []
 
-    def fake_run(command, *, check=True, input_text=None):
+    def fake_run(command, *, check=True, input_text=None, capture_output=False):
         calls.append((command, input_text))
         if len(calls) == 3:
             return subprocess.CompletedProcess(
@@ -45,7 +45,7 @@ def test_creates_local_admin_secret_through_stdin_without_leaking_credentials(mo
 def test_reuses_existing_local_admin_secret(monkeypatch) -> None:
     calls: list[list[str]] = []
 
-    def fake_run(command, *, check=True, input_text=None):
+    def fake_run(command, *, check=True, input_text=None, capture_output=False):
         calls.append(command)
         if command[2] == "secret":
             return subprocess.CompletedProcess(
@@ -75,7 +75,7 @@ def test_reuses_existing_local_admin_secret(monkeypatch) -> None:
 def test_deploy_orders_namespace_secret_and_helm_without_printing_new_password(monkeypatch, capsys) -> None:
     calls: list[tuple[str, list[str], str | None]] = []
 
-    def fake_run(command, *, check=True, input_text=None):
+    def fake_run(command, *, check=True, input_text=None, capture_output=False):
         calls.append(("run", command, input_text))
         if len(calls) == 3:
             return subprocess.CompletedProcess(
@@ -123,7 +123,7 @@ def test_deploy_orders_namespace_secret_and_helm_without_printing_new_password(m
 def test_existing_legacy_secret_is_patched_without_rotating_credentials(monkeypatch) -> None:
     calls: list[tuple[list[str], str | None]] = []
 
-    def fake_run(command, *, check=True, input_text=None):
+    def fake_run(command, *, check=True, input_text=None, capture_output=False):
         calls.append((command, input_text))
         if command[2] == "secret":
             return subprocess.CompletedProcess(
@@ -151,7 +151,7 @@ def test_existing_legacy_secret_is_patched_without_rotating_credentials(monkeypa
 
 
 def test_existing_secret_requires_complete_matching_contract(monkeypatch) -> None:
-    def fake_run(command, *, check=True, input_text=None):
+    def fake_run(command, *, check=True, input_text=None, capture_output=False):
         if command[2] == "secret":
             return subprocess.CompletedProcess(
                 command,
@@ -167,7 +167,7 @@ def test_existing_secret_requires_complete_matching_contract(monkeypatch) -> Non
 
 
 def test_secret_lookup_fails_closed_for_non_not_found_errors(monkeypatch) -> None:
-    def fake_run(command, *, check=True, input_text=None):
+    def fake_run(command, *, check=True, input_text=None, capture_output=False):
         if command[2] == "secret":
             return subprocess.CompletedProcess(command, 1, "Error from server (Forbidden): secrets is forbidden")
         return subprocess.CompletedProcess(command, 0, "")
@@ -189,7 +189,7 @@ def test_secret_lookup_fails_closed_for_non_not_found_errors(monkeypatch) -> Non
     ],
 )
 def test_existing_secret_rejects_invalid_json_data_without_exposing_values(monkeypatch, secret_data) -> None:
-    def fake_run(command, *, check=True, input_text=None):
+    def fake_run(command, *, check=True, input_text=None, capture_output=False):
         if command[2] == "secret":
             return subprocess.CompletedProcess(command, 0, json.dumps(secret_data))
         return subprocess.CompletedProcess(command, 0, "")
@@ -206,7 +206,7 @@ def test_existing_secret_rejects_invalid_json_data_without_exposing_values(monke
 def test_local_upgrade_ensures_secret_and_waits_for_hub(monkeypatch) -> None:
     calls: list[list[str]] = []
 
-    def fake_run(command, *, check=True, input_text=None):
+    def fake_run(command, *, check=True, input_text=None, capture_output=False):
         calls.append(command)
         if command[2] == "secret":
             return subprocess.CompletedProcess(
@@ -236,3 +236,57 @@ def test_local_upgrade_ensures_secret_and_waits_for_hub(monkeypatch) -> None:
     assert calls[1][:3] == ["kubectl", "get", "secret"]
     assert any(command[:2] == ["helm", "upgrade"] for command in calls)
     assert ["kubectl", "rollout", "status", "deployment/hub", "--namespace", "jupyterhub", "--timeout=600s"] in calls
+
+
+def test_verbose_first_install_captures_secret_inspection_without_printing_credentials(monkeypatch, capsys) -> None:
+    calls: list[tuple[list[str], bool]] = []
+
+    def fake_run(command, *, check=True, input_text=None, capture_output=False):
+        calls.append((command, capture_output))
+        if command[1:3] == ["get", "secret"]:
+            assert capture_output
+            return subprocess.CompletedProcess(
+                command, 1, 'Error from server (NotFound): secrets "jupyterhub-admin-credentials" not found'
+            )
+        return subprocess.CompletedProcess(command, 0, "")
+
+    monkeypatch.setattr("auplc_installer.helm.run", fake_run)
+    monkeypatch.setattr("auplc_installer.util._VERBOSE", True)
+    monkeypatch.setattr("auplc_installer.helm.secrets.token_urlsafe", lambda _length: "generated-password")
+
+    assert ensure_local_admin_secret("operator") == "generated-password"
+    assert calls[0][1]
+    assert calls[1][1]
+    assert calls[2][1] is False
+    assert "generated-password" not in capsys.readouterr().out
+
+
+def test_verbose_reuse_captures_secret_inspection_without_printing_credentials(monkeypatch, capsys) -> None:
+    calls: list[tuple[list[str], bool]] = []
+
+    def fake_run(command, *, check=True, input_text=None, capture_output=False):
+        calls.append((command, capture_output))
+        if command[1:3] == ["get", "secret"]:
+            assert capture_output
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                json.dumps(
+                    {
+                        "data": {
+                            "admin-username": "b3BlcmF0b3I=",
+                            "admin-password": "c2VjcmV0LXBhc3N3b3Jk",
+                            "api-token": "dG9rZW4=",
+                        }
+                    }
+                ),
+            )
+        return subprocess.CompletedProcess(command, 0, "")
+
+    monkeypatch.setattr("auplc_installer.helm.run", fake_run)
+    monkeypatch.setattr("auplc_installer.util._VERBOSE", True)
+
+    assert ensure_local_admin_secret("operator") is None
+    assert calls[0][1]
+    assert calls[1][1]
+    assert "secret-password" not in capsys.readouterr().out
