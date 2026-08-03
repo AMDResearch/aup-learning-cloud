@@ -42,10 +42,10 @@ from __future__ import annotations
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Final, Literal, assert_never
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 # =============================================================================
 # YAML Configuration Models
@@ -149,6 +149,10 @@ class ResourceMetadata(BaseModel):
     model_config = {"extra": "allow"}
 
 
+ResourceAccessPolicy = Literal["all", "group-mapped"]
+DEFAULT_RESOURCE_ACCESS_POLICY: Final[ResourceAccessPolicy] = "group-mapped"
+
+
 class ResourcesConfig(BaseModel):
     """Resources configuration (images, requirements, and metadata)."""
 
@@ -156,6 +160,18 @@ class ResourcesConfig(BaseModel):
     requirements: dict[str, ResourceRequirements] = Field(default_factory=dict)
     metadata: dict[str, ResourceMetadata] = Field(default_factory=dict)
     groupOrder: list[str] = Field(default_factory=list)
+    accessPolicy: ResourceAccessPolicy | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_explicit_null_access_policy(cls, value: Any) -> Any:
+        if isinstance(value, dict) and "accessPolicy" in value and value["accessPolicy"] is None:
+            raise ValueError("accessPolicy must be all or group-mapped")
+        return value
+
+    @property
+    def effective_access_policy(self) -> ResourceAccessPolicy:
+        return self.accessPolicy or DEFAULT_RESOURCE_ACCESS_POLICY
 
     model_config = {"extra": "allow"}
 
@@ -361,6 +377,16 @@ def _parse_auth_capabilities(raw_config: dict[str, Any]) -> tuple[AuthCapabiliti
     return AuthCapabilities(True, False, False, False), False
 
 
+def _legacy_resource_access_policy(mode: LegacyAuthMode) -> ResourceAccessPolicy:
+    match mode:
+        case "auto-login" | "dummy" | "local":
+            return "all"
+        case "github" | "multi":
+            return "group-mapped"
+        case unreachable:
+            assert_never(unreachable)
+
+
 # =============================================================================
 # Hub Configuration Singleton
 # =============================================================================
@@ -425,7 +451,8 @@ class HubConfig:
 
         # Extract runtime settings
         instance._auth, legacy_auth = _parse_auth_capabilities(raw_config)
-        instance.auth_mode = instance._auth.effective_mode
+        effective_mode = instance._auth.effective_mode
+        instance.auth_mode = effective_mode
         if legacy_auth:
             warnings.warn(
                 "authMode is deprecated; configure authentication with auth provider flags instead",
@@ -458,6 +485,11 @@ class HubConfig:
             code_server=raw_config.get("codeServer"),
             notifications=raw_config.get("notifications"),
         )
+
+        if instance._config.resources.accessPolicy is None:
+            instance._config.resources.accessPolicy = (
+                _legacy_resource_access_policy(effective_mode) if legacy_auth else DEFAULT_RESOURCE_ACCESS_POLICY
+            )
 
         # Canonical providers use neutral policy defaults; legacy input retains historical defaults.
         if instance._config.quota.enabled is not None:
