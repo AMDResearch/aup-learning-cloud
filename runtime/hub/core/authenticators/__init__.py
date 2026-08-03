@@ -27,35 +27,37 @@ from core.authenticators.auto_login import AutoLoginAuthenticator
 from core.authenticators.firstuse import CustomFirstUseAuthenticator
 from core.authenticators.github_app import GITHUB_USERNAME_PREFIX, CustomGitHubOAuthenticator
 from core.authenticators.jwt import RemoteLabAuthenticator
-from core.authenticators.local import CustomLocalAuthenticator
 from core.authenticators.multi import CustomMultiAuthenticator
+from core.config import AuthCapabilities, AuthConfigurationError, LegacyAuthMode
 
 LOCAL_ACCOUNT_PREFIX = "LocalAccount"
 
 
-def create_authenticator(auth_mode: str, **kwargs):
-    """
-    Factory function to create the appropriate authenticator.
+def create_authenticator(auth: AuthCapabilities | LegacyAuthMode) -> type | str:
+    """Select the JupyterHub authenticator class for validated capabilities."""
 
-    Args:
-        auth_mode: Authentication mode ("auto-login", "dummy", "github", "local", "multi")
-        **kwargs: Additional configuration options
-
-    Returns:
-        Authenticator class (not instance)
-    """
-    if auth_mode == "auto-login":
-        return AutoLoginAuthenticator
-    elif auth_mode == "dummy":
-        return "dummy"
-    elif auth_mode == "github":
-        return CustomGitHubOAuthenticator
-    elif auth_mode == "local":
-        return CustomLocalAuthenticator
-    elif auth_mode == "multi":
-        return CustomMultiAuthenticator
-    else:
-        raise ValueError(f"Unknown authentication mode: {auth_mode}")
+    match auth:
+        case AuthCapabilities(auto_login=True, dummy=False, native=False, github=False) | "auto-login":
+            return AutoLoginAuthenticator
+        case AuthCapabilities(auto_login=False, dummy=True, native=False, github=False) | "dummy":
+            return "dummy"
+        case AuthCapabilities(auto_login=False, dummy=False, native=True, github=False) | "local":
+            return CustomFirstUseAuthenticator
+        case AuthCapabilities(auto_login=False, dummy=False, native=False, github=True) | "github":
+            return CustomGitHubOAuthenticator
+        case AuthCapabilities(auto_login=False, dummy=False, native=True, github=True) | "multi":
+            return CustomMultiAuthenticator
+        case AuthCapabilities():
+            raise AuthConfigurationError("auth must enable one exclusive provider or native + github")
+        # Todo 13: remove the effective-mode compatibility boundary after Todo 6 consumes config.auth.
+        case str():
+            raise ValueError(f"Unknown authentication mode: {auth}")
+        case bool():
+            raise AuthConfigurationError("authentication capabilities cannot be boolean values")
+        case unsupported:
+            raise AuthConfigurationError(
+                f"authentication capabilities must be AuthCapabilities or a supported effective mode, got {type(unsupported).__name__}"
+            )
 
 
 __all__ = [
@@ -63,7 +65,6 @@ __all__ = [
     "AutoLoginAuthenticator",
     "CustomGitHubOAuthenticator",
     "CustomFirstUseAuthenticator",
-    "CustomLocalAuthenticator",
     "CustomMultiAuthenticator",
     "create_authenticator",
     "LOCAL_ACCOUNT_PREFIX",
