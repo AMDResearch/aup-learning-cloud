@@ -145,15 +145,12 @@ def configure_handlers(
     platform_name: str = "AUP Learning Cloud",
 ) -> None:
     """Configure handler module with runtime settings."""
-    if accelerator_options is not None:
-        _handler_config["accelerator_options"] = accelerator_options
-    if quota_rates is not None:
-        _handler_config["quota_rates"] = quota_rates
+    _handler_config["accelerator_options"] = accelerator_options or {}
+    _handler_config["quota_rates"] = quota_rates or {}
     _handler_config["quota_enabled"] = quota_enabled
     _handler_config["minimum_quota_to_start"] = minimum_quota_to_start
     _handler_config["default_quota"] = default_quota
-    if team_resource_mapping is not None:
-        _handler_config["team_resource_mapping"] = team_resource_mapping
+    _handler_config["team_resource_mapping"] = team_resource_mapping or {}
     _handler_config["github_org"] = github_org
     _handler_config["auth_mode"] = auth_mode
     _handler_config["access_policy"] = access_policy

@@ -7,17 +7,11 @@ from pathlib import Path
 
 import anyio
 import pytest
+from provider_setup_support import GITHUB_SETTINGS, make_config
 
 ROOT = Path(__file__).resolve().parents[1]
 SETUP = ROOT / "core" / "setup.py"
 CONFIG = ROOT / "core" / "config.py"
-GITHUB_SETTINGS = {
-    "hub.config.GitHubOAuthenticator.app_id": "app-id",
-    "hub.config.GitHubOAuthenticator.installation_id": "installation-id",
-    "hub.config.GitHubOAuthenticator.private_key": "private-key",
-    "hub.config.GitHubOAuthenticator.private_key_file": "private-key-file",
-    "hub.config.GitHubOAuthenticator.team_sync_ttl_seconds": 123,
-}
 MODULE_NAMES = tuple(
     (
         "bcrypt|core|core.z2jh|core.config|core.authenticators|core.database|core.handlers|core.metrics_updater|"
@@ -30,24 +24,13 @@ MODULE_NAMES = tuple(
 _module = types.ModuleType
 
 
-def _config_for(auth: object) -> types.SimpleNamespace:
-    return types.SimpleNamespace(
-        auth=auth,
-        auth_mode=auth.effective_mode,
-        accelerators={},
-        build_quota_rates=lambda: {},
-        quota_enabled=True,
-        quota=types.SimpleNamespace(minimumToStart=0, defaultQuota=0),
-        teams=types.SimpleNamespace(mapping={"learners": ["cpu"]}),
-        github_org_name="example-org",
-        platform_display_name="AUP Learning Cloud",
-        cluster_name="",
-    )
-
-
 @contextmanager
 def _loaded_setup(
-    monkeypatch: pytest.MonkeyPatch, providers: tuple[bool, bool, bool, bool], *, fail_setup: bool = False
+    monkeypatch: pytest.MonkeyPatch,
+    providers: tuple[bool, bool, bool, bool],
+    *,
+    access_policy: str = "group-mapped",
+    fail_setup: bool = False,
 ) -> Iterator[types.SimpleNamespace]:
     with monkeypatch.context() as module_patch:
         for variable in ("JUPYTERHUB_ADMIN_PASSWORD", "JUPYTERHUB_ADMIN_USERNAME", "JUPYTERHUB_API_TOKEN"):
@@ -70,7 +53,7 @@ def _loaded_setup(
         core.config = config_module
         config_spec.loader.exec_module(config_module)
         auth = config_module.AuthCapabilities(*providers)
-        config = _config_for(auth)
+        config = make_config(auth, access_policy)
         config_module.HubConfig._instance, config_module.HubConfig._initialized = config, True
 
         settings_reads: list[str] = []
@@ -119,14 +102,19 @@ def _loaded_setup(
         database = _module("core.database")
         database.init_database = database.create_all_tables = lambda *_args: None
         module_patch.setitem(sys.modules, "core.database", database)
+        handler_configs: list[dict[str, object]] = []
         handlers = _module("core.handlers")
-        handlers.configure_handlers, handlers.get_handlers = lambda **_kwargs: None, lambda: []
+        handlers.configure_handlers = lambda **kwargs: handler_configs.append(kwargs)
+        handlers.get_handlers = lambda: []
         module_patch.setitem(sys.modules, "core.handlers", handlers)
         metrics = _module("core.metrics_updater")
         metrics.start_metrics_updater = lambda: None
         module_patch.setitem(sys.modules, "core.metrics_updater", metrics)
+        spawner_configs: list[object] = []
         spawner = _module("core.spawner")
-        spawner.RemoteLabKubeSpawner = type("RemoteLabKubeSpawner", (), {"configure_from_config": lambda _config: None})
+        spawner.RemoteLabKubeSpawner = type(
+            "RemoteLabKubeSpawner", (), {"configure_from_config": lambda config: spawner_configs.append(config)}
+        )
         module_patch.setitem(sys.modules, "core.spawner", spawner)
 
         group_assignments: list[tuple[str, str]] = []
@@ -178,12 +166,15 @@ def _loaded_setup(
         )
         yield types.SimpleNamespace(
             auth=auth,
+            config=config,
             c=c,
             factory_inputs=factory_inputs,
             group_assignments=group_assignments,
             team_syncs=team_syncs,
             authenticator_types=authenticator_types,
             settings_reads=settings_reads,
+            handler_configs=handler_configs,
+            spawner_configs=spawner_configs,
             setup=setup_module,
         )
 
@@ -223,6 +214,15 @@ def test_native_only_setup_never_reads_github_settings(monkeypatch: pytest.Monke
         state.setup.setup_hub(state.c)
 
         assert not any(key.startswith("hub.config.GitHubOAuthenticator") for key in state.settings_reads)
+
+
+@pytest.mark.parametrize("access_policy", ("all", "group-mapped"))
+def test_setup_propagates_effective_access_policy(monkeypatch: pytest.MonkeyPatch, access_policy: str) -> None:
+    with _loaded_setup(monkeypatch, (False, False, False, True), access_policy=access_policy) as state:
+        state.setup.setup_hub(state.c)
+
+        assert state.spawner_configs == [state.config]
+        assert state.handler_configs[0]["access_policy"] == access_policy
 
 
 @pytest.mark.parametrize("providers", ((False, False, False, True), (False, False, True, True)))

@@ -50,7 +50,7 @@ from core.metrics import (
 )
 
 if TYPE_CHECKING:
-    from core.config import HubConfig
+    from core.config import HubConfig, ResourceAccessPolicy
 
 
 # NPU Security Config
@@ -91,6 +91,7 @@ class RemoteLabKubeSpawner(KubeSpawner):
     # Runtime settings (set by jupyterhub_config.py)
     github_org_name: str = ""
     auth_mode: str = "auto-login"
+    access_policy: ResourceAccessPolicy = "group-mapped"
     single_node_mode: bool = False
     quota_enabled: bool | None = False
 
@@ -132,6 +133,7 @@ class RemoteLabKubeSpawner(KubeSpawner):
 
         # Basic spawner settings
         cls.auth_mode = config.auth_mode
+        cls.access_policy = config.resources.effective_access_policy
         cls.single_node_mode = config.single_node_mode
         cls.github_org_name = config.github_org_name
 
@@ -189,7 +191,7 @@ class RemoteLabKubeSpawner(KubeSpawner):
         available_resources = resolve_resources_for_user(
             self.user,
             self.team_resource_mapping,
-            self.auth_mode,
+            self.access_policy,
             list(self.resource_images.keys()),
         )
         self.log.debug(f"User '{username}' resolved resources: {available_resources}")
