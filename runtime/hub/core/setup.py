@@ -49,28 +49,28 @@ if TYPE_CHECKING:
     pass
 
 
-def _bootstrap_admin_password(admin_username: str, admin_password: str, *, require_match: bool = False) -> None:
+def _bootstrap_admin_password(admin_username: str, admin_password: str) -> None:
     from core.authenticators.models import UserPassword
     from core.database import session_scope
 
+    created = False
     with session_scope() as session:
         user_pw = session.query(UserPassword).filter_by(username=admin_username).first()
-        if user_pw:
-            if require_match and not bcrypt.checkpw(admin_password.encode(), user_pw.password_hash):
-                raise RuntimeError(
-                    "Existing administrator password hash does not match the configured credentials Secret"
+        if user_pw is None:
+            password_hash = bcrypt.hashpw(admin_password.encode(), bcrypt.gensalt())
+            session.add(
+                UserPassword(
+                    username=admin_username,
+                    password_hash=password_hash,
+                    force_change=False,
                 )
-            print(f"[SETUP] Admin '{admin_username}' password already set")
-            return
-        password_hash = bcrypt.hashpw(admin_password.encode(), bcrypt.gensalt())
-        session.add(
-            UserPassword(
-                username=admin_username,
-                password_hash=password_hash,
-                force_change=False,
             )
-        )
+            created = True
+
+    if created:
         print(f"[SETUP] Admin '{admin_username}' password set automatically")
+    else:
+        print(f"[SETUP] Admin '{admin_username}' password already set")
 
 
 def _configure_api_token(c: Any, api_token: str | None, admin_username: str) -> None:
@@ -243,6 +243,7 @@ def setup_hub(c: Any) -> None:
         team_resource_mapping=dict(config.teams.mapping),
         github_org=config.github_org_name,
         auth_mode=config.auth_mode,
+        access_policy=config.resources.effective_access_policy,
         platform_name=config.platform_display_name,
     )
 
@@ -374,18 +375,10 @@ def setup_hub(c: Any) -> None:
 
     admin_password = os.environ.get("JUPYTERHUB_ADMIN_PASSWORD", "")
     admin_username = os.environ.get("JUPYTERHUB_ADMIN_USERNAME", "admin")
-
-    if config.auth_mode == "local" and not admin_password:
-        raise RuntimeError("Local authentication requires JUPYTERHUB_ADMIN_PASSWORD")
-    if config.auth_mode == "local" and not os.environ.get("JUPYTERHUB_ADMIN_USERNAME"):
-        raise RuntimeError("Local authentication requires JUPYTERHUB_ADMIN_USERNAME")
-
-    # =========================================================================
-    # API Token
-    # =========================================================================
-
     api_token = os.environ.get("JUPYTERHUB_API_TOKEN")
-    _configure_api_token(c, api_token, admin_username)
+
+    if admin_password and not auth.native:
+        raise RuntimeError("Administrator password bootstrap requires native authentication")
 
     # =========================================================================
     # Template Paths
@@ -396,11 +389,13 @@ def setup_hub(c: Any) -> None:
 
     if admin_password:
         try:
-            _bootstrap_admin_password(admin_username, admin_password, require_match=config.auth_mode == "local")
+            _bootstrap_admin_password(admin_username, admin_password)
         except Exception as e:
-            if config.auth_mode == "local":
-                raise RuntimeError("Failed to bootstrap local administrator credentials") from e
-            print(f"[SETUP] Warning: Failed to set admin password: {e}")
+            raise RuntimeError("Failed to bootstrap administrator credentials") from e
+
+    _configure_api_token(c, api_token, admin_username)
+
+    if admin_password:
         c.Authenticator.admin_users = {admin_username}
         print(f"[SETUP] Admin user configured: {admin_username}")
 
