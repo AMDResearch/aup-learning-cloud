@@ -99,33 +99,35 @@ Use exactly one Kubernetes GPU management path. Do not install the GPU Operator 
 This is the direct AUP-matching path when AMD host drivers are already installed and managed outside Kubernetes. The following block uses the same immutable upstream revision and manifest checksums pinned by AUP. It requires `curl` and `sha256sum` on the operator machine:
 
 ```bash
-(
-  set -euo pipefail
-  umask 077
-  plugin_commit='dea1db13f05159e64d8114bca4c31f48c3cfcac6'
-  plugin_sha256='b751e467feecf6118bed1de8ba80b9abff01c1f52a6b0b8f31aca3609e6e9dbd'
-  labeller_sha256='c3e456967efdf14bcfeb97d8f87ca75a402cc6c7c8c6201a320efdd0370fa7aa'
-  work_dir="$(mktemp -d "${TMPDIR:-/tmp}/aup-amd-device-plugin.XXXXXX")"
-  trap 'rm -rf "$work_dir"' EXIT
-  base_url="https://raw.githubusercontent.com/ROCm/k8s-device-plugin/${plugin_commit}"
-  curl --fail --show-error --silent --location \
-    "$base_url/k8s-ds-amdgpu-dp.yaml" \
-    --output "$work_dir/k8s-ds-amdgpu-dp.yaml"
-  curl --fail --show-error --silent --location \
-    "$base_url/k8s-ds-amdgpu-labeller.yaml" \
-    --output "$work_dir/k8s-ds-amdgpu-labeller.yaml"
-  printf '%s  %s\n' "$plugin_sha256" "$work_dir/k8s-ds-amdgpu-dp.yaml" | sha256sum --check -
-  printf '%s  %s\n' "$labeller_sha256" "$work_dir/k8s-ds-amdgpu-labeller.yaml" | sha256sum --check -
-  kubectl apply -f "$work_dir/k8s-ds-amdgpu-dp.yaml"
-  kubectl apply -f "$work_dir/k8s-ds-amdgpu-labeller.yaml"
-  kubectl rollout status --namespace kube-system \
-    daemonset/amdgpu-device-plugin-daemonset --timeout=5m
-  kubectl rollout status --namespace kube-system \
-    daemonset/amdgpu-labeller-daemonset --timeout=5m
-)
+curl -fsSL \
+  https://raw.githubusercontent.com/ROCm/k8s-device-plugin/dea1db13f05159e64d8114bca4c31f48c3cfcac6/k8s-ds-amdgpu-dp.yaml \
+  -o /tmp/k8s-ds-amdgpu-dp.yaml
+
+curl -fsSL \
+  https://raw.githubusercontent.com/ROCm/k8s-device-plugin/dea1db13f05159e64d8114bca4c31f48c3cfcac6/k8s-ds-amdgpu-labeller.yaml \
+  -o /tmp/k8s-ds-amdgpu-labeller.yaml
+
+echo 'b751e467feecf6118bed1de8ba80b9abff01c1f52a6b0b8f31aca3609e6e9dbd  /tmp/k8s-ds-amdgpu-dp.yaml' \
+  | sha256sum --check
+echo 'c3e456967efdf14bcfeb97d8f87ca75a402cc6c7c8c6201a320efdd0370fa7aa  /tmp/k8s-ds-amdgpu-labeller.yaml' \
+  | sha256sum --check
 ```
 
-The block fails before applying anything if either download or checksum verification fails. `kubectl apply` is idempotent, both DaemonSets must roll out successfully, and the private temporary directory is removed on exit.
+Both checksum commands must report `OK`. Stop and delete the downloaded files if either check fails. When both checks pass, apply the manifests:
+
+```bash
+kubectl apply -f /tmp/k8s-ds-amdgpu-dp.yaml
+kubectl apply -f /tmp/k8s-ds-amdgpu-labeller.yaml
+
+kubectl rollout status --namespace kube-system \
+  daemonset/amdgpu-device-plugin-daemonset --timeout=5m
+kubectl rollout status --namespace kube-system \
+  daemonset/amdgpu-labeller-daemonset --timeout=5m
+
+rm -f /tmp/k8s-ds-amdgpu-dp.yaml /tmp/k8s-ds-amdgpu-labeller.yaml
+```
+
+The apply commands are idempotent, and both DaemonSets must roll out successfully.
 
 ### AMD GPU Operator Alternative
 
@@ -205,16 +207,10 @@ Site values may contain OAuth, administrator, registry, or other credentials. Pr
 
 ```bash
 cd <repository-root>
-(
-  set -eu
-  site_values='runtime/values-existing-cluster.yaml'
-  if test -e "$site_values"; then
-    printf 'Refusing to overwrite existing %s\n' "$site_values" >&2
-    exit 1
-  fi
-  cp --no-clobber runtime/values-multi-nodes.yaml.example "$site_values"
-  chmod 600 "$site_values"
-)
+cp --no-clobber \
+  runtime/values-multi-nodes.yaml.example \
+  runtime/values-existing-cluster.yaml
+chmod 600 runtime/values-existing-cluster.yaml
 ls -l runtime/values-existing-cluster.yaml
 ```
 
@@ -225,7 +221,7 @@ The example is not production-ready. It currently contains site-specific samples
 ```bash
 grep -nE 'nfs-client|:latest|supplementalGroups|TODO|<YOUR-|your\.domain\.com' \
   runtime/values-existing-cluster.yaml
-${EDITOR:-nano} runtime/values-existing-cluster.yaml
+nano runtime/values-existing-cluster.yaml
 ```
 
 Collect the storage and GPU facts again while editing:
@@ -269,19 +265,13 @@ cd <repository-root>
 helm lint runtime/chart \
   --namespace jupyterhub \
   -f runtime/values-existing-cluster.yaml
-(
-  set -eu
-  umask 077
-  rendered_manifest="$(mktemp "${TMPDIR:-/tmp}/aup-learning-cloud-rendered.XXXXXX.yaml")"
-  trap 'rm -f "$rendered_manifest"' EXIT
-  helm template jupyterhub runtime/chart \
-    --namespace jupyterhub \
-    -f runtime/values-existing-cluster.yaml > "$rendered_manifest"
-  less "$rendered_manifest"
-)
+
+helm template jupyterhub runtime/chart \
+  --namespace jupyterhub \
+  -f runtime/values-existing-cluster.yaml | less
 ```
 
-The temporary manifest can contain Secrets or derived sensitive values. Do not publish or retain it; the trap removes it when the subshell exits.
+The rendered output can contain Secrets or derived sensitive values. Review it in the terminal; do not save, publish, or upload it.
 
 Before installation, confirm:
 
@@ -386,15 +376,14 @@ kubectl get pods --namespace jupyterhub -l component=singleuser-server -o wide
 GPU_USER_POD='<exact-gpu-user-pod-name>'
 kubectl get pod --namespace jupyterhub "$GPU_USER_POD" \
   -o jsonpath='{.spec.nodeName}{"\n"}{.spec.containers[0].resources}{"\n"}'
-GPU_NODE="$(kubectl get pod --namespace jupyterhub "$GPU_USER_POD" -o jsonpath='{.spec.nodeName}')"
-kubectl get node "$GPU_NODE" -L amd.com/gpu.product-name
+kubectl get nodes -L amd.com/gpu.product-name
 ```
 
 The Pod must request `amd.com/gpu` and land on a node with the product label selected by its AUP resource. Resolve a missing request, selector mismatch, pending Pod, or wrong-node placement before continuing.
 
 ### Verify Host Device Modes
 
-Connect to the exact `GPU_NODE` through the site's approved node-access method. There is no universal node-login command.
+Connect to the node reported by the selected GPU Pod through the site's approved node-access method. There is no universal node-login command.
 
 **GPU node:**
 
