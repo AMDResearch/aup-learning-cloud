@@ -31,9 +31,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlencode, urlparse, urlunparse
 
 from jupyterhub.apihandlers import APIHandler
@@ -63,6 +62,9 @@ from core.stats_handlers import (
     StatsUserHandler,
 )
 
+if TYPE_CHECKING:
+    from core.config import ResourceAccessPolicy
+
 # =============================================================================
 # Module-level configuration (set via configure_handlers)
 # =============================================================================
@@ -75,15 +77,12 @@ _handler_config: dict[str, Any] = {
     "default_quota": 0,
     "team_resource_mapping": {},
     "auth_mode": "auto-login",
+    "access_policy": "group-mapped",
     "platform_name": "AUP Learning Cloud",
 }
 
 
 MAX_NATIVE_PASSWORD_BYTES = 72
-
-
-def _is_secret_managed_bootstrap_admin(username: str) -> bool:
-    return _handler_config["auth_mode"] == "local" and username == os.environ.get("JUPYTERHUB_ADMIN_USERNAME")
 
 
 def _serialize_dismissed_at(value: datetime | None) -> str | None:
@@ -142,6 +141,7 @@ def configure_handlers(
     team_resource_mapping: dict[str, list[str]] | None = None,
     github_org: str = "",
     auth_mode: str = "auto-login",
+    access_policy: ResourceAccessPolicy = "group-mapped",
     platform_name: str = "AUP Learning Cloud",
 ) -> None:
     """Configure handler module with runtime settings."""
@@ -156,6 +156,7 @@ def configure_handlers(
         _handler_config["team_resource_mapping"] = team_resource_mapping
     _handler_config["github_org"] = github_org
     _handler_config["auth_mode"] = auth_mode
+    _handler_config["access_policy"] = access_policy
     _handler_config["platform_name"] = platform_name
 
 
@@ -285,13 +286,6 @@ class ChangePasswordHandler(BaseHandler):
             self.set_status(400)
             return self.finish(html)
 
-        if _is_secret_managed_bootstrap_admin(username):
-            html = await _render_error(
-                "The configured local administrator password is managed by the Kubernetes Secret"
-            )
-            self.set_status(403)
-            return self.finish(html)
-
         firstuse_auth = _find_firstuse_authenticator(self.authenticator)
 
         if not firstuse_auth:
@@ -379,12 +373,6 @@ class AdminResetPasswordHandler(BaseHandler):
                 + f"admin/reset-password?user={target_user}&error=Cannot+reset+password+for+GitHub+users"
             )
 
-        if _is_secret_managed_bootstrap_admin(username):
-            return self.redirect(
-                self.hub.base_url
-                + f"admin/reset-password?user={target_user}&error=Configured+local+administrator+password+is+managed+by+the+Kubernetes+Secret"
-            )
-
         firstuse_auth = _find_firstuse_authenticator(self.authenticator)
 
         if not firstuse_auth:
@@ -460,15 +448,6 @@ class AdminAPISetPasswordHandler(APIHandler):
                 self.set_status(400)
                 self.set_header("Content-Type", "application/json")
                 return self.finish(json.dumps({"error": "Cannot set password for GitHub users"}))
-
-            if _is_secret_managed_bootstrap_admin(username):
-                self.set_status(403)
-                self.set_header("Content-Type", "application/json")
-                return self.finish(
-                    json.dumps(
-                        {"error": "The configured local administrator password is managed by the Kubernetes Secret"}
-                    )
-                )
 
             firstuse_auth = _find_firstuse_authenticator(self.authenticator)
 
@@ -555,15 +534,6 @@ class AdminAPIBatchSetPasswordHandler(APIHandler):
                     return self.finish(
                         json.dumps({"error": f"Cannot set password for GitHub user: {entry['username']}"})
                     )
-                if _is_secret_managed_bootstrap_admin(entry["username"]):
-                    self.set_status(403)
-                    self.set_header("Content-Type", "application/json")
-                    return self.finish(
-                        json.dumps(
-                            {"error": "The configured local administrator password is managed by the Kubernetes Secret"}
-                        )
-                    )
-
             firstuse_auth = _find_firstuse_authenticator(self.authenticator)
 
             if not firstuse_auth:
@@ -1173,7 +1143,7 @@ class ResourcesAPIHandler(APIHandler):
             resolve_resources_for_user(
                 self.current_user,
                 _handler_config.get("team_resource_mapping", {}),
-                _handler_config.get("auth_mode", "auto-login"),
+                _handler_config["access_policy"],
                 list(config.resources.images.keys()),
             )
         )

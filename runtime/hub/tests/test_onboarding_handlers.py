@@ -1,395 +1,20 @@
 import asyncio
-import importlib.util
 import json
-import sys
-import types
-from contextlib import contextmanager
 from datetime import datetime, timezone
-from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-CORE = ROOT / "core"
-AUTHENTICATORS = CORE / "authenticators"
+import pytest
+from onboarding_handlers_support import FakeDb, fake_session_scope, load_handlers, make_handler
 
-if "jupyterhub.apihandlers" not in sys.modules:
-    jupyterhub_module = types.ModuleType("jupyterhub")
-    apihandlers_module = types.ModuleType("jupyterhub.apihandlers")
-    handlers_module = types.ModuleType("jupyterhub.handlers")
-    orm_module = types.ModuleType("jupyterhub.orm")
-    apihandlers_module.APIHandler = type("APIHandler", (), {})
-    handlers_module.BaseHandler = type("BaseHandler", (), {})
-    orm_module.User = type("User", (), {})
-    scopes_module = types.ModuleType("jupyterhub.scopes")
-    scopes_module.needs_scope = lambda _scope: lambda handler: handler
-    sys.modules["jupyterhub"] = jupyterhub_module
-    sys.modules["jupyterhub.apihandlers"] = apihandlers_module
-    sys.modules["jupyterhub.handlers"] = handlers_module
-    sys.modules["jupyterhub.orm"] = orm_module
-    sys.modules["jupyterhub.scopes"] = scopes_module
 
-if "jupyterhub.roles" not in sys.modules:
-    roles_module = types.ModuleType("jupyterhub.roles")
-    roles_module.assign_default_roles = lambda *_args, **_kwargs: None
-    sys.modules["jupyterhub.roles"] = roles_module
+@pytest.fixture
+def loaded_handlers(monkeypatch: pytest.MonkeyPatch):
+    with load_handlers(monkeypatch) as state:
+        yield state
 
-if "jupyterhub.utils" not in sys.modules:
-    utils_module = types.ModuleType("jupyterhub.utils")
 
-    async def maybe_future(value):
-        return value
-
-    utils_module.maybe_future = maybe_future
-    sys.modules["jupyterhub.utils"] = utils_module
-
-if "multiauthenticator" not in sys.modules:
-    multiauthenticator_module = types.ModuleType("multiauthenticator")
-    multiauthenticator_module.MultiAuthenticator = type("MultiAuthenticator", (), {})
-    sys.modules["multiauthenticator"] = multiauthenticator_module
-
-if "core" not in sys.modules:
-    core_module = types.ModuleType("core")
-    core_module.__path__ = [str(CORE)]
-    sys.modules["core"] = core_module
-
-if "core.authenticators" not in sys.modules:
-    auth_module = types.ModuleType("core.authenticators")
-    auth_module.__path__ = [str(AUTHENTICATORS)]
-    auth_module.CustomFirstUseAuthenticator = type("CustomFirstUseAuthenticator", (), {})
-    auth_module.GITHUB_USERNAME_PREFIX = "github:"
-    sys.modules["core.authenticators"] = auth_module
-
-if "sqlalchemy" not in sys.modules:
-    sqlalchemy_module = types.ModuleType("sqlalchemy")
-
-    class _SQLAType:
-        def __init__(self, *args, **kwargs):
-            pass
-
-    class _Func:
-        @staticmethod
-        def now():
-            return None
-
-    sqlalchemy_module.Boolean = _SQLAType
-    sqlalchemy_module.DateTime = _SQLAType
-    sqlalchemy_module.Integer = _SQLAType
-    sqlalchemy_module.LargeBinary = _SQLAType
-    sqlalchemy_module.String = _SQLAType
-    sqlalchemy_module.func = _Func()
-    sys.modules["sqlalchemy"] = sqlalchemy_module
-
-if "sqlalchemy.orm" in sys.modules:
-    sqlalchemy_orm_module = sys.modules["sqlalchemy.orm"]
-else:
-    sqlalchemy_orm_module = types.ModuleType("sqlalchemy.orm")
-    sys.modules["sqlalchemy.orm"] = sqlalchemy_orm_module
-
-
-class Mapped:
-    def __class_getitem__(cls, _item):
-        return cls
-
-
-def mapped_column(*args, **kwargs):
-    return None
-
-
-if not hasattr(sqlalchemy_orm_module, "Mapped"):
-    sqlalchemy_orm_module.Mapped = Mapped
-if not hasattr(sqlalchemy_orm_module, "mapped_column"):
-    sqlalchemy_orm_module.mapped_column = mapped_column
-if not hasattr(sqlalchemy_orm_module, "Session"):
-    sqlalchemy_orm_module.Session = type("Session", (), {})
-
-if "core.database" not in sys.modules:
-    database_module = types.ModuleType("core.database")
-
-    class Base:
-        def __init__(self, **kwargs):
-            for key, value in kwargs.items():
-                setattr(self, key, value)
-
-    @contextmanager
-    def session_scope():
-        raise AssertionError("session_scope must be patched in onboarding tests")
-
-    database_module.Base = Base
-    database_module.session_scope = session_scope
-    sys.modules["core.database"] = database_module
-
-if "core.quota" not in sys.modules:
-    quota_module = types.ModuleType("core.quota")
-    quota_module.BatchQuotaRequest = type("BatchQuotaRequest", (), {})
-    quota_module.QuotaAction = type("QuotaAction", (), {})
-    quota_module.QuotaModifyRequest = type("QuotaModifyRequest", (), {})
-    quota_module.QuotaRefreshRequest = type("QuotaRefreshRequest", (), {})
-    quota_module.get_quota_manager = lambda: None
-    sys.modules["core.quota"] = quota_module
-
-if "core.stats_handlers" not in sys.modules:
-    stats_module = types.ModuleType("core.stats_handlers")
-    for name in [
-        "StatsActiveSSEHandler",
-        "StatsDistributionHandler",
-        "StatsHourlyHandler",
-        "StatsMyUsageHandler",
-        "StatsOverviewHandler",
-        "StatsUsageHandler",
-        "StatsUserHandler",
-    ]:
-        setattr(stats_module, name, type(name, (), {}))
-    sys.modules["core.stats_handlers"] = stats_module
-
-
-def load_module(name: str, path: Path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
-
-
-models = load_module("core.authenticators.models", AUTHENTICATORS / "models.py")
-handlers = load_module("core.handlers", CORE / "handlers.py")
-database = sys.modules["core.database"]
-
-UserOnboardingState = models.UserOnboardingState
-DismissMyOnboardingHandler = handlers.DismissMyOnboardingHandler
-GetMyOnboardingHandler = handlers.GetMyOnboardingHandler
-AdminResetPasswordHandler = handlers.AdminResetPasswordHandler
-AdminAPISetPasswordHandler = handlers.AdminAPISetPasswordHandler
-ChangePasswordHandler = handlers.ChangePasswordHandler
-AdminAPIProvisionUsersHandler = handlers.AdminAPIProvisionUsersHandler
-
-
-class DummyUser:
-    def __init__(self, name: str, admin: bool = False):
-        self.name = name
-        self.admin = admin
-
-
-class FakeQuery:
-    def __init__(self, rows):
-        self._rows = rows
-        self._filtered = rows
-
-    def filter_by(self, **kwargs):
-        self._filtered = [
-            row for row in self._rows if all(getattr(row, key, None) == value for key, value in kwargs.items())
-        ]
-        return self
-
-    def first(self):
-        return self._filtered[0] if self._filtered else None
-
-    def all(self):
-        return self._filtered
-
-    def one_or_none(self):
-        return self.first()
-
-
-class FakeDb:
-    def __init__(self, rows=None):
-        self.rows = rows or []
-        self.commits = 0
-
-    def query(self, _model):
-        return FakeQuery(self.rows)
-
-    def add(self, obj):
-        self.rows.append(obj)
-
-    def flush(self):
-        pass
-
-    def commit(self):
-        self.commits += 1
-
-
-class DetachedAwareState:
-    def __init__(self, username: str, dismissed_at):
-        self.username = username
-        self._dismissed_at = dismissed_at
-        self.detached = False
-
-    @property
-    def dismissed_at(self):
-        if self.detached:
-            raise RuntimeError("detached instance access")
-        return self._dismissed_at
-
-    @dismissed_at.setter
-    def dismissed_at(self, value):
-        self._dismissed_at = value
-
-
-def fake_session_scope(db):
-    @contextmanager
-    def _scope():
-        yield db
-        for row in getattr(db, "rows", []):
-            if hasattr(row, "detached"):
-                row.detached = True
-        db.commit()
-
-    return _scope
-
-
-def make_handler(handler_cls, username: str):
-    handler = object.__new__(handler_cls)
-    handler.current_user = DummyUser(username)
-    captured = {}
-    handler.set_header = lambda key, value: captured.setdefault("headers", {}).__setitem__(key, value)
-    handler.finish = lambda payload: captured.setdefault("body", payload)
-    return handler, captured
-
-
-def test_admin_reset_listing_excludes_all_administrators() -> None:
-    handler = object.__new__(AdminResetPasswordHandler)
-    handler.current_user = DummyUser("operator", admin=True)
-    handler.db = FakeDb(
-        [
-            DummyUser("operator", admin=True),
-            DummyUser("admin", admin=True),
-            DummyUser("learner"),
-            DummyUser("github:member"),
-        ]
-    )
-    handler.get_argument = lambda _name, default="": default
-    rendered = {}
-
-    async def render_template(_name, **kwargs):
-        rendered.update(kwargs)
-        return "html"
-
-    handler.render_template = render_template
-    handler.finish = lambda _html: None
-
-    asyncio.run(handler.get())
-
-    assert rendered["native_users"] == ["learner"]
-
-
-def test_admin_provisioning_rejects_username_that_local_login_would_reject(monkeypatch) -> None:
-    class FakeAuthenticator:
-        def __init__(self):
-            self.validated_usernames = []
-
-        def validate_username(self, username):
-            self.validated_usernames.append(username)
-            return username == username.lower() and ":" not in username
-
-    class FakeFirstUseAuthenticator:
-        def normalize_username(self, username):
-            return username.lower()
-
-        def _check_password_strength(self, _password):
-            return None
-
-        def set_password(self, *_args, **_kwargs):
-            raise AssertionError("invalid username must not set a password")
-
-    authenticator = FakeAuthenticator()
-    handler = object.__new__(AdminAPIProvisionUsersHandler)
-    handler.current_user = DummyUser("operator", admin=True)
-    handler.authenticator = authenticator
-    handler.request = types.SimpleNamespace(
-        body=json.dumps({"users": [{"username": "Admin", "password": "Password1!"}]}).encode("utf-8")
-    )
-    handler.find_user = lambda _username: None
-    captured = {}
-    handler.set_header = lambda key, value: captured.setdefault("headers", {}).__setitem__(key, value)
-    handler.finish = lambda payload: captured.setdefault("body", payload)
-    handler.log = types.SimpleNamespace(error=lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(handlers, "_find_firstuse_authenticator", lambda _authenticator: FakeFirstUseAuthenticator())
-
-    asyncio.run(handler.post())
-
-    payload = json.loads(captured["body"])
-    assert authenticator.validated_usernames == ["Admin"]
-    assert payload["failed"] == 1
-    assert payload["results"][0]["error"] == "Invalid username: Admin"
-
-
-def test_password_management_rejects_the_secret_managed_local_administrator(monkeypatch) -> None:
-    class FakeFirstUseAuthenticator:
-        async def authenticate(self, *_args):
-            raise AssertionError("bootstrap administrator password must not be authenticated for a change")
-
-        def set_password(self, *_args, **_kwargs):
-            raise AssertionError("bootstrap administrator password must not be changed")
-
-    monkeypatch.setitem(handlers._handler_config, "auth_mode", "local")
-    monkeypatch.setenv("JUPYTERHUB_ADMIN_USERNAME", "operator")
-    monkeypatch.setattr(handlers, "_find_firstuse_authenticator", lambda _authenticator: FakeFirstUseAuthenticator())
-
-    change = object.__new__(ChangePasswordHandler)
-    change.current_user = DummyUser("operator")
-    change.authenticator = object()
-    change.hub = types.SimpleNamespace(base_url="/hub/")
-    change.get_body_argument = lambda name, default=None: {
-        "current_password": "OldPassword1!",
-        "new_password": "NewPassword1!",
-        "confirm_password": "NewPassword1!",
-    }.get(name, default)
-    change.set_status = lambda status: setattr(change, "status", status)
-    change.finish = lambda payload: setattr(change, "body", payload)
-
-    async def render_template(_name, **kwargs):
-        return kwargs["error_message"]
-
-    change.render_template = render_template
-    asyncio.run(change.post())
-
-    assert change.status == 403
-    assert "managed by the Kubernetes Secret" in change.body
-
-    admin_api = object.__new__(AdminAPISetPasswordHandler)
-    admin_api.current_user = DummyUser("manager", admin=True)
-    admin_api.authenticator = object()
-    admin_api.request = types.SimpleNamespace(
-        body=json.dumps({"username": "operator", "password": "NewPassword1!"}).encode("utf-8")
-    )
-    admin_api.set_status = lambda status: setattr(admin_api, "status", status)
-    admin_api.set_header = lambda *_args: None
-    admin_api.finish = lambda payload: setattr(admin_api, "body", payload)
-    admin_api.log = types.SimpleNamespace(error=lambda *_args, **_kwargs: None)
-    asyncio.run(admin_api.post())
-
-    assert admin_api.status == 403
-    assert "managed by the Kubernetes Secret" in json.loads(admin_api.body)["error"]
-
-
-def test_admin_password_management_keeps_other_local_users_changeable(monkeypatch) -> None:
-    class FakeFirstUseAuthenticator:
-        def set_password(self, username, password, force_change=True):
-            assert (username, password, force_change) == ("learner", "NewPassword1!", True)
-            return "Password set for learner (force change on next login)"
-
-    monkeypatch.setitem(handlers._handler_config, "auth_mode", "local")
-    monkeypatch.setenv("JUPYTERHUB_ADMIN_USERNAME", "operator")
-    monkeypatch.setattr(handlers, "_find_firstuse_authenticator", lambda _authenticator: FakeFirstUseAuthenticator())
-
-    handler = object.__new__(AdminAPISetPasswordHandler)
-    handler.current_user = DummyUser("manager", admin=True)
-    handler.authenticator = object()
-    handler.request = types.SimpleNamespace(
-        body=json.dumps({"username": "learner", "password": "NewPassword1!"}).encode("utf-8")
-    )
-    handler.set_header = lambda *_args: None
-    handler.finish = lambda payload: setattr(handler, "body", payload)
-    handler.log = types.SimpleNamespace(error=lambda *_args, **_kwargs: None)
-
-    asyncio.run(handler.post())
-
-    assert json.loads(handler.body)["message"].startswith("Password set for learner")
-
-
-def test_get_my_onboarding_returns_visible_when_no_state_exists(monkeypatch):
-    monkeypatch.setattr(database, "session_scope", fake_session_scope(FakeDb()))
-    handler, captured = make_handler(GetMyOnboardingHandler, "alice")
+def test_get_my_onboarding_returns_visible_when_no_state_exists(loaded_handlers, monkeypatch) -> None:
+    monkeypatch.setattr(loaded_handlers.database, "session_scope", lambda: fake_session_scope(FakeDb()))
+    handler, captured = make_handler(loaded_handlers.handlers.GetMyOnboardingHandler, "alice")
 
     asyncio.run(handler.get())
 
@@ -397,37 +22,46 @@ def test_get_my_onboarding_returns_visible_when_no_state_exists(monkeypatch):
     assert json.loads(captured["body"]) == {"should_show": True, "dismissed_at": None}
 
 
-def test_get_my_onboarding_returns_hidden_when_current_user_already_dismissed(monkeypatch):
-    dismissed_at = datetime(2026, 4, 22, 12, 30, 0, tzinfo=timezone.utc)
-    db = FakeDb([DetachedAwareState(username="alice", dismissed_at=dismissed_at)])
-    monkeypatch.setattr(database, "session_scope", fake_session_scope(db))
-    handler, captured = make_handler(GetMyOnboardingHandler, "alice")
+def test_get_my_onboarding_returns_hidden_when_current_user_already_dismissed(loaded_handlers, monkeypatch) -> None:
+    class DetachedAwareState:
+        def __init__(self, username: str, dismissed_at: datetime) -> None:
+            self.username = username
+            self._dismissed_at = dismissed_at
+            self.detached = False
+
+        @property
+        def dismissed_at(self) -> datetime:
+            if self.detached:
+                raise RuntimeError("detached instance access")
+            return self._dismissed_at
+
+    dismissed_at = datetime(2026, 4, 22, 12, 30, tzinfo=timezone.utc)
+    state = DetachedAwareState(username="alice", dismissed_at=dismissed_at)
+    monkeypatch.setattr(loaded_handlers.database, "session_scope", lambda: fake_session_scope(FakeDb([state])))
+    handler, captured = make_handler(loaded_handlers.handlers.GetMyOnboardingHandler, "alice")
 
     asyncio.run(handler.get())
 
     assert captured["headers"]["Content-Type"] == "application/json"
-    assert json.loads(captured["body"]) == {
-        "should_show": False,
-        "dismissed_at": dismissed_at.isoformat(),
-    }
+    assert json.loads(captured["body"]) == {"should_show": False, "dismissed_at": dismissed_at.isoformat()}
 
 
-def test_dismiss_my_onboarding_persists_dismissal_for_current_user(monkeypatch):
-    existing_state = UserOnboardingState(
+def test_dismiss_my_onboarding_persists_dismissal_for_current_user(loaded_handlers, monkeypatch) -> None:
+    existing_state = loaded_handlers.models.UserOnboardingState(
         username="bob",
-        dismissed_at=datetime(2026, 4, 21, 8, 0, 0, tzinfo=timezone.utc),
+        dismissed_at=datetime(2026, 4, 21, 8, tzinfo=timezone.utc),
     )
     db = FakeDb([existing_state])
-    monkeypatch.setattr(database, "session_scope", fake_session_scope(db))
-    handler, captured = make_handler(DismissMyOnboardingHandler, "alice")
+    monkeypatch.setattr(loaded_handlers.database, "session_scope", lambda: fake_session_scope(db))
+    handler, captured = make_handler(loaded_handlers.handlers.DismissMyOnboardingHandler, "alice")
 
     asyncio.run(handler.post())
 
     payload = json.loads(captured["body"])
+    dismissed_at = datetime.fromisoformat(payload["dismissed_at"])
     assert captured["headers"]["Content-Type"] == "application/json"
     assert payload["should_show"] is False
     assert payload["dismissed_at"] is not None
-    dismissed_at = datetime.fromisoformat(payload["dismissed_at"])
     assert dismissed_at.tzinfo == timezone.utc
     assert db.commits == 1
     assert len(db.rows) == 2
