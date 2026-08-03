@@ -433,7 +433,7 @@ custom:
         resourceType: "notebook"
       Course-Finetuning:
         group: "ROSCON 2026"
-        description: "VLA Finetuning (MolmoAct2)"
+        description: "Fine-tuning on GPUs: from cloud to robot"
         subDescription: "Fine-tune MolmoAct2 policies with ROCm"
         accelerator: "GPU"
         acceleratorKeys:
@@ -442,7 +442,7 @@ custom:
         resourceType: "notebook"
       Course-LocalInference:
         group: "ROSCON 2026"
-        description: "Local Robot Inference (RAI + Lemonade)"
+        description: "Local inference of embodied AI"
         subDescription: "Run local models with ROS 2 and RAI"
         accelerator: "GPU"
         acceleratorKeys:

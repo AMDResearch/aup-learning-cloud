@@ -51,13 +51,19 @@ COURSE_CATALOG: tuple[Course, ...] = (
     Course("Course-DL", "auplc-dl", True, "dl", "Deep Learning Course"),
     Course("Course-LLM", "auplc-llm", True, "llm", "Large Language Model Course"),
     Course("Course-PhySim", "auplc-physim", True, "physim", "Physical Simulation Course"),
-    Course("Course-Finetuning", "auplc-finetuning", True, "finetuning", "VLA Finetuning (MolmoAct2)"),
+    Course(
+        "Course-Finetuning",
+        "auplc-finetuning",
+        True,
+        "finetuning",
+        "Fine-tuning on GPUs: from cloud to robot",
+    ),
     Course(
         "Course-LocalInference",
         "auplc-localinference",
         True,
         "local-inference",
-        "Local Robot Inference (RAI + Lemonade)",
+        "Local inference of embodied AI",
     ),
 )
 
