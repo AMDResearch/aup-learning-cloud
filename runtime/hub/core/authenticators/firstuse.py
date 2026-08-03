@@ -58,19 +58,16 @@ class CustomFirstUseAuthenticator(FirstUseAuthenticator):
 
     def _user_exists(self, username):
         """Check if user exists in JupyterHub database."""
-        if self.db is None:
-            if hasattr(self, "parent") and self.parent:
-                db = self.parent.db
-                if db is None:
-                    return True
-            else:
-                return True
-        else:
-            db = self.db
+        db = getattr(self, "db", None)
+        if db is None:
+            db = getattr(getattr(self, "parent", None), "db", None)
+        if db is None:
+            self.log.warning("Native authentication denied because Hub database is unavailable")
+            return False
 
         from jupyterhub.orm import User
 
-        return db.query(User).filter_by(name=username).first() is not None
+        return bool(db.query(User).filter_by(name=username).first())
 
     def _get_user_password(self, username: str) -> UserPassword | None:
         """Get user password record from database."""
