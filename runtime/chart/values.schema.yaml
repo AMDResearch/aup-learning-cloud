@@ -3172,29 +3172,99 @@ properties:
       accelerators, resources, teams, quota management, and API service configuration.
     properties:
       authMode:
-        type: string
-        enum: [auto-login, dummy, github, local, multi]
+        type: [string, "null"]
+        enum: [null, auto-login, dummy, github, local, multi]
         description: |
-          Authentication mode for the JupyterHub instance.
+          Deprecated authentication mode retained for one release. Do not combine
+          this field with `custom.auth`.
 
           - `auto-login`: No credentials required, auto-login as 'student' (for demos/single-node)
           - `dummy`: Accept any username/password (for testing)
           - `github`: GitHub App authentication only
-          - `local`: Closed local accounts managed by an administrator
-          - `multi`: GitHub App + Local native accounts (recommended for production)
+          - `local`: Native accounts without GitHub authentication
+          - `multi`: GitHub App + native accounts (recommended for production)
+
+      auth:
+        type: object
+        additionalProperties: false
+        description: |
+          Composable authentication providers. Omitted providers are disabled.
+          Exactly one of auto-login, dummy, native, GitHub, or native plus GitHub
+          must be enabled whenever this object is present.
+        properties:
+          autoLogin:
+            type: boolean
+          dummy:
+            type: boolean
+          native:
+            type: boolean
+          github:
+            type: boolean
+        oneOf:
+          - required: [autoLogin]
+            properties:
+              autoLogin:
+                const: true
+              dummy:
+                const: false
+              native:
+                const: false
+              github:
+                const: false
+          - required: [dummy]
+            properties:
+              autoLogin:
+                const: false
+              dummy:
+                const: true
+              native:
+                const: false
+              github:
+                const: false
+          - required: [native]
+            properties:
+              autoLogin:
+                const: false
+              dummy:
+                const: false
+              native:
+                const: true
+              github:
+                const: false
+          - required: [github]
+            properties:
+              autoLogin:
+                const: false
+              dummy:
+                const: false
+              native:
+                const: false
+              github:
+                const: true
+          - required: [native, github]
+            properties:
+              autoLogin:
+                const: false
+              dummy:
+                const: false
+              native:
+                const: true
+              github:
+                const: true
 
       adminUser:
         type: object
         additionalProperties: false
         description: |
-          Auto-create admin user configuration.
-          Bootstrap configuration for an administrator account.
+          Bootstrap configuration for an administrator account in native
+          authentication modes. Leave `existingSecret` empty for chart-generated
+          credentials, or provide an external Secret with `admin-password` and
+          optional `api-token` keys.
         properties:
           enabled:
             type: boolean
             description: |
-              Enable auto-admin creation on first install.
-              Credentials will be stored in `jupyterhub-admin-credentials` secret.
+              Enable administrator bootstrap on first install.
           username:
             type: string
             pattern: "^[a-z0-9][a-z0-9._-]{0,63}$"
@@ -3789,37 +3859,35 @@ properties:
                 description: Image pull policy.
 
     allOf:
+      - not:
+          required: [authMode, auth]
       - if:
-          required: [authMode]
-          properties:
-            authMode:
-              const: local
-        then:
           required: [adminUser]
           properties:
             adminUser:
-              required: [enabled, username, existingSecret]
+              required: [enabled]
               properties:
                 enabled:
                   const: true
-                username:
-                  minLength: 1
-                existingSecret:
-                  minLength: 1
-
-      - if:
-          required: [adminUser]
+        then:
+          oneOf:
+            - required: [auth]
+              properties:
+                auth:
+                  required: [native]
+                  properties:
+                    native:
+                      const: true
+            - required: [authMode]
+              properties:
+                authMode:
+                  enum: [local, multi]
           properties:
             adminUser:
-              required: [existingSecret]
+              required: [username]
               properties:
-                existingSecret:
+                username:
                   minLength: 1
-        then:
-          required: [authMode]
-          properties:
-            authMode:
-              const: local
 
   cull:
     type: object
