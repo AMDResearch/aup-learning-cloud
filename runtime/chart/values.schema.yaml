@@ -3429,6 +3429,15 @@ properties:
           Resource images and requirements configuration.
           Defines available container images and their resource requirements.
         properties:
+          accessPolicy:
+            type: string
+            enum:
+              - all
+              - group-mapped
+            description: |
+              Controls resource visibility independently of authentication providers.
+              `all` exposes every configured resource; `group-mapped` uses the
+              configured team mapping and native/GitHub fallback behavior.
           images:
             type: object
             additionalProperties:
