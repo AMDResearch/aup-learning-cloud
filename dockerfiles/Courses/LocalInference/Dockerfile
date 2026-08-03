@@ -75,6 +75,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       xwayland \
     && rm -rf /var/lib/apt/lists/*
 
+# Proxy the RAI Streamlit UI and camera stream through each JupyterHub user's
+# existing notebook-server route.
+RUN /usr/bin/python3 -m pip install --no-cache-dir --break-system-packages \
+      jupyter-server-proxy
+
 ENV CARGO_HOME=/opt/cargo \
     RUSTUP_HOME=/opt/rustup \
     PATH="/opt/cargo/bin:/opt/rai-venv/bin:${PATH}"
@@ -107,7 +112,7 @@ print('torchaudio==' + version('torchaudio'))" > /opt/torch-constraints.txt \
       "setuptools<82" \
       "empy<4" \
     && PIP_CONSTRAINT=/opt/torch-constraints.txt /opt/rai-venv/bin/pip install \
-      --no-cache-dir --no-build-isolation openai-whisper==20231117
+      --no-cache-dir --no-build-isolation openai-whisper==20250625
 
 WORKDIR /ryzers/rai
 RUN sed -i \
@@ -120,10 +125,29 @@ RUN sed -i \
     && rosdep install \
       --from-paths src/examples/rai-manipulation-demo/ros2_ws/src \
       --ignore-src -r -y \
+    && . ./scripts/download_demo.sh manipulation \
     && . /opt/ros/${ROS_DISTRO}/setup.sh \
     && colcon build --symlink-install \
     && PIP_CONSTRAINT=/opt/torch-constraints.txt pip install --no-cache-dir \
-      src/rai_bench src/rai_sim rai-perception \
+      src/rai_bench src/rai_sim \
+    && PIP_CONSTRAINT=/opt/torch-constraints.txt pip install --no-cache-dir \
+      "rai-gsam2>=1.1.2,<2" \
+      "rf-groundingdino>=0.2.0,<0.3" \
+      "scikit-learn>=1.0,<1.4" \
+      "transformers<5" \
+    && PIP_CONSTRAINT=/opt/torch-constraints.txt pip install --no-cache-dir \
+      --no-deps rai-perception==0.3.0 \
+    && RAI_PERCEPTION_DIR="$(python3 -c \
+      'from pathlib import Path; import rai_perception; print(Path(rai_perception.__file__).parent)')" \
+    && sed -i \
+      's|Path.home() / Path(".cache/rai/")|Path("/opt/rai-cache")|g' \
+      "${RAI_PERCEPTION_DIR}/agents/base_vision_agent.py" \
+      "${RAI_PERCEPTION_DIR}/services/base_vision_service.py" \
+    && sed -i \
+      's|Path.home() / Path(".cache/rai")|Path("/opt/rai-cache")|g' \
+      "${RAI_PERCEPTION_DIR}/services/segmentation_service.py" \
+    && mkdir -p /opt/rai-cache \
+    && download-perception-models \
     && python3 -c \
       "import torch; assert torch.version.hip, 'RAI dependencies replaced ROCm torch'; print('RAI ROCm environment OK:', torch.__version__)"
 
@@ -147,11 +171,18 @@ RUN getent group audio >/dev/null || groupadd audio \
     && printf '[general]\nemail = ""\n' > /home/jovyan/.streamlit/credentials.toml
 
 COPY ./course_data /ryzers/notebooks
+COPY ./course_data/lemonade_env.sh \
+     ./course_data/manipulation_demo_headless.sh \
+     ./course_data/manipulation_demo_streamlit.py \
+     /ryzers/
 
 RUN ln -s /ryzers/notebooks/tests/test_ros.sh /ryzers/test_ros.sh \
     && ln -s /ryzers/notebooks/tests/test_o3de.sh /ryzers/test_o3de.sh \
     && ln -s /ryzers/notebooks/tests/test_rai.sh /ryzers/test_rai.sh \
     && ln -s /ryzers/notebooks/tests/test_lemonade-sdk.sh /ryzers/test_lemonade-sdk.sh \
+    && chmod +x \
+      /ryzers/lemonade_env.sh \
+      /ryzers/manipulation_demo_headless.sh \
     && chown -R jovyan:100 \
       /home/jovyan/.cache \
       /home/jovyan/.streamlit \

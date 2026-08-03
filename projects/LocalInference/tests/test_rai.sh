@@ -39,6 +39,31 @@ print('  - Pipeline: available')
 print('  - PipelineBuilder: available')
 "
 
+# Test the perception stack and assets used by 03_robot_agents.ipynb.
+echo ""
+echo "Testing RAI manipulation demo..."
+PYTHONWARNINGS=ignore python3 -c "
+from pathlib import Path
+
+from rai_perception.services.detection_service import DetectionService
+from rai_perception.services.segmentation_service import SegmentationService
+
+weights = Path('/opt/rai-cache/vision/weights')
+expected = [
+    weights / 'groundingdino_swint_ogc.pth',
+    weights / 'sam2_hiera_large.pt',
+]
+assert DetectionService.DEFAULT_WEIGHTS_ROOT_PATH == Path('/opt/rai-cache')
+assert all(path.stat().st_size > 100_000_000 for path in expected)
+assert Path('/ryzers/rai/examples/manipulation-demo-streamlit.py').is_file()
+print('RAI perception imports and preloaded weights available!')
+"
+/usr/bin/python3 -c "import jupyter_server_proxy"
+test -x /ryzers/lemonade_env.sh
+test -x /ryzers/manipulation_demo_headless.sh
+test -f /ryzers/manipulation_demo_streamlit.py
+echo "RAI demo scripts and Jupyter port proxy available!"
+
 # Check ROS 2 tools
 echo ""
 echo "Testing ROS 2 integration..."
