@@ -897,7 +897,7 @@ class RemoteLabKubeSpawner(KubeSpawner):
         """Start the spawner and schedule automatic shutdown."""
         # Ensure pod fails immediately (not retried) when an init container fails.
         # JupyterHub manages pod lifecycle; Kubernetes should not silently restart pods.
-        self.extra_pod_config = {"restartPolicy": "Never"}
+        self.extra_pod_config["restartPolicy"] = "Never"
 
         runtime_minutes = self.user_options.get("runtime_minutes", 20)
         resource_type = self.user_options.get("resource_type", "cpu")
