@@ -86,7 +86,16 @@ export const CourseCard = memo(function CourseCard({
     if (!acceleratorKeys || acceleratorKeys.length === 0) {
       return [];
     }
-    return accelerators.filter(acc => acceleratorKeys.includes(acc.key));
+    const real = accelerators.filter(acc => acceleratorKeys.includes(acc.key));
+    if (real.length <= 1) return real;
+    const minRate = Math.min(...real.map(a => a.quotaRate));
+    const autoOption: Accelerator = {
+      key: 'auto',
+      displayName: 'Auto',
+      description: 'Auto select best available GPU node',
+      quotaRate: minRate,
+    };
+    return [autoOption, ...real];
   }, [acceleratorKeys, accelerators]);
 
   // Memoize resource tag to avoid recalculation
