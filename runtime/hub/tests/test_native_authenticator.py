@@ -72,7 +72,13 @@ def _loaded_firstuse_authenticator(monkeypatch: pytest.MonkeyPatch) -> Iterator[
         bcrypt = types.ModuleType("bcrypt")
         bcrypt.gensalt = lambda: b"salt"
         bcrypt.hashpw = lambda password, _salt: b"hash:" + password
-        bcrypt.checkpw = lambda password, password_hash: password_hash == b"hash:" + password
+        bcrypt.checkpw_calls = []
+
+        def checkpw(password, password_hash):
+            bcrypt.checkpw_calls.append((password, password_hash))
+            return password_hash == b"hash:" + password
+
+        bcrypt.checkpw = checkpw
 
         class FakeFirstUseAuthenticator:
             def __init__(self) -> None:
@@ -180,6 +186,7 @@ def test_existing_user_authentication_checks_normalized_username(
             ("has_password", "learner"),
             ("check_password", "learner", submitted_password),
         ]
+        assert sys.modules["bcrypt"].checkpw_calls == []
 
 
 def test_missing_child_and_parent_database_rejects_without_password_side_effect(
@@ -199,6 +206,7 @@ def test_missing_child_and_parent_database_rejects_without_password_side_effect(
         assert authenticated is None
         assert password_changes == []
         assert authenticator.log.warnings
+        assert sys.modules["bcrypt"].checkpw_calls == []
 
 
 def test_missing_parent_database_rejects_without_password_side_effect(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -214,6 +222,7 @@ def test_missing_parent_database_rejects_without_password_side_effect(monkeypatc
         assert authenticated is None
         assert password_changes == []
         assert authenticator.log.warnings
+        assert sys.modules["bcrypt"].checkpw_calls == []
 
 
 @pytest.mark.parametrize("query_result", [None, False], ids=["none", "falsey"])
@@ -230,6 +239,7 @@ def test_unknown_user_query_result_rejects_without_password_side_effect(
 
         assert authenticated is None
         assert password_changes == []
+        assert sys.modules["bcrypt"].checkpw_calls == [(b"Password1!", authenticator_type.DUMMY_PASSWORD_HASH)]
 
 
 def test_database_query_error_propagates_without_password_side_effect(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -243,6 +253,7 @@ def test_database_query_error_propagates_without_password_side_effect(monkeypatc
             asyncio.run(authenticator.authenticate(None, {"username": "learner", "password": "Password1!"}))
 
         assert password_changes == []
+        assert sys.modules["bcrypt"].checkpw_calls == []
 
 
 def test_parent_database_fallback_supports_multiauth_child(monkeypatch: pytest.MonkeyPatch) -> None:
