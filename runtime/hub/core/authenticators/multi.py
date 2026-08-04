@@ -28,7 +28,7 @@ from __future__ import annotations
 from multiauthenticator import MultiAuthenticator
 from multiauthenticator.multiauthenticator import PREFIX_SEPARATOR
 
-LOCAL_ACCOUNT_PREFIX = "LocalAccount"
+from core.authenticators.firstuse import CustomFirstUseAuthenticator
 
 
 class CustomMultiAuthenticator(MultiAuthenticator):
@@ -83,34 +83,37 @@ class CustomMultiAuthenticator(MultiAuthenticator):
             login_service = getattr(authenticator, "login_service", name)
             url = authenticator.login_url(base_url)
 
-            if name == LOCAL_ACCOUNT_PREFIX:
-                html.append(f"""
+            match authenticator:
+                case CustomFirstUseAuthenticator():
+                    html.append(f"""
                 <div class="login-option mb-6 bg-white rounded-xl shadow-lg p-6">
-                <form action="{url}" method="post">
+                <form action="{url}{{% if next is defined and next|length %}}?next={{{{ next | urlencode }}}}{{% endif %}}" method="post">
                     <input type="hidden" name="_xsrf" value="{{{{ xsrf }}}}" />
                     <div class="mb-4">
                     <input type="text" name="username" placeholder="Username"
+                            aria-label="Username"
                             class="block w-full px-4 py-2 border rounded-md shadow-sm focus:ring-2 focus:ring-blue-500"
                             required />
                     </div>
                     <div class="mb-4">
                     <input type="password" name="password" placeholder="Password"
+                            aria-label="Password"
                             class="block w-full px-4 py-2 border rounded-md shadow-sm focus:ring-2 focus:ring-blue-500"
                             required />
                     </div>
                     <button type="submit"
-                            class="w-full py-2 px-4 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-md">
+                            class="login-submit w-full py-2 px-4 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-md">
                     Use LocalAccount Login
                     </button>
                 </form>
                 </div>
                 """)
-            else:
-                html.append(f"""
+                case _:
+                    html.append(f"""
                 <div class="login-option mb-4">
-                <a role="button" class="w-full inline-block text-center py-3 px-4 bg-gray-800 text-white
+                <a role="button" class="login-github-button w-full inline-block text-center py-3 px-4 bg-gray-800
                                     rounded-md hover:bg-gray-900 font-medium"
-                    href="{url}{{% if next is defined and next|length %}}?next={{{{next}}}}{{% endif %}}">
+                    href="{url}{{% if next is defined and next|length %}}?next={{{{ next }}}}{{% endif %}}">
                     Use {login_service} Login
                 </a>
                 </div>
