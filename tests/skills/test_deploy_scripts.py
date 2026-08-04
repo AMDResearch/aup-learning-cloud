@@ -14,6 +14,7 @@ from contextlib import redirect_stdout
 from pathlib import Path
 
 import pytest
+import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 DEPLOY_SCRIPTS = ROOT / "skills" / "deploy-aup-learning-cloud" / "scripts"
@@ -956,6 +957,51 @@ def test_generator_retains_known_accelerator_product_name_overrides(tmp_path: Pa
     assert result.returncode == 0, result.stdout + result.stderr
     values = (out_dir / "values-basic-example.yaml").read_text(encoding="utf-8")
     assert 'amd.com/gpu.product-name: "AMD_Custom_8060S"' in values
+
+
+@pytest.mark.parametrize(
+    ("auth_mode", "expected_auth"),
+    [
+        ("auto-login", {"autoLogin": True}),
+        ("dummy", {"dummy": True}),
+        ("github", {"github": True}),
+        ("local", {"native": True}),
+        ("multi", {"native": True, "github": True}),
+    ],
+)
+def test_generator_emits_canonical_auth_and_runtime_policy(
+    tmp_path: Path, auth_mode: str, expected_auth: dict[str, bool]
+) -> None:
+    spec = generator_spec()
+    spec["auth_mode"] = auth_mode
+    spec_path = write_file(tmp_path / "spec.json", json.dumps(spec))
+    out_dir = tmp_path / "generated"
+
+    result = run_script(GEN_CONFIGS, "--spec", str(spec_path), "--out-dir", str(out_dir))
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    values = yaml.safe_load((out_dir / "values-basic-example.yaml").read_text(encoding="utf-8"))
+    custom = values["custom"]
+    assert custom["auth"] == expected_auth
+    assert "authMode" not in custom
+    assert custom["runtimeLimitEnabled"] is True
+    assert custom["quota"]["enabled"] is True
+
+
+@pytest.mark.parametrize("auth_mode", [None, 42, "unsupported"])
+def test_generator_rejects_invalid_auth_mode_before_discovery(
+    tmp_path: Path, auth_mode: str | int | None
+) -> None:
+    spec = generator_spec()
+    spec["auth_mode"] = auth_mode
+    spec_path = write_file(tmp_path / "spec.json", json.dumps(spec))
+    out_dir = tmp_path / "generated"
+
+    result = run_script(GEN_CONFIGS, "--spec", str(spec_path), "--out-dir", str(out_dir))
+
+    assert result.returncode == 1
+    assert "spec.auth_mode must be one of: auto-login, dummy, github, local, multi" in result.stderr
+    assert not out_dir.exists()
 
 
 def test_generator_rejects_a_non_mapping_accelerators_field_before_writing_artifacts(tmp_path: Path) -> None:

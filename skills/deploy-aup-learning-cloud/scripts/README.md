@@ -131,6 +131,10 @@ consistency validation, where inventory and resolution values must be strict
 booleans. The generator-first skill workflow supplies both and never generates
 `auto`.
 
+The spec's historical `auth_mode` field is a one-release generator compatibility
+input. It emits only canonical `custom.auth` provider flags; see the deploy
+skill reference migration table before creating or updating a spec.
+
 ## Conventions
 
 - Detection data goes to stdout as JSON. Diagnostics go to stderr.

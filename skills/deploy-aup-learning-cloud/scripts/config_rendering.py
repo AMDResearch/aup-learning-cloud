@@ -89,11 +89,10 @@ def render_pxe_vars(spec: dict, pxe_gpu_access_enabled: bool) -> str:
     return "\n".join(lines) + "\n"
 
 
-def render_values(spec: dict) -> str:
+def render_values(spec: dict, auth_providers: tuple[str, ...]) -> str:
     accel = spec.get("accelerators") or {}
     storage_class = (spec.get("storage") or {}).get("class", "nfs-client")
     node_port = (spec.get("proxy") or {}).get("node_port", 30890)
-    auth_mode = spec.get("auth_mode", "auto-login")
     images = spec.get("images") or {}
     lines = [
         "# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.",
@@ -102,7 +101,13 @@ def render_values(spec: dict) -> str:
         "#   helm upgrade --install jupyterhub ./runtime/chart -n jupyterhub \\",
         "#     --create-namespace -f runtime/values.yaml -f <this file>",
         "custom:",
-        f"  authMode: {yaml_quote(auth_mode)}",
+        "  auth:",
+    ]
+    lines.extend(f"    {provider}: true" for provider in auth_providers)
+    lines += [
+        "  runtimeLimitEnabled: true",
+        "  quota:",
+        "    enabled: true",
     ]
     if accel:
         lines.append("  accelerators:")
