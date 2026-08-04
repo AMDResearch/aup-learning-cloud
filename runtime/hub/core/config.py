@@ -33,7 +33,7 @@ Usage:
     # In business logic:
     from core.config import HubConfig
     config = HubConfig.get()
-    if config.auth_mode == "multi":
+    if config.auth.github:
         ...
 """
 
@@ -42,10 +42,10 @@ from __future__ import annotations
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Final, Literal, assert_never
+from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError, field_validator
 
 # =============================================================================
 # YAML Configuration Models
@@ -79,7 +79,7 @@ class AcceleratorConfig(BaseModel):
 class QuotaSettings(BaseModel):
     """Quota system configuration."""
 
-    enabled: bool | None = None  # None = auto-detect based on auth_mode
+    enabled: StrictBool | None = None
     cpuRate: int = 1
     minimumToStart: int = 10
     defaultQuota: int = 0
@@ -149,10 +149,6 @@ class ResourceMetadata(BaseModel):
     model_config = {"extra": "allow"}
 
 
-ResourceAccessPolicy = Literal["all", "group-mapped"]
-DEFAULT_RESOURCE_ACCESS_POLICY: Final[ResourceAccessPolicy] = "group-mapped"
-
-
 class ResourcesConfig(BaseModel):
     """Resources configuration (images, requirements, and metadata)."""
 
@@ -160,19 +156,6 @@ class ResourcesConfig(BaseModel):
     requirements: dict[str, ResourceRequirements] = Field(default_factory=dict)
     metadata: dict[str, ResourceMetadata] = Field(default_factory=dict)
     groupOrder: list[str] = Field(default_factory=list)
-    accessPolicy: ResourceAccessPolicy | None = None
-
-    @model_validator(mode="before")
-    @classmethod
-    def reject_explicit_null_access_policy(cls, value: Any) -> Any:
-        if isinstance(value, dict) and "accessPolicy" in value and value["accessPolicy"] is None:
-            raise ValueError("accessPolicy must be all or group-mapped")
-        return value
-
-    @property
-    def effective_access_policy(self) -> ResourceAccessPolicy:
-        return self.accessPolicy or DEFAULT_RESOURCE_ACCESS_POLICY
-
     model_config = {"extra": "allow"}
 
 
@@ -287,21 +270,16 @@ class AuthCapabilities:
     native: bool
     github: bool
 
-    @property
-    def effective_mode(self) -> LegacyAuthMode:
-        """Project capabilities onto the temporary legacy mode consumed downstream."""
-
+    def validate(self) -> AuthCapabilities:
         match self:
-            case AuthCapabilities(auto_login=True, dummy=False, native=False, github=False):
-                return "auto-login"
-            case AuthCapabilities(auto_login=False, dummy=True, native=False, github=False):
-                return "dummy"
-            case AuthCapabilities(auto_login=False, dummy=False, native=True, github=False):
-                return "local"
-            case AuthCapabilities(auto_login=False, dummy=False, native=False, github=True):
-                return "github"
-            case AuthCapabilities(auto_login=False, dummy=False, native=True, github=True):
-                return "multi"
+            case (
+                AuthCapabilities(auto_login=True, dummy=False, native=False, github=False)
+                | AuthCapabilities(auto_login=False, dummy=True, native=False, github=False)
+                | AuthCapabilities(auto_login=False, dummy=False, native=True, github=False)
+                | AuthCapabilities(auto_login=False, dummy=False, native=False, github=True)
+                | AuthCapabilities(auto_login=False, dummy=False, native=True, github=True)
+            ):
+                return self
             case _:
                 raise AuthConfigurationError("auth must enable one exclusive provider or native + github")
 
@@ -355,7 +333,7 @@ def _legacy_auth_capabilities(mode: str) -> AuthCapabilities:
             raise AuthConfigurationError("authMode must be one of auto-login, dummy, github, local, or multi")
 
 
-def _parse_auth_capabilities(raw_config: dict[str, Any]) -> tuple[AuthCapabilities, bool]:
+def _parse_auth_capabilities(raw_config: dict[str, Any]) -> tuple[AuthCapabilities, LegacyAuthMode | None]:
     """Parse explicit configuration form presence before defaulted models erase it."""
 
     canonical_present = "auth" in raw_config
@@ -367,24 +345,11 @@ def _parse_auth_capabilities(raw_config: dict[str, Any]) -> tuple[AuthCapabiliti
             capabilities = CanonicalAuthConfig.model_validate(raw_config["auth"]).capabilities()
         except ValidationError as error:
             raise AuthConfigurationError(f"auth must be a strict provider mapping: {error}") from error
-        try:
-            _ = capabilities.effective_mode
-        except AuthConfigurationError as error:
-            raise AuthConfigurationError("auth must enable one exclusive provider or native + github") from error
-        return capabilities, False
+        return capabilities.validate(), None
     if legacy_present and raw_config["authMode"] is not None:
-        return _legacy_auth_capabilities(raw_config["authMode"]), True
-    return AuthCapabilities(True, False, False, False), False
-
-
-def _legacy_resource_access_policy(mode: LegacyAuthMode) -> ResourceAccessPolicy:
-    match mode:
-        case "auto-login" | "dummy" | "local":
-            return "all"
-        case "github" | "multi":
-            return "group-mapped"
-        case unreachable:
-            assert_never(unreachable)
+        legacy_mode = raw_config["authMode"]
+        return _legacy_auth_capabilities(legacy_mode), legacy_mode
+    return AuthCapabilities(True, False, False, False), None
 
 
 # =============================================================================
@@ -408,9 +373,8 @@ class HubConfig:
 
     def __init__(self):
         # Runtime settings
-        self.auth_mode: str = "auto-login"
         self._auth: AuthCapabilities = AuthCapabilities(True, False, False, False)
-        self.single_node_mode: bool = False
+        self.runtime_limit_enabled: bool = True
         self.github_org_name: str = ""
         self.cluster_name: str = ""
         self.admin_username: str = "admin"
@@ -450,10 +414,8 @@ class HubConfig:
         print(f"[CONFIG] Loaded configuration from {config_path}")
 
         # Extract runtime settings
-        instance._auth, legacy_auth = _parse_auth_capabilities(raw_config)
-        effective_mode = instance._auth.effective_mode
-        instance.auth_mode = effective_mode
-        if legacy_auth:
+        instance._auth, legacy_mode = _parse_auth_capabilities(raw_config)
+        if legacy_mode is not None:
             warnings.warn(
                 "authMode is deprecated; configure authentication with auth provider flags instead",
                 DeprecationWarning,
@@ -465,13 +427,15 @@ class HubConfig:
         if isinstance(admin_user, dict):
             instance.admin_username = admin_user.get("username", "admin")
 
-        # Canonical providers use neutral policy defaults; legacy input retains historical defaults.
-        if "singleNodeMode" in raw_config:
-            instance.single_node_mode = raw_config["singleNodeMode"]
-        elif legacy_auth:
-            instance.single_node_mode = instance.auth_mode in ("auto-login", "local")
+        if "runtimeLimitEnabled" in raw_config:
+            runtime_limit_enabled = raw_config["runtimeLimitEnabled"]
+            if type(runtime_limit_enabled) is not bool:
+                raise AuthConfigurationError("runtimeLimitEnabled must be a boolean")
+            instance.runtime_limit_enabled = runtime_limit_enabled
+        elif legacy_mode is not None:
+            instance.runtime_limit_enabled = legacy_mode not in ("auto-login", "local")
         else:
-            instance.single_node_mode = False
+            instance.runtime_limit_enabled = True
 
         # Parse structured configuration
         instance._config = ParsedConfig.from_dicts(
@@ -486,25 +450,29 @@ class HubConfig:
             notifications=raw_config.get("notifications"),
         )
 
-        if instance._config.resources.accessPolicy is None:
-            instance._config.resources.accessPolicy = (
-                _legacy_resource_access_policy(effective_mode) if legacy_auth else DEFAULT_RESOURCE_ACCESS_POLICY
-            )
-
         # Canonical providers use neutral policy defaults; legacy input retains historical defaults.
         if instance._config.quota.enabled is not None:
             instance.quota_enabled = instance._config.quota.enabled
         else:
-            instance.quota_enabled = instance.auth_mode not in ("auto-login", "dummy", "local") if legacy_auth else True
+            instance.quota_enabled = (
+                legacy_mode not in ("auto-login", "dummy", "local") if legacy_mode is not None else True
+            )
             instance._config.quota.enabled = instance.quota_enabled
+
+        if instance.quota_enabled and not instance.runtime_limit_enabled:
+            raise AuthConfigurationError("quota.enabled requires runtimeLimitEnabled: true")
 
         cls._instance = instance
         cls._initialized = True
 
         # Log configuration
         print("[CONFIG] HubConfig initialized:")
-        print(f"[CONFIG]   auth_mode={instance.auth_mode}")
-        print(f"[CONFIG]   single_node_mode={instance.single_node_mode}")
+        print(
+            "[CONFIG]   auth="
+            f"auto_login:{instance.auth.auto_login},dummy:{instance.auth.dummy},"
+            f"native:{instance.auth.native},github:{instance.auth.github}"
+        )
+        print(f"[CONFIG]   runtime_limit_enabled={instance.runtime_limit_enabled}")
         print(f"[CONFIG]   quota_enabled={instance.quota_enabled}")
         print(f"[CONFIG]   resources={len(instance._config.resources.images)} images")
         print(f"[CONFIG]   accelerators={list(instance._config.accelerators.keys())}")

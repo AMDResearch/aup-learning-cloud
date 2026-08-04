@@ -50,7 +50,7 @@ from core.metrics import (
 )
 
 if TYPE_CHECKING:
-    from core.config import HubConfig, ResourceAccessPolicy
+    from core.config import HubConfig
 
 
 # NPU Security Config
@@ -90,9 +90,7 @@ class RemoteLabKubeSpawner(KubeSpawner):
 
     # Runtime settings (set by jupyterhub_config.py)
     github_org_name: str = ""
-    auth_mode: str = "auto-login"
-    access_policy: ResourceAccessPolicy = "group-mapped"
-    single_node_mode: bool = False
+    runtime_limit_enabled: bool = True
     quota_enabled: bool | None = False
 
     # Resource configuration (set from config)
@@ -132,9 +130,7 @@ class RemoteLabKubeSpawner(KubeSpawner):
         cls._hub_config = config
 
         # Basic spawner settings
-        cls.auth_mode = config.auth_mode
-        cls.access_policy = config.resources.effective_access_policy
-        cls.single_node_mode = config.single_node_mode
+        cls.runtime_limit_enabled = config.runtime_limit_enabled
         cls.github_org_name = config.github_org_name
 
         # Extract resource images and requirements
@@ -174,9 +170,8 @@ class RemoteLabKubeSpawner(KubeSpawner):
     def _resolve_user_resources(self) -> list[str]:
         """Resolve available resources for the current user from server-side policy.
 
-        For auto-login/dummy modes, returns all configured resources.
-        For all other users, resolves resources from JupyterHub groups
-        (which are synced from GitHub teams or assigned to native users
+        Resolves resources from JupyterHub groups, which are synced from GitHub teams
+        or assigned to native users
         via the auth_state_hook). Falls back to legacy pattern matching
         for native users with no group assignments.
 
@@ -191,8 +186,6 @@ class RemoteLabKubeSpawner(KubeSpawner):
         available_resources = resolve_resources_for_user(
             self.user,
             self.team_resource_mapping,
-            self.access_policy,
-            list(self.resource_images.keys()),
         )
         self.log.debug(f"User '{username}' resolved resources: {available_resources}")
         return available_resources
@@ -237,8 +230,8 @@ class RemoteLabKubeSpawner(KubeSpawner):
     async def options_form(self, _) -> str:
         """Generate the HTML form for resource selection.
 
-        Returns a <script> tag that injects ``window.AVAILABLE_RESOURCES``
-        and ``window.SINGLE_NODE_MODE`` for the React spawn app.  The custom
+        Returns a <script> tag that injects ``window.AVAILABLE_RESOURCES`` for
+        the React spawn app. The custom
         ``spawn.html`` template renders this via ``{{ spawner_options_form | safe }}``.
         """
         try:
@@ -246,14 +239,7 @@ class RemoteLabKubeSpawner(KubeSpawner):
             self.log.debug(f"Providing users with following resources: {available_resource_names}")
 
             available_resources_js = json.dumps(available_resource_names)
-            single_node_mode_js = "true" if self.single_node_mode else "false"
-
-            return (
-                "<script>"
-                f"window.AVAILABLE_RESOURCES={available_resources_js};"
-                f"window.SINGLE_NODE_MODE={single_node_mode_js};"
-                "</script>"
-            )
+            return f"<script>window.AVAILABLE_RESOURCES={available_resources_js};</script>"
 
         except Exception as e:
             self.log.error(f"Failed to load options form: {e}", exc_info=True)
@@ -750,17 +736,17 @@ class RemoteLabKubeSpawner(KubeSpawner):
         start_time: int,
         runtime_minutes: int,
         quota_rate: int,
-        runtime_unlimited: bool,
+        runtime_limit_enabled: bool,
     ) -> dict[str, str]:
         env = {
             "JOB_START_TIME": str(start_time),
             "QUOTA_RATE": str(quota_rate),
         }
 
-        if runtime_unlimited:
-            env["AUPLC_RUNTIME_UNLIMITED"] = "true"
-        else:
+        if runtime_limit_enabled:
             env["JOB_RUN_TIME"] = str(runtime_minutes)
+        else:
+            env["AUPLC_RUNTIME_UNLIMITED"] = "true"
 
         return env
 
@@ -1098,7 +1084,7 @@ class RemoteLabKubeSpawner(KubeSpawner):
                 start_time=start_time,
                 runtime_minutes=runtime_minutes,
                 quota_rate=quota_rate,
-                runtime_unlimited=self.single_node_mode,
+                runtime_limit_enabled=self.runtime_limit_enabled,
             )
         )
 
@@ -1244,11 +1230,10 @@ class RemoteLabKubeSpawner(KubeSpawner):
         self.start_time = start_time
         self._resource_type = resource_type
 
-        # In single-node mode, skip auto-shutdown timer
-        if self.single_node_mode:
+        if not self.runtime_limit_enabled:
             self.shutdown_time = None
             self.check_timer = None
-            self.log.debug(f"Container for {self.user.name} started (single-node mode, no time limit)")
+            self.log.debug(f"Container for {self.user.name} started without a runtime limit")
         else:
             self.shutdown_time = start_time + (runtime_minutes * 60)
             loop = asyncio.get_event_loop()

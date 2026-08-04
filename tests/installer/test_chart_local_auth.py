@@ -86,6 +86,175 @@ def test_chart_accepts_absent_auth_forms_without_injecting_a_default() -> None:
     assert "authMode" not in custom
 
 
+def test_runtime_values_keep_auth_absent_and_resolve_to_compatibility_auto_login(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    result = subprocess.run(
+        ["helm", "template", "jupyterhub", CHART, "-f", "runtime/values.yaml"],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    config_map = document_by_kind(rendered_documents(result.stdout), "ConfigMap")
+    rendered_config = config_map["data"]["hub-config.yaml"]
+    custom = yaml.safe_load(rendered_config)
+    assert "auth" not in custom
+    assert "authMode" not in custom
+    assert "runtimeLimitEnabled" not in custom
+
+    config_path = tmp_path / "hub-config.yaml"
+    config_path.write_text(rendered_config, encoding="utf-8")
+    spec = importlib.util.spec_from_file_location("runtime_values_config", ROOT / "runtime/hub/core/config.py")
+    assert spec is not None
+    assert spec.loader is not None
+    config_module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, config_module)
+    spec.loader.exec_module(config_module)
+    hub_config = config_module.HubConfig.init(config_path)
+
+    assert (
+        hub_config.auth.auto_login,
+        hub_config.auth.dummy,
+        hub_config.auth.native,
+        hub_config.auth.github,
+    ) == (True, False, False, False)
+    assert not hasattr(hub_config, "auth_mode")
+    assert hub_config.runtime_limit_enabled is True
+    assert hub_config.quota_enabled is True
+
+
+def test_multi_node_example_emits_canonical_auth_and_runtime_policy() -> None:
+    values = yaml.safe_load((ROOT / "runtime/values-multi-nodes.yaml.example").read_text(encoding="utf-8"))
+    custom = values["custom"]
+
+    assert custom["auth"] == {"native": True, "github": True}
+    assert "authMode" not in custom
+    assert custom["runtimeLimitEnabled"] is True
+    assert custom["quota"]["enabled"] is True
+
+
+@pytest.mark.parametrize(
+    ("runtime_limit_enabled", "quota_enabled"),
+    [(True, True), (True, False), (False, False)],
+)
+def test_chart_accepts_each_valid_quota_runtime_combination(runtime_limit_enabled: bool, quota_enabled: bool) -> None:
+    result = render(
+        f"custom.runtimeLimitEnabled={str(runtime_limit_enabled).lower()}",
+        f"custom.quota.enabled={str(quota_enabled).lower()}",
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_chart_rejects_enabled_quota_with_unlimited_runtime() -> None:
+    result = render("custom.runtimeLimitEnabled=false", "custom.quota.enabled=true")
+
+    assert result.returncode != 0
+    assert "values don't meet the specifications" in result.stderr
+
+
+@pytest.mark.parametrize("quota_enabled", ("false", "yes"))
+def test_chart_rejects_string_quota_enabled_values(quota_enabled: str) -> None:
+    result = render(string_settings=(f"custom.quota.enabled={quota_enabled}",))
+
+    assert result.returncode != 0
+    assert "got string, want null or boolean" in result.stderr
+
+
+def test_chart_rejects_integer_quota_enabled_value() -> None:
+    result = render("custom.quota.enabled=1")
+
+    assert result.returncode != 0
+    assert "got number, want null or boolean" in result.stderr
+
+
+def test_chart_rejects_array_quota_enabled_value() -> None:
+    result = subprocess.run(
+        ["helm", "template", "jupyterhub", CHART, "--set-json", "custom.quota.enabled=[]"],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "got array, want null or boolean" in result.stderr
+
+
+def test_chart_rejects_legacy_local_enabled_quota_without_runtime_limit() -> None:
+    result = render("custom.authMode=local", "custom.quota.enabled=true")
+
+    assert result.returncode != 0
+    assert "values don't meet the specifications" in result.stderr
+
+
+def test_chart_accepts_legacy_local_enabled_quota_with_explicit_runtime_limit() -> None:
+    result = render(
+        "custom.authMode=local",
+        "custom.runtimeLimitEnabled=true",
+        "custom.quota.enabled=true",
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize(
+    "legacy_case",
+    [
+        ("local", False, False),
+        ("multi", True, True),
+    ],
+)
+def test_legacy_auth_overlay_preserves_runtime_defaults_after_shared_values_render(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, legacy_case: tuple[str, bool, bool]
+) -> None:
+    auth_mode, expected_runtime_limit, expected_quota = legacy_case
+    overlay = tmp_path / "legacy-auth.yaml"
+    overlay.write_text(f"custom:\n  authMode: {auth_mode}\n", encoding="utf-8")
+    result = subprocess.run(
+        [
+            "helm",
+            "template",
+            "jupyterhub",
+            CHART,
+            "-f",
+            "runtime/values.yaml",
+            "-f",
+            str(overlay),
+        ],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    config_map = document_by_kind(rendered_documents(result.stdout), "ConfigMap")
+    rendered_config = config_map["data"]["hub-config.yaml"]
+    custom = yaml.safe_load(rendered_config)
+    assert custom["authMode"] == auth_mode
+    assert "auth" not in custom
+    assert "runtimeLimitEnabled" not in custom
+
+    config_path = tmp_path / "hub-config.yaml"
+    config_path.write_text(rendered_config, encoding="utf-8")
+    spec = importlib.util.spec_from_file_location("legacy_chart_contract_config", ROOT / "runtime/hub/core/config.py")
+    assert spec is not None
+    assert spec.loader is not None
+    config_module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, config_module)
+    spec.loader.exec_module(config_module)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        hub_config = config_module.HubConfig.init(config_path)
+
+    assert hub_config.runtime_limit_enabled is expected_runtime_limit
+    assert hub_config.quota_enabled is expected_quota
+
+
 def test_null_legacy_mode_renders_as_compatibility_absent_without_warning(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -117,13 +286,13 @@ def test_null_legacy_mode_renders_as_compatibility_absent_without_warning(
         warnings.simplefilter("always")
         hub_config = config_module.HubConfig.init(config_path)
 
-    assert hub_config.auth_mode == "auto-login"
     assert (
         hub_config.auth.auto_login,
         hub_config.auth.dummy,
         hub_config.auth.native,
         hub_config.auth.github,
     ) == (True, False, False, False)
+    assert not hasattr(hub_config, "auth_mode")
     assert not [warning for warning in caught if issubclass(warning.category, DeprecationWarning)]
 
 

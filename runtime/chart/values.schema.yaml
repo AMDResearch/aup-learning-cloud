@@ -3252,6 +3252,12 @@ properties:
               github:
                 const: true
 
+      runtimeLimitEnabled:
+        type: boolean
+        description: |
+          Controls enforcement of the selected session runtime and automatic Pod
+          shutdown. Set to false only when quota is also disabled.
+
       adminUser:
         type: object
         additionalProperties: false
@@ -3429,15 +3435,6 @@ properties:
           Resource images and requirements configuration.
           Defines available container images and their resource requirements.
         properties:
-          accessPolicy:
-            type: string
-            enum:
-              - all
-              - group-mapped
-            description: |
-              Controls resource visibility independently of authentication providers.
-              `all` exposes every configured resource; `group-mapped` uses the
-              configured team mapping and native/GitHub fallback behavior.
           images:
             type: object
             additionalProperties:
@@ -3651,8 +3648,8 @@ properties:
             type: [boolean, "null"]
             description: |
               Enable/disable quota system.
-              Set to `null` for auto-detection based on authMode
-              (disabled for auto-login/dummy, enabled otherwise).
+              Canonical configurations set this explicitly. A null or omitted value
+              retains historical defaults only for one-release `authMode` migration.
           cpuRate:
             type: integer
             minimum: 1
@@ -3870,6 +3867,34 @@ properties:
     allOf:
       - not:
           required: [authMode, auth]
+      - if:
+          required: [runtimeLimitEnabled]
+          properties:
+            runtimeLimitEnabled:
+              const: false
+        then:
+          required: [quota]
+          properties:
+            quota:
+              required: [enabled]
+              properties:
+                enabled:
+                  const: false
+      - if:
+          required: [authMode, quota]
+          properties:
+            authMode:
+              enum: [auto-login, local]
+            quota:
+              required: [enabled]
+              properties:
+                enabled:
+                  const: true
+        then:
+          required: [runtimeLimitEnabled]
+          properties:
+            runtimeLimitEnabled:
+              const: true
       - if:
           required: [adminUser]
           properties:

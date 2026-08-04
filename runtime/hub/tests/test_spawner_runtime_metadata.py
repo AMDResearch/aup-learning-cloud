@@ -22,6 +22,8 @@ import sys
 import types
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 CORE = ROOT / "core"
 
@@ -87,17 +89,17 @@ kubernetes = load_module("core.spawner.kubernetes", CORE / "spawner" / "kubernet
 RemoteLabKubeSpawner = kubernetes.RemoteLabKubeSpawner
 
 
-def build_env(runtime_minutes: int, runtime_unlimited: bool, quota_rate: int = 3):
+def build_env(runtime_minutes: int, runtime_limit_enabled: bool, quota_rate: int = 3):
     return RemoteLabKubeSpawner._build_runtime_metadata_env(
         start_time=1_717_171_717,
         runtime_minutes=runtime_minutes,
         quota_rate=quota_rate,
-        runtime_unlimited=runtime_unlimited,
+        runtime_limit_enabled=runtime_limit_enabled,
     )
 
 
 def test_finite_runtime_metadata_includes_positive_job_run_time():
-    env = build_env(runtime_minutes=120, runtime_unlimited=False)
+    env = build_env(runtime_minutes=120, runtime_limit_enabled=True)
 
     assert env == {
         "JOB_START_TIME": "1717171717",
@@ -108,15 +110,15 @@ def test_finite_runtime_metadata_includes_positive_job_run_time():
 
 
 def test_quota_unlimited_finite_runtime_metadata_stays_finite():
-    env = build_env(runtime_minutes=120, runtime_unlimited=False, quota_rate=0)
+    env = build_env(runtime_minutes=120, runtime_limit_enabled=True, quota_rate=0)
 
     assert env["JOB_RUN_TIME"] == "120"
     assert env["QUOTA_RATE"] == "0"
     assert "AUPLC_RUNTIME_UNLIMITED" not in env
 
 
-def test_single_node_no_limit_runtime_metadata_uses_unlimited_flag():
-    env = build_env(runtime_minutes=120, runtime_unlimited=True)
+def test_runtime_limit_disabled_metadata_uses_unlimited_flag():
+    env = build_env(runtime_minutes=120, runtime_limit_enabled=False)
 
     assert env == {
         "JOB_START_TIME": "1717171717",
@@ -125,3 +127,59 @@ def test_single_node_no_limit_runtime_metadata_uses_unlimited_flag():
     }
     assert "JOB_RUN_TIME" not in env
     assert "4320" not in env.values()
+
+
+@pytest.mark.parametrize("runtime_limit_enabled", [True, False])
+def test_start_schedules_shutdown_only_when_runtime_limit_enabled(
+    monkeypatch: pytest.MonkeyPatch, runtime_limit_enabled: bool
+) -> None:
+    class QuotaManager:
+        def start_usage_session(self, *_args: str) -> str:
+            return "usage-session"
+
+    class TimerLoop:
+        def __init__(self) -> None:
+            self.calls: list[tuple[int, object]] = []
+
+        def call_later(self, delay: int, callback: object) -> str:
+            self.calls.append((delay, callback))
+            return "timer"
+
+    quota_module = types.ModuleType("core.quota")
+    quota_module.get_quota_manager = lambda: QuotaManager()
+    monkeypatch.setitem(sys.modules, "core.quota", quota_module)
+
+    async def base_start(_spawner: object) -> str:
+        return "started"
+
+    timer_loop = TimerLoop()
+    monkeypatch.setattr(kubernetes.KubeSpawner, "start", base_start, raising=False)
+    monkeypatch.setattr(kubernetes.time, "time", lambda: 1_717_171_717)
+    monkeypatch.setattr(kubernetes.asyncio, "get_event_loop", lambda: timer_loop)
+
+    spawner = object.__new__(RemoteLabKubeSpawner)
+    spawner.user = types.SimpleNamespace(name="student")
+    spawner.user_options = {"runtime_minutes": 120, "resource_type": "cpu"}
+    spawner.quota_enabled = False
+    spawner.runtime_limit_enabled = runtime_limit_enabled
+    spawner.environment = {}
+    spawner.notebook_allowed_origins = []
+    spawner._hub_config = None
+    spawner.log = types.SimpleNamespace(debug=lambda _message: None)
+    spawner._launches_code_server = lambda _resource_type: False
+
+    result = kubernetes.asyncio.run(spawner.start())
+
+    assert result == "started"
+    if runtime_limit_enabled:
+        assert spawner.shutdown_time == 1_717_178_917
+        assert spawner.check_timer == "timer"
+        assert timer_loop.calls == [(60, spawner.check_timeout)]
+        assert spawner.environment["JOB_RUN_TIME"] == "120"
+        assert "AUPLC_RUNTIME_UNLIMITED" not in spawner.environment
+    else:
+        assert spawner.shutdown_time is None
+        assert spawner.check_timer is None
+        assert timer_loop.calls == []
+        assert spawner.environment["AUPLC_RUNTIME_UNLIMITED"] == "true"
+        assert "JOB_RUN_TIME" not in spawner.environment

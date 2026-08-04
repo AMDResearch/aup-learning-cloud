@@ -51,11 +51,11 @@ ResourceMetadata = config.ResourceMetadata
 ProviderFlags = tuple[bool, bool, bool, bool]
 AUTH_FLAG_NAMES = ("autoLogin", "dummy", "native", "github")
 VALID_CANONICAL_AUTH = (
-    ((True, False, False, False), "auto-login"),
-    ((False, True, False, False), "dummy"),
-    ((False, False, True, False), "local"),
-    ((False, False, False, True), "github"),
-    ((False, False, True, True), "multi"),
+    (True, False, False, False),
+    (False, True, False, False),
+    (False, False, True, False),
+    (False, False, False, True),
+    (False, False, True, True),
 )
 INVALID_CANONICAL_AUTH = (
     (False, False, False, False),
@@ -151,26 +151,26 @@ def test_code_server_extra_trusted_domains_parse_from_config():
 def test_legacy_github_mode_preserves_existing_runtime_defaults(tmp_path: Path):
     hub_config = config.HubConfig.init(write_hub_config(tmp_path, "authMode: github\n"))
 
-    assert hub_config.auth_mode == "github"
-    assert hub_config.single_node_mode is False
+    assert hub_config.auth.github is True
+    assert not hasattr(hub_config, "auth_mode")
+    assert hub_config.runtime_limit_enabled is True
     assert hub_config.quota_enabled is True
 
 
 def test_absent_auth_forms_preserve_existing_auto_login_compatibility(tmp_path: Path):
     hub_config = config.HubConfig.init(write_hub_config(tmp_path, "resources: {}\n"))
 
-    assert hub_config.auth_mode == "auto-login"
+    assert hub_config.auth.auto_login is True
+    assert not hasattr(hub_config, "auth_mode")
 
 
-@pytest.mark.parametrize(("flags", "expected_mode"), VALID_CANONICAL_AUTH)
-def test_canonical_auth_flags_normalize_to_capabilities_and_neutral_policy(
-    tmp_path: Path, flags: ProviderFlags, expected_mode: str
-):
+@pytest.mark.parametrize("flags", VALID_CANONICAL_AUTH)
+def test_canonical_auth_flags_normalize_to_capabilities_and_runtime_limit_default(tmp_path: Path, flags: ProviderFlags):
     hub_config = config.HubConfig.init(write_hub_config(tmp_path, canonical_auth_yaml(flags)))
 
-    assert hub_config.auth_mode == expected_mode
     assert (hub_config.auth.auto_login, hub_config.auth.dummy, hub_config.auth.native, hub_config.auth.github) == flags
-    assert hub_config.single_node_mode is False
+    assert not hasattr(hub_config, "auth_mode")
+    assert hub_config.runtime_limit_enabled is True
     assert hub_config.quota_enabled is True
 
 
@@ -180,30 +180,30 @@ def test_canonical_auth_rejects_each_invalid_boolean_combination(tmp_path: Path,
 
 
 @pytest.mark.parametrize(
-    ("legacy_mode", "expected_flags", "expected_single_node", "expected_quota"),
+    ("legacy_mode", "expected_flags", "expected_runtime_limit", "expected_quota"),
     [
-        ("auto-login", (True, False, False, False), True, False),
-        ("dummy", (False, True, False, False), False, False),
-        ("github", (False, False, False, True), False, True),
-        ("local", (False, False, True, False), True, False),
-        ("multi", (False, False, True, True), False, True),
+        ("auto-login", (True, False, False, False), False, False),
+        ("dummy", (False, True, False, False), True, False),
+        ("github", (False, False, False, True), True, True),
+        ("local", (False, False, True, False), False, False),
+        ("multi", (False, False, True, True), True, True),
     ],
 )
 def test_explicit_legacy_modes_map_to_capabilities_and_preserve_policy_defaults(
-    tmp_path: Path, legacy_mode: str, expected_flags: ProviderFlags, expected_single_node: bool, expected_quota: bool
+    tmp_path: Path, legacy_mode: str, expected_flags: ProviderFlags, expected_runtime_limit: bool, expected_quota: bool
 ):
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeprecationWarning)
         hub_config = config.HubConfig.init(write_hub_config(tmp_path, f"authMode: {legacy_mode}\n"))
 
-    assert hub_config.auth_mode == legacy_mode
     assert (
         hub_config.auth.auto_login,
         hub_config.auth.dummy,
         hub_config.auth.native,
         hub_config.auth.github,
     ) == expected_flags
-    assert hub_config.single_node_mode is expected_single_node
+    assert not hasattr(hub_config, "auth_mode")
+    assert hub_config.runtime_limit_enabled is expected_runtime_limit
     assert hub_config.quota_enabled is expected_quota
 
 
@@ -226,14 +226,14 @@ def test_absent_auth_forms_use_compatibility_auto_login_with_neutral_defaults(tm
         hub_config = config.HubConfig.init(write_hub_config(tmp_path, "resources: {}\n"))
 
     assert not [warning for warning in caught if issubclass(warning.category, DeprecationWarning)]
-    assert hub_config.auth_mode == "auto-login"
     assert (hub_config.auth.auto_login, hub_config.auth.dummy, hub_config.auth.native, hub_config.auth.github) == (
         True,
         False,
         False,
         False,
     )
-    assert hub_config.single_node_mode is False
+    assert not hasattr(hub_config, "auth_mode")
+    assert hub_config.runtime_limit_enabled is True
     assert hub_config.quota_enabled is True
 
 
@@ -255,21 +255,60 @@ def test_malformed_canonical_auth_is_rejected_before_hub_setup(tmp_path: Path, c
 
 
 @pytest.mark.parametrize(
-    ("contents", "expected_single_node", "expected_quota"),
+    ("contents", "expected_runtime_limit", "expected_quota"),
     [
-        ("auth:\n  native: true\nsingleNodeMode: true\nquota:\n  enabled: false\n", True, False),
-        ("authMode: local\nsingleNodeMode: false\nquota:\n  enabled: true\n", False, True),
+        ("auth:\n  native: true\nruntimeLimitEnabled: true\nquota:\n  enabled: true\n", True, True),
+        ("auth:\n  native: true\nruntimeLimitEnabled: true\nquota:\n  enabled: false\n", True, False),
+        ("auth:\n  native: true\nruntimeLimitEnabled: false\nquota:\n  enabled: false\n", False, False),
     ],
 )
-def test_explicit_runtime_policy_values_override_auth_compatibility_defaults(
-    tmp_path: Path, contents: str, expected_single_node: bool, expected_quota: bool
+def test_explicit_runtime_limit_and_quota_values_are_independent(
+    tmp_path: Path, contents: str, expected_runtime_limit: bool, expected_quota: bool
 ):
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeprecationWarning)
         hub_config = config.HubConfig.init(write_hub_config(tmp_path, contents))
 
-    assert hub_config.single_node_mode is expected_single_node
+    assert hub_config.runtime_limit_enabled is expected_runtime_limit
     assert hub_config.quota_enabled is expected_quota
+
+
+def test_hub_rejects_enabled_quota_with_unlimited_runtime_before_setup(tmp_path: Path):
+    assert_auth_configuration_rejected(
+        tmp_path,
+        "auth:\n  native: true\nruntimeLimitEnabled: false\nquota:\n  enabled: true\n",
+        "quota.enabled requires runtimeLimitEnabled: true",
+    )
+
+
+@pytest.mark.parametrize("quota_enabled", ['"false"', '"yes"', "1", "[]"])
+def test_hub_rejects_malformed_quota_enabled_values(tmp_path: Path, quota_enabled: str):
+    with pytest.raises(ValidationError):
+        config.HubConfig.init(
+            write_hub_config(tmp_path, f"auth:\n  native: true\nquota:\n  enabled: {quota_enabled}\n")
+        )
+
+
+def test_legacy_local_rejects_enabled_quota_when_runtime_limit_is_omitted(tmp_path: Path):
+    assert_auth_configuration_rejected(
+        tmp_path,
+        "authMode: local\nquota:\n  enabled: true\n",
+        "quota.enabled requires runtimeLimitEnabled: true",
+    )
+
+
+def test_legacy_local_accepts_enabled_quota_with_explicit_runtime_limit(tmp_path: Path):
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        hub_config = config.HubConfig.init(
+            write_hub_config(
+                tmp_path,
+                "authMode: local\nruntimeLimitEnabled: true\nquota:\n  enabled: true\n",
+            )
+        )
+
+    assert hub_config.runtime_limit_enabled is True
+    assert hub_config.quota_enabled is True
 
 
 def test_hub_config_singleton_is_reset_before_each_case():
@@ -288,7 +327,8 @@ def test_null_legacy_mode_is_absent_compatibility_without_warning(tmp_path: Path
         warnings.simplefilter("always")
         hub_config = config.HubConfig.init(write_hub_config(tmp_path, "authMode: null\n"))
 
-    assert hub_config.auth_mode == "auto-login"
+    assert hub_config.auth.auto_login is True
+    assert not hasattr(hub_config, "auth_mode")
     assert not [warning for warning in caught if issubclass(warning.category, DeprecationWarning)]
 
 
