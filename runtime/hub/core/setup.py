@@ -41,12 +41,33 @@ from __future__ import annotations
 
 import os
 from contextlib import suppress
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypedDict
 
 import bcrypt
 
 if TYPE_CHECKING:
-    pass
+    from core.config import AuthCapabilities
+
+
+class AuthTemplateVars(TypedDict):
+    auth_auto_login: bool
+    auth_dummy: bool
+    auth_native: bool
+    auth_github: bool
+    password_management_enabled: bool
+    hide_logout: bool
+
+
+def _build_auth_template_vars(auth: AuthCapabilities) -> AuthTemplateVars:
+    _ = auth.effective_mode
+    return {
+        "auth_auto_login": auth.auto_login,
+        "auth_dummy": auth.dummy,
+        "auth_native": auth.native,
+        "auth_github": auth.github,
+        "password_management_enabled": auth.native,
+        "hide_logout": auth.auto_login,
+    }
 
 
 def _bootstrap_admin_password(admin_username: str, admin_password: str) -> None:
@@ -405,8 +426,7 @@ def setup_hub(c: Any) -> None:
 
     if not isinstance(c.JupyterHub.template_vars, dict):
         c.JupyterHub.template_vars = {}
-    c.JupyterHub.template_vars["authenticator_mode"] = config.auth_mode  # type: ignore[assignment]
-    c.JupyterHub.template_vars["hide_logout"] = config.auth_mode == "auto-login"  # type: ignore[assignment]
+    c.JupyterHub.template_vars.update(_build_auth_template_vars(auth))
     c.JupyterHub.template_vars["cluster_name"] = config.cluster_name  # type: ignore[assignment]
     c.JupyterHub.template_vars["platform_name"] = config.platform_display_name  # type: ignore[assignment]
 
