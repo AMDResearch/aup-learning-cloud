@@ -53,6 +53,8 @@ sudo apt install python3-questionary python3-prompt-toolkit
 | `--image-registry=PREFIX` | default `ghcr.io/amdresearch` | Env `IMAGE_REGISTRY`. |
 | `--image-tag=TAG` | default `latest` | GPU suffix appended automatically. Env `IMAGE_TAG`. Use `develop` for the preview UI. |
 | `--runtime=MODE` | `docker` (default) or `containerd` | `docker` makes images visible to k3s immediately; `containerd` exports for offline. |
+| `--access-mode=PROFILE` | `personal` (default) or `local` | Installer UX profile. `personal` emits auto-login; `local` emits native authentication and admin bootstrap. |
+| `--admin-username=NAME` | `admin` | Administrator name for the `local` installer profile. |
 | `--courses`, `--mirror=`, `--mirror-pip=`, `--mirror-npm=` | — | Registry / PyPI / npm mirrors for restricted networks. |
 | `-y`, `--yes` | — | Assume yes (scripted/CI). Env `AUPLC_YES=1`. |
 | `--dry-run` (`--try-run`) | — | Preview only. |
@@ -86,16 +88,23 @@ sudo apt install python3-questionary python3-prompt-toolkit
 
 ## Default deployment facts
 
-The checked-in chart and interactive installer default to `personal` access via
-`custom.authMode: auto-login`. Selecting `--access-mode=local` creates
+`personal` and `local` are installer UX profiles only. The generated overlay
+uses canonical `custom.auth` flags and always writes explicit
+`custom.runtimeLimitEnabled: false` and `custom.quota.enabled: false`. `personal`
+selects auto-login. `local` selects native authentication and creates
 `jupyterhub-admin-credentials` with `admin-username`, `admin-password`, and
-`api-token`.
-The single-node NodePort is not a TLS or LAN exposure boundary; use local mode only
-on a trusted host/network. To change generated installer values, run
-`./auplc-installer rt upgrade`; it preserves and validates an existing local Secret.
+`api-token`. In runtime/quota order, `false/false` means neither automatic
+session shutdown nor credit enforcement is active.
+The single-node NodePort is not a TLS or LAN exposure boundary; use the `local`
+profile only on a trusted host/network. `values.local.yaml` is installer-generated output.
+Manual edits aren't preserved and may be silently overwritten by upgrade or
+reinstall.
 If a release fails, run `helm status jupyterhub -n jupyterhub` before retrying.
-`rt upgrade` and `rt reinstall` retain `jupyterhub-admin-credentials`; do not
-delete it unless intentionally resetting local credentials.
+`rt upgrade` and `rt reinstall` reuse `jupyterhub-admin-credentials`. The
+`admin-password` seeds only a missing administrator password row. Once that row
+exists, the database hash is authoritative. Changing the Secret doesn't rotate
+or reconcile the password. The `api-token` key is separate delivery for API
+scripts and isn't password bootstrap.
 
 ## Offline / air-gapped (pack)
 
@@ -129,7 +138,7 @@ installation verifies and installs it from the bundle.
 | `localhost:30890` refused | Proxy not up or NodePort changed | `kubectl get svc -n jupyterhub`, `kubectl get pods -n jupyterhub` |
 | `docker` permission denied | User not in docker group | re-run `usermod -aG docker $USER` then re-login / `newgrp docker` |
 | Need to re-apply values only | Changed the overlay, not images | `./auplc-installer rt upgrade` (don't reinstall k3s) |
-| Local administrator password unavailable | Existing Secret is intentionally preserved | `kubectl -n jupyterhub get secret jupyterhub-admin-credentials -o jsonpath='{.data.admin-password}' | base64 -d && echo` |
+| Bootstrap password doesn't match after first login | A database password row already exists | Use supported native password management; changing the Secret won't rotate the database password |
 
 ## Out of scope
 

@@ -2,29 +2,29 @@
 name: configure-aup-learning-cloud-auth
 description: >-
   Group: Maintain AUP Learning Cloud. Configures authentication for AUP Learning
-  Cloud: auth modes (auto-login/dummy/github/local/multi), GitHub App / OAuth, GitHub
-  team-to-group sync, native local accounts, password policy and forced
-  first-login change, and admin bootstrap. Use when the user wants to set or
-  switch custom.authMode, enable GitHub login, create or migrate a GitHub
-  App, set oauth_callback_url / client_id / client_secret / app_id /
-  private_key_file, sync GitHub teams into JupyterHub groups, enable native
-  accounts, bootstrap the initial admin (custom.adminUser), or debug "Resource
-  not accessible by integration", a login 404, or OAuth callback errors.
-  Triggers include custom.authMode, GitHubOAuthenticator, custom.githubOrgName,
-  allowed_organizations, jupyterhub-admin-credentials. Do not use to map which
-  resources a group sees (configure-aup-learning-cloud-courses), to
-  bulk-manage users (manage-aup-learning-cloud-users), or to configure
-  private-repo cloning (configure-aup-learning-cloud-repos).
+  Cloud with custom.auth provider flags for auto-login, dummy, native, GitHub,
+  or native plus GitHub. Covers GitHub App OAuth and team sync, native accounts,
+  password policy, forced first-login change, and custom.adminUser bootstrap.
+  Use for custom.auth, GitHubOAuthenticator, custom.githubOrgName,
+  oauth_callback_url, allowed_organizations, jupyterhub-admin-credentials,
+  login 404s, OAuth callback errors, or "Resource not accessible by
+  integration". Do not use for resource-to-group mapping
+  (configure-aup-learning-cloud-courses), bulk users
+  (manage-aup-learning-cloud-users), or private-repo cloning
+  (configure-aup-learning-cloud-repos).
 ---
 
 # Configure AUP Learning Cloud authentication
 
-Choose and wire the Hub's login path: pick the `custom.authMode`, set up the
-GitHub App (OAuth + server-to-server team sync) and/or native local accounts,
-and bootstrap the initial admin — then re-apply with the installer or Helm.
+Choose and wire the Hub's providers with `custom.auth`, set up the GitHub App
+and/or native accounts, and optionally bootstrap the first administrator. Then
+re-apply with the installer or Helm.
 
-Edit a **values overlay** (`runtime/values.yaml`, `values-multi-nodes.yaml`, or
-`values.local.yaml`), never hardcode secrets into tracked files. The full
+Edit a supported, manually managed values overlay and never hardcode secrets
+into tracked files. Don't manually edit installer-generated
+`runtime/values.local.yaml`: it is operational output, receives no preservation
+guarantee, and may be silently overwritten by upgrade or reinstall. Use
+installer flags for that profile or maintain a separate Helm overlay. The full
 GitHub App walkthrough, value blocks, and troubleshooting are in
 **[reference.md](reference.md)**.
 
@@ -33,67 +33,71 @@ GitHub App walkthrough, value blocks, and troubleshooting are in
 - A checkout of `aup-learning-cloud`; a running (or about-to-deploy) Hub.
 - `helm` + `kubectl` against the cluster, or `./auplc-installer` on a
   single-node box.
-- For `github` / `multi`: a GitHub **organization** you own (the App is created
+- For GitHub or native plus GitHub: a GitHub **organization** you own (the App is created
   under the org, not a personal account) and admin access to its settings.
 
-## Pick the auth mode
+## Pick the provider combination
 
-| Mode | When to use | Notes |
+| `custom.auth` flags | When to use | Notes |
 | --- | --- | --- |
-| `auto-login` | Local demo / single dev box | No credentials; quota auto-disabled unless forced. The checked-in default. |
-| `dummy` | Throwaway testing only | Accepts any user/password; not for real use; its login can 404 in normal setups. |
-| `github` | Org-backed SSO | GitHub App only; team membership syncs into Hub groups. |
-| `local` | Closed single-node or standalone local auth | Administrator-managed local accounts only; no GitHub setup. |
-| `multi` | GitHub + local accounts | Combined login page; native accounts for users without GitHub. |
+| `autoLogin: true` | Shared demo session | No credentials. |
+| `dummy: true` | Throwaway testing only | Accepts any user/password; not for real use. |
+| `native: true` | Managed native accounts | No GitHub setup required. |
+| `github: true` | Org-backed SSO | GitHub App and team sync. |
+| `native: true`, `github: true` | Both login methods | Combined login page. |
 
-`custom.authMode` is the single switch. Confirm the target mode with the user
-before changing a live Hub (a `helm upgrade` restarts the Hub pod, a brief
-login blip).
+Exactly one row is valid. Confirm the provider combination before changing a
+live Hub. Set `custom.runtimeLimitEnabled` and `custom.quota.enabled` explicitly;
+neither is inferred from the providers.
 
 ## Workflow
 
-1. **Read current state.** Check `custom.authMode`, `custom.adminUser.enabled`,
+1. **Read current state.** Check `custom.auth`, `custom.adminUser.enabled`,
    `custom.githubOrgName`, and `hub.config.GitHubOAuthenticator` in the active
    overlay.
-2. **Set the mode** in the overlay. For `auto-login`/`dummy` you are done with
+2. **Set the providers** in the overlay. For auto-login or dummy you are done with
    credentials; skip to step 6.
-3. **GitHub App (github/multi).** Create the App under the org with the exact
-   callback URL for the mode and `Members: Read-only` + `Contents: Read-only`
+3. **GitHub App.** Create the App under the org with the callback URL required
+   by the selected provider combination and `Members: Read-only` + `Contents: Read-only`
    permissions, then fill `hub.config.GitHubOAuthenticator` (`app_id`,
    `client_id`, `client_secret`, `private_key_file`, `allowed_organizations`,
    `scope: []`) and `custom.githubOrgName`. Step-by-step in
    [reference.md](reference.md).
-   - **Callback URL must match the mode exactly:** `multi` uses
-     `…/hub/github/oauth_callback`; single `github` uses `…/hub/oauth_callback`.
+   - **Callback URL must match the providers:** native plus GitHub uses
+     `…/hub/github/oauth_callback`; GitHub-only uses `…/hub/oauth_callback`.
 4. **Team sync.** Team-to-group sync uses the App installation token; the org
    teams are intersected with `custom.teams.mapping`. Mapping *which resource* a
    group sees stays in the configure-courses skill — this skill only makes the
-   groups exist.
-5. **Native accounts (local/multi).** The first-use authenticator has
+   groups exist. All provider combinations use this mapping and the existing
+   fallback groups for resource visibility.
+5. **Native accounts.** Native and native plus GitHub use the same first-use
+   authenticator. It has
    `create_users = False`, so accounts must be created by an admin before login
    (see manage-users skill). Password policy: ≥8 chars with upper, lower, digit,
    and special; users can be forced to change on first login.
-6. **Admin bootstrap (optional).** Set `custom.adminUser.enabled: true` with a
-   canonical `custom.adminUser.username`. Direct Helm local mode requires a
-   nonempty `custom.adminUser.existingSecret`; create that Secret before Helm
-   runs. The single-node installer creates and validates its lifecycle Secret
-   before Helm runs. Chart-managed credentials remain available for non-local
-   authentication modes.
+6. **Admin bootstrap (native providers only).** Set
+   `custom.adminUser.enabled: true` with a canonical `custom.adminUser.username`.
+   Leave `existingSecret` empty to have the chart generate
+   `jupyterhub-admin-credentials`, or name an external Secret with
+   `admin-password` and optional `api-token` keys. The `admin-password` seeds
+   only a missing password row. An existing database hash is authoritative, so
+   changing the Secret doesn't rotate or reconcile the password. The separate
+   `api-token` key supplies API access for scripts and isn't password bootstrap.
 7. **Pre-flight the render.** `helm template jupyterhub ./runtime/chart -f
    runtime/values.yaml -f <overlay>` must succeed.
 8. **Apply.** Single-node: `./auplc-installer rt upgrade`. For a direct Helm
-   local deployment, first create the configured existing Secret, then run
+   deployment with an external Secret, create the configured Secret, then run
    `helm upgrade --install jupyterhub ./runtime/chart -n jupyterhub -f
-   runtime/values.yaml -f <overlay>`. Multi/manual non-local deployments can
-   use chart-managed credentials when no existing Secret is configured.
+   runtime/values.yaml -f <overlay>`. Native-enabled deployments can use
+   chart-generated credentials when no existing Secret is configured.
 9. **Verify.** Load the Hub: the expected login page appears, a GitHub user
    lands in the right groups, and (if bootstrapped) the admin can log in. Read
    the secret with the commands in [reference.md](reference.md).
 
 If a Helm install/upgrade fails, inspect `helm status jupyterhub -n jupyterhub`
 before retrying. On a single-node install, `./auplc-installer rt upgrade` or
-`./auplc-installer rt reinstall` preserves `jupyterhub-admin-credentials`; do
-not delete that Secret unless intentionally resetting credentials.
+`./auplc-installer rt reinstall` reuses `jupyterhub-admin-credentials`. This
+doesn't change an existing database password.
 
 ## Safety
 
@@ -101,7 +105,8 @@ not delete that Secret unless intentionally resetting credentials.
   and `jupyterhub-admin-credentials` must come from a mounted K8s secret or an
   untracked overlay. Never commit them.
 - **Avoid `dummy` outside isolated testing** — it accepts any credentials.
-- **Switching modes is disruptive.** `auto-login` → `github`/`multi` forces
+- **Switching providers is disruptive.** Moving from auto-login to GitHub or
+  native plus GitHub forces
   every user through login and changes who can spawn; confirm timing for a live
   class.
 - A `helm upgrade` / `rt upgrade` restarts the Hub pod (brief auth blip).
@@ -111,5 +116,5 @@ not delete that Secret unless intentionally resetting credentials.
 ## Reference
 
 GitHub App creation walkthrough, every `GitHubOAuthenticator` field, the
-OAuth-App→GitHub-App migration, native-account/password details, admin secret
+OAuth-App→GitHub-App migration, native-account/password details, admin Secret
 retrieval, and the troubleshooting table: [reference.md](reference.md).

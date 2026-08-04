@@ -18,6 +18,39 @@ GPU policy, including for SSH. Create deployment specs from the current
 `--print-schema` output. Generation resolves hosts to strict `true` or `false`
 values and never writes `auto`.
 
+## One-release generator auth migration
+
+`gen_configs.py` temporarily accepts `auth_mode` as a one-release compatibility
+input for generator specs. It isn't a Helm value. Generated overlays always use
+canonical `custom.auth` flags.
+
+| Temporary `auth_mode` input | Generated `custom.auth` flags |
+| --- | --- |
+| `auto-login` | `autoLogin: true` |
+| `dummy` | `dummy: true` |
+| `github` | `github: true` |
+| `local` | `native: true` |
+| `multi` | `native: true`, `github: true` |
+
+## Values field guide
+
+| Field | Purpose |
+| --- | --- |
+| `custom.auth` | Select exactly one supported combination: auto-login, dummy, native, GitHub, or native plus GitHub. |
+| `custom.runtimeLimitEnabled` | Enforce the selected session timer. Generated multi-node overlays set this to `true`. |
+| `custom.quota.enabled` | Enforce credit balances. Generated multi-node overlays set this to `true`. |
+| `custom.githubOrgName`, `hub.config.GitHubOAuthenticator` | Configure GitHub OAuth when GitHub is selected. |
+| `custom.adminUser` | Name the Hub administrator. |
+| `custom.accelerators.*.nodeSelector` | Match the AMD GPU labels found through discovery and confirmed by the user. |
+| `custom.resources.images` | Define CPU, GPU, and course notebook images. |
+| `custom.resources.requirements`, `custom.teams.mapping`, `custom.quota` | Define per-team resources and quotas. |
+| `hub.db.pvc.storageClassName`, `singleuser.storage.dynamic.storageClass` | Select shared storage, normally `nfs-client` for multi-node deployments. |
+| `proxy.service`, `ingress` | Expose the Hub through a NodePort or ingress. |
+
+Authentication doesn't select runtime limits, quota, or resource visibility.
+Every provider combination uses `custom.teams.mapping` and its existing
+fallback groups to resolve visible resources.
+
 ## Canonical validation inputs
 
 Use the topology's validator command from the

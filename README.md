@@ -86,7 +86,10 @@ cd aup-learning-cloud
 
 ### Single-Node Access
 
-The interactive installer defaults to `personal` access, preserving the shared student session used by earlier single-node installs. Choose `local` when individual managed accounts are required.
+The installer offers two UX profiles. `personal` keeps the shared student
+session used by earlier single-node installs. `local` selects native accounts
+and first-run administrator bootstrap. These names are installer choices, not
+Helm authentication values.
 
 Both interactive and scripted installs keep `personal` as the compatibility default. Select local access explicitly when credentials are required:
 
@@ -94,9 +97,36 @@ Both interactive and scripted installs keep `personal` as the compatibility defa
 ./auplc-installer install --access-mode=local --admin-username=admin
 ```
 
-The installer generates the administrator password and API token only when it creates `jupyterhub-admin-credentials`. It displays the password once after a successful interactive deployment. Re-running against an existing Secret reuses the credentials without rotating them; recover credentials with `kubectl -n jupyterhub get secret jupyterhub-admin-credentials -o jsonpath='{.data.admin-password}' | base64 -d && echo`. The configured bootstrap administrator remains Secret-managed and cannot change or reset its password through the UI. Other local users are created and assigned passwords through the Admin UI.
+The installer creates `jupyterhub-admin-credentials` for the `local` profile.
+Its `admin-password` is first-run input only: the Hub uses it only when the
+administrator has no password row. After that, the database hash is
+authoritative. Changing the Secret doesn't rotate or reconcile the existing
+database password. The separate `api-token` key supplies an API token for
+scripts and isn't part of password bootstrap. Other native users are created
+and assigned passwords through the Admin UI.
 
-Local mode is an installer MVP for `http://localhost:30890` on a trusted single-node host. It does not configure TLS or restrict the K3s NodePort from LAN reachability; do not treat local credentials as a network exposure control.
+Installer-generated `values.local.yaml` is operational output. Manual edits to
+that file aren't preserved and may be silently overwritten by a later upgrade
+or reinstall.
+
+For direct Helm configuration, select exactly one of these provider
+combinations with `custom.auth`: auto-login, dummy, native, GitHub, or native
+plus GitHub. Runtime limits and quota are separate settings. A multi-node native plus
+GitHub overlay looks like this:
+
+<!-- auplc-deployment-example: canonical -->
+```yaml
+custom:
+  auth:
+    native: true
+    github: true
+  runtimeLimitEnabled: true
+  quota:
+    enabled: true
+```
+
+Every provider combination uses the existing `custom.teams.mapping` resolver
+and its existing fallback groups to determine resource visibility.
 
 A successful install looks like this:
 
@@ -180,7 +210,8 @@ Kubernetes provides a robust infrastructure for deploying and managing JupyterHu
 ### Authentication
 
 Seamless integration with GitHub Single Sign-On (SSO) and Native Authenticator for secure and efficient user authentication.
-- **Auto-admin on install**: Initial admin created automatically with random password
+- **Composable providers**: choose auto-login, dummy, native, GitHub, or native plus GitHub with `custom.auth`
+- **Optional admin bootstrap**: native authentication can seed a missing administrator password row from a generated or external Secret
 - **Dual login**: GitHub App + Native accounts on single login page
 - **Batch user management**: CSV/Excel-based bulk operations via scripts
 

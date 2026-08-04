@@ -48,6 +48,12 @@ CLI **quota** commands call the Hub admin API, so they need a valid API token
 and a reachable Hub. `kubectl` is only needed to bootstrap the token from the
 secret above or inspect scheduled quota refresh CronJobs.
 
+The Secret's `admin-password` is first-run input used only when the
+administrator has no password row. An existing database hash is authoritative;
+changing the Secret doesn't rotate or reconcile it. The separate `api-token`
+key delivers the token used for `JUPYTERHUB_TOKEN` and isn't part of password
+bootstrap.
+
 ## Python dependencies
 
 ```bash

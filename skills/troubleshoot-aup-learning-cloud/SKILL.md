@@ -61,7 +61,8 @@ the loaded deploy skill's `SKILL.md`, then set
 | --- | --- |
 | PXE rootfs vars / rebuild, agent netboot, NFS rootfs, k3s token publish | deploy-aup-learning-cloud |
 | Single-node install / GPU detect / `localhost:30890` | install-aup-learning-cloud-single-node |
-| `nodeSelector` ↔ GPU label, course/team/quota, auth mode | configure-aup-learning-cloud-courses |
+| `nodeSelector` ↔ GPU label, course/team/quota | configure-aup-learning-cloud-courses |
+| Authentication providers, GitHub callback, native login | configure-aup-learning-cloud-auth |
 | Image tag / `ImagePullBackOff` from a missing build | build-aup-learning-cloud-images |
 | Version mismatch after a bump, chart rollback | upgrade-aup-learning-cloud |
 
@@ -77,8 +78,9 @@ the loaded deploy skill's `SKILL.md`, then set
   `custom.accelerators.*.nodeSelector`.
 - **Storage:** `kubectl get pvc -A`, provisioner logs, `showmount -e <NFS>`,
   `/etc/exports`.
-- **Auth:** Hub logs (`kubectl logs -n jupyterhub deploy/hub`), `custom.authMode`
-  (avoid `dummy`, whose login 404s), GitHub OAuth callback URL.
+- **Auth:** Hub logs (`kubectl logs -n jupyterhub deploy/hub`), `custom.auth`
+  provider flags, and the GitHub OAuth callback URL. Check resource visibility
+  separately through `custom.teams.mapping` and the user's fallback group.
 
 ## Safety
 
