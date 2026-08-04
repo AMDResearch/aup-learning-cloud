@@ -173,6 +173,18 @@ def test_install_dry_run_defaults_to_pull() -> None:
     assert "  Image source     : pull" in out
 
 
+def test_install_dry_run_local_summary_includes_profile_and_admin_username() -> None:
+    state = InstallerState(access_mode="local", admin_username="operator")
+    buf = io.StringIO()
+
+    with redirect_stdout(buf):
+        cmd_install_plan(state, legacy_pull=False)
+
+    out = buf.getvalue()
+    assert "  Access mode      : local" in out
+    assert "  Admin username   : operator" in out
+
+
 @pytest.mark.parametrize("username", ["Admin", "admin:name", 'admin"name'])
 @patch("auplc_installer.cli._resolve_source_root")
 @patch("auplc_installer.cli.InstallerState.from_environment")

@@ -36,7 +36,8 @@ def test_overlay_emits_local_auth_and_round_trips_generated_headers(tmp_path: Pa
     settings = try_load_access_settings_from_overlay(overlay)
     rendered = json.loads(json.dumps(__import__("yaml").safe_load(overlay.read_text())))
     assert settings == ("local", "operator")
-    assert rendered["custom"]["authMode"] == "local"
+    assert rendered["custom"]["auth"] == {"native": True}
+    assert "authMode" not in rendered["custom"]
     assert rendered["custom"]["adminUser"] == {
         "enabled": True,
         "username": "operator",
@@ -109,35 +110,15 @@ def test_local_admin_username_rejects_unsafe_values(username: str) -> None:
 
 def test_explicit_local_upgrade_without_username_preserves_previous_username(tmp_path: Path) -> None:
     overlay = tmp_path / "values.local.yaml"
-    overlay.write_text("# Access mode   : local\n# Admin username: operator\n", encoding="utf-8")
+    overlay.write_text(
+        "# Access mode   : local\n# Admin username: operator\ncustom:\n  authMode: local\n",
+        encoding="utf-8",
+    )
     state = InstallerState(access_mode="local")
 
     _preserve_access_settings_for_upgrade(state, overlay)
 
     assert _resolve_access_settings(state) == ("local", "operator")
-
-
-def test_upgrade_rejects_unmanaged_advanced_auth_overlay(tmp_path: Path) -> None:
-    overlay = tmp_path / "values.local.yaml"
-    overlay.write_text("custom:\n  authMode: github\n", encoding="utf-8")
-
-    with pytest.raises(Exception, match="operator-managed Helm values"):
-        _preserve_access_settings_for_upgrade(InstallerState(), overlay)
-
-
-@pytest.mark.parametrize(
-    "auth_mode",
-    ['"github"', "'multi' # operator-managed", '"dummy"'],
-)
-def test_upgrade_rejects_quoted_or_commented_advanced_auth_overlay(tmp_path: Path, auth_mode: str) -> None:
-    overlay = tmp_path / "values.local.yaml"
-    overlay.write_text(
-        f"# Access mode   : local\n# Admin username: operator\ncustom:\n  authMode: {auth_mode}\n",
-        encoding="utf-8",
-    )
-
-    with pytest.raises(Exception, match="operator-managed Helm values"):
-        _preserve_access_settings_for_upgrade(InstallerState(), overlay)
 
 
 @pytest.mark.parametrize(
@@ -178,7 +159,10 @@ def test_reinstall_preserves_local_access_before_removing_release(
     monkeypatch, tmp_path: Path, reinstall, install: str
 ) -> None:
     overlay = tmp_path / "values.local.yaml"
-    overlay.write_text("# Access mode   : local\n# Admin username: operator\n", encoding="utf-8")
+    overlay.write_text(
+        "# Access mode   : local\n# Admin username: operator\ncustom:\n  authMode: local\n",
+        encoding="utf-8",
+    )
     state = InstallerState()
     monkeypatch.setattr(state, "runtime_paths", lambda: RuntimePaths(Path("chart"), Path("values"), overlay))
     observed = []
@@ -210,4 +194,4 @@ def test_local_overlay_retains_single_node_runtime_behavior(tmp_path: Path) -> N
     )
 
     rendered = __import__("yaml").safe_load(overlay.read_text())
-    assert rendered["custom"]["singleNodeMode"] is True
+    assert rendered["custom"]["runtimeLimitEnabled"] is False

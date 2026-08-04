@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import argparse
 import contextlib
-import re
 import sys
 import time
 from collections.abc import Sequence
@@ -19,7 +18,6 @@ from pathlib import Path
 from typing import NoReturn
 
 from auplc_installer import __version__
-from auplc_installer.auth import validate_local_admin_username
 from auplc_installer.catalog import parse_selection_spec
 from auplc_installer.gpu import (
     detect_and_configure_gpu,
@@ -46,6 +44,7 @@ from auplc_installer.overlay import (
     try_load_courses_from_overlay,
 )
 from auplc_installer.pack import pack_bundle
+from auplc_installer.profiles import resolve_access_settings
 from auplc_installer.progress import stage
 from auplc_installer.rocm import deploy_rocm_gpu_device_plugin
 from auplc_installer.state import InstallerState
@@ -767,16 +766,6 @@ def _preserve_courses_for_upgrade(state: InstallerState, overlay_path: Path) -> 
 
 
 def _preserve_access_settings_for_upgrade(state: InstallerState, overlay_path: Path) -> None:
-    if overlay_path.is_file():
-        text = overlay_path.read_text(encoding="utf-8")
-        if re.search(
-            r"^\s*authMode\s*:\s*(?:\"(?:github|multi|dummy)\"|'(?:github|multi|dummy)'|github|multi|dummy)\s*(?:#.*)?$",
-            text,
-            re.MULTILINE,
-        ):
-            raise InstallerError(
-                "Existing overlay uses an advanced authMode; use operator-managed Helm values instead of installer upgrade"
-            )
     previous = try_load_access_settings_from_overlay(overlay_path)
     if state.access_mode:
         if state.access_mode == "local" and not state.admin_username and previous and previous[0] == "local":
@@ -789,13 +778,8 @@ def _preserve_access_settings_for_upgrade(state: InstallerState, overlay_path: P
 
 
 def _resolve_access_settings(state: InstallerState) -> tuple[str, str]:
-    access_mode = state.access_mode or "personal"
-    if access_mode not in ("local", "personal"):
-        raise InstallerError("--access-mode must be local or personal")
-    admin_username = state.admin_username or "admin"
-    if access_mode == "local":
-        admin_username = validate_local_admin_username(admin_username)
-    return access_mode, admin_username
+    settings = resolve_access_settings(state.access_mode, state.admin_username)
+    return settings.access_mode, settings.admin_username
 
 
 def cmd_rt_remove(state: InstallerState) -> None:

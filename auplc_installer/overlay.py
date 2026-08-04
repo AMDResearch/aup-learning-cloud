@@ -14,8 +14,8 @@ from __future__ import annotations
 import re
 from io import StringIO
 from pathlib import Path
+from typing import assert_never
 
-from auplc_installer.auth import validate_local_admin_username
 from auplc_installer.catalog import (
     BASE_TEAM_MAPPING,
     NONE_SENTINEL,
@@ -23,6 +23,7 @@ from auplc_installer.catalog import (
     parse_selection_spec,
 )
 from auplc_installer.gpu import GpuConfig, is_curated_sku
+from auplc_installer.profiles import AccessProfile, detect_installer_profile, resolve_access_settings
 from auplc_installer.util import InstallerError, log
 
 # Resource name → image basename (used by acceleratorOverrides emission
@@ -52,6 +53,7 @@ def emit_overlay(
     offline_mode: bool = False,
 ) -> str:
     """Render the overlay as a string. Pure function — no I/O."""
+    settings = resolve_access_settings(access_mode, admin_username)
     buf = StringIO()
     primary_tag = f"{image_tag}-{cfg.gpu_target}"
     homogeneous_target = cfg.homogeneous_target
@@ -67,20 +69,30 @@ def emit_overlay(
         targets = " ".join(s.gpu_target for s in cfg.skus)
         buf.write(f"# Mixed gfx targets: {targets}\n")
     buf.write(f"# Env selection : {courses.description()}\n")
-    buf.write(f"# Access mode   : {access_mode}\n")
-    buf.write(f"# Admin username: {admin_username}\n")
+    buf.write(f"# Access mode   : {settings.access_mode}\n")
+    buf.write(f"# Admin username: {settings.admin_username}\n")
     buf.write("# Regenerated on install/upgrade.\n")
     buf.write("custom:\n")
-    auth_mode = "local" if access_mode == "local" else "auto-login"
-    if access_mode == "local":
-        admin_username = validate_local_admin_username(admin_username)
-    buf.write(f"  authMode: {auth_mode}\n")
-    buf.write("  singleNodeMode: true\n")
+    match settings.profile:
+        case AccessProfile.PERSONAL:
+            buf.write("  auth:\n")
+            buf.write("    autoLogin: true\n")
+        case AccessProfile.LOCAL:
+            buf.write("  auth:\n")
+            buf.write("    native: true\n")
+    buf.write("  runtimeLimitEnabled: false\n")
     buf.write("  adminUser:\n")
-    buf.write(f"    enabled: {'true' if access_mode == 'local' else 'false'}\n")
-    buf.write(f'    username: "{admin_username}"\n')
-    if access_mode == "local":
-        buf.write('    existingSecret: "jupyterhub-admin-credentials"\n')
+    match settings.profile:
+        case AccessProfile.LOCAL:
+            buf.write("    enabled: true\n")
+            buf.write(f'    username: "{settings.admin_username}"\n')
+            buf.write('    existingSecret: "jupyterhub-admin-credentials"\n')
+        case AccessProfile.PERSONAL:
+            buf.write("    enabled: false\n")
+        case unreachable:
+            assert_never(unreachable)
+    buf.write("  quota:\n")
+    buf.write(f"    enabled: {str(settings.quota_enabled).lower()}\n")
 
     # --- accelerators ---
     any_accel_emitted = False
@@ -123,7 +135,6 @@ def emit_overlay(
                 buf.write("      env: {}\n")
             buf.write(f"      quotaRate: {sku.quota_rate}\n")
 
-    # --- resources block: GPU course images + metadata ---
     emit_resources = [r for r in GPU_RESOURCE_KEYS if not filter_courses or courses.is_selected(r)]
     if emit_resources:
         buf.write("  resources:\n")
@@ -204,8 +215,6 @@ def generate_values_overlay(
 # ``rt upgrade`` (no ``--courses=`` flag) preserves whatever the user
 # originally installed with instead of silently expanding to "all".
 _COURSE_HEADER_RE = re.compile(r"^# (?:Env selection|Course selection)\s*:\s*(.+?)\s*$")
-_ACCESS_MODE_HEADER_RE = re.compile(r"^# Access mode\s*:\s*(local|personal)\s*$")
-_ADMIN_USERNAME_HEADER_RE = re.compile(r"^# Admin username\s*:\s*(.+?)\s*$")
 
 
 def try_load_courses_from_overlay(overlay_path: Path) -> CourseSelection | None:
@@ -252,19 +261,10 @@ def try_load_access_settings_from_overlay(overlay_path: Path) -> tuple[str, str]
         text = overlay_path.read_text(encoding="utf-8")
     except OSError:
         return None
-    access_mode = ""
-    admin_username = ""
-    for line in text.splitlines():
-        mode_match = _ACCESS_MODE_HEADER_RE.match(line)
-        if mode_match:
-            access_mode = mode_match.group(1)
-            continue
-        username_match = _ADMIN_USERNAME_HEADER_RE.match(line)
-        if username_match:
-            admin_username = username_match.group(1)
-    if access_mode == "" or admin_username == "":
+    settings = detect_installer_profile(text)
+    if settings is None:
         return None
-    return access_mode, admin_username
+    return settings.access_mode, settings.admin_username
 
 
 # Re-exported so callers can import ``NONE_SENTINEL`` from a single module
