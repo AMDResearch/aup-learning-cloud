@@ -29,7 +29,6 @@ def _loaded_setup(
     monkeypatch: pytest.MonkeyPatch,
     providers: tuple[bool, bool, bool, bool],
     *,
-    access_policy: str = "group-mapped",
     fail_setup: bool = False,
 ) -> Iterator[types.SimpleNamespace]:
     with monkeypatch.context() as module_patch:
@@ -53,7 +52,7 @@ def _loaded_setup(
         core.config = config_module
         config_spec.loader.exec_module(config_module)
         auth = config_module.AuthCapabilities(*providers)
-        config = make_config(auth, access_policy)
+        config = make_config(auth)
         config_module.HubConfig._instance, config_module.HubConfig._initialized = config, True
 
         settings_reads: list[str] = []
@@ -216,13 +215,12 @@ def test_native_only_setup_never_reads_github_settings(monkeypatch: pytest.Monke
         assert not any(key.startswith("hub.config.GitHubOAuthenticator") for key in state.settings_reads)
 
 
-@pytest.mark.parametrize("access_policy", ("all", "group-mapped"))
-def test_setup_propagates_effective_access_policy(monkeypatch: pytest.MonkeyPatch, access_policy: str) -> None:
-    with _loaded_setup(monkeypatch, (False, False, False, True), access_policy=access_policy) as state:
+def test_setup_configures_consumers_without_effective_auth_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    with _loaded_setup(monkeypatch, (False, False, False, True)) as state:
         state.setup.setup_hub(state.c)
 
         assert state.spawner_configs == [state.config]
-        assert state.handler_configs[0]["access_policy"] == access_policy
+        assert "auth_mode" not in state.handler_configs[0]
 
 
 @pytest.mark.parametrize("providers", ((False, False, False, True), (False, False, True, True)))

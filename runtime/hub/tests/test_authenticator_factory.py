@@ -57,23 +57,8 @@ def _loaded_factory(monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[types.Mod
         yield authenticator_factory, config
 
 
-@pytest.mark.parametrize(
-    ("mode", "expected_name"),
-    [
-        ("auto-login", "AutoLoginAuthenticator"),
-        ("dummy", "dummy"),
-        ("local", "CustomFirstUseAuthenticator"),
-        ("github", "CustomGitHubOAuthenticator"),
-        ("multi", "CustomMultiAuthenticator"),
-    ],
-)
-def test_factory_preserves_legacy_projection_and_prefix_contract(
-    monkeypatch: pytest.MonkeyPatch, mode: str, expected_name: str
-) -> None:
+def test_factory_preserves_identity_prefix_contract(monkeypatch: pytest.MonkeyPatch) -> None:
     with _loaded_factory(monkeypatch) as (factory, _config):
-        selected = factory.create_authenticator(mode)
-
-        assert selected == "dummy" if expected_name == "dummy" else selected.__name__ == expected_name
         assert factory.GITHUB_USERNAME_PREFIX == "github:"
         assert factory.CustomGitHubOAuthenticator.prefix == "github:"
         assert factory.CustomFirstUseAuthenticator.prefix == ""
@@ -115,7 +100,10 @@ def test_factory_rejects_invalid_capabilities_before_authenticator_construction(
         factory.create_authenticator(config.AuthCapabilities(*capabilities))
 
 
-@pytest.mark.parametrize("malformed_auth", (None, 1, True, (), object()))
+@pytest.mark.parametrize(
+    "malformed_auth",
+    (None, 1, True, (), object(), "auto-login", "dummy", "local", "github", "multi", "unexpected"),
+)
 def test_factory_rejects_malformed_runtime_inputs(monkeypatch: pytest.MonkeyPatch, malformed_auth) -> None:
     with _loaded_factory(monkeypatch) as (factory, config), pytest.raises(config.AuthConfigurationError):
         factory.create_authenticator(malformed_auth)
@@ -143,11 +131,3 @@ def test_factory_module_cleanup_survives_a_forced_test_failure(monkeypatch: pyte
             assert name not in sys.modules
         else:
             assert sys.modules[name] is original_module
-
-
-def test_authenticator_factory_rejects_unknown_mode(monkeypatch: pytest.MonkeyPatch) -> None:
-    with (
-        _loaded_factory(monkeypatch) as (factory, _config),
-        pytest.raises(ValueError, match="Unknown authentication mode"),
-    ):
-        factory.create_authenticator("unexpected")

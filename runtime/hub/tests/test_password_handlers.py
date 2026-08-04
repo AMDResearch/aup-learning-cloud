@@ -34,14 +34,13 @@ class PasswordAuthenticator:
         return {"success": len(users), "failed": 0, "results": []}
 
 
-def configure_local_bootstrap(monkeypatch, handlers) -> None:
-    monkeypatch.setitem(handlers._handler_config, "auth_mode", "local")
+def configure_local_bootstrap(monkeypatch) -> None:
     monkeypatch.setenv("JUPYTERHUB_ADMIN_USERNAME", "operator")
 
 
 def test_bootstrap_admin_can_change_own_password(loaded_handlers, monkeypatch) -> None:
     authenticator = PasswordAuthenticator()
-    configure_local_bootstrap(monkeypatch, loaded_handlers.handlers)
+    configure_local_bootstrap(monkeypatch)
     monkeypatch.setattr(loaded_handlers.handlers, "_find_firstuse_authenticator", lambda _auth: authenticator)
     handler = object.__new__(loaded_handlers.handlers.ChangePasswordHandler)
     handler.current_user = DummyUser("operator")
@@ -65,7 +64,7 @@ def test_bootstrap_admin_can_change_own_password(loaded_handlers, monkeypatch) -
 
 def test_admin_can_reset_bootstrap_administrator(loaded_handlers, monkeypatch) -> None:
     authenticator = PasswordAuthenticator()
-    configure_local_bootstrap(monkeypatch, loaded_handlers.handlers)
+    configure_local_bootstrap(monkeypatch)
     monkeypatch.setattr(loaded_handlers.handlers, "_find_firstuse_authenticator", lambda _auth: authenticator)
     handler = object.__new__(loaded_handlers.handlers.AdminResetPasswordHandler)
     handler.current_user = DummyUser("manager", admin=True)
@@ -113,7 +112,7 @@ def test_admin_reset_listing_excludes_administrators_and_github_users(loaded_han
 
 def test_admin_api_can_set_bootstrap_administrator_password(loaded_handlers, monkeypatch) -> None:
     authenticator = PasswordAuthenticator()
-    configure_local_bootstrap(monkeypatch, loaded_handlers.handlers)
+    configure_local_bootstrap(monkeypatch)
     monkeypatch.setattr(loaded_handlers.handlers, "_find_firstuse_authenticator", lambda _auth: authenticator)
     handler = object.__new__(loaded_handlers.handlers.AdminAPISetPasswordHandler)
     handler.current_user = DummyUser("manager", admin=True)
@@ -132,7 +131,7 @@ def test_admin_api_can_set_bootstrap_administrator_password(loaded_handlers, mon
 
 def test_admin_api_keeps_other_local_users_changeable(loaded_handlers, monkeypatch) -> None:
     authenticator = PasswordAuthenticator()
-    configure_local_bootstrap(monkeypatch, loaded_handlers.handlers)
+    configure_local_bootstrap(monkeypatch)
     monkeypatch.setattr(loaded_handlers.handlers, "_find_firstuse_authenticator", lambda _auth: authenticator)
     handler = object.__new__(loaded_handlers.handlers.AdminAPISetPasswordHandler)
     handler.current_user = DummyUser("manager", admin=True)
@@ -150,7 +149,7 @@ def test_admin_api_keeps_other_local_users_changeable(loaded_handlers, monkeypat
 
 def test_admin_api_batch_can_set_bootstrap_administrator_password(loaded_handlers, monkeypatch) -> None:
     authenticator = PasswordAuthenticator()
-    configure_local_bootstrap(monkeypatch, loaded_handlers.handlers)
+    configure_local_bootstrap(monkeypatch)
     monkeypatch.setattr(loaded_handlers.handlers, "_find_firstuse_authenticator", lambda _auth: authenticator)
     handler = object.__new__(loaded_handlers.handlers.AdminAPIBatchSetPasswordHandler)
     handler.current_user = DummyUser("manager", admin=True)
@@ -169,7 +168,7 @@ def test_admin_api_batch_can_set_bootstrap_administrator_password(loaded_handler
 
 def test_github_users_remain_blocked_from_native_password_changes(loaded_handlers, monkeypatch) -> None:
     authenticator = PasswordAuthenticator()
-    configure_local_bootstrap(monkeypatch, loaded_handlers.handlers)
+    configure_local_bootstrap(monkeypatch)
     monkeypatch.setattr(loaded_handlers.handlers, "_find_firstuse_authenticator", lambda _auth: authenticator)
     handler = object.__new__(loaded_handlers.handlers.AdminAPISetPasswordHandler)
     handler.current_user = DummyUser("manager", admin=True)

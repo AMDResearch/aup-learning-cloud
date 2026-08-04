@@ -65,32 +65,19 @@ def load_spawner(monkeypatch: pytest.MonkeyPatch, groups: types.ModuleType) -> t
     return module.RemoteLabKubeSpawner
 
 
-@pytest.mark.parametrize(
-    ("access_policy", "expected_resources"),
-    (("all", ["cpu", "gpu", "code-cpu"]), ("group-mapped", ["gpu"])),
-)
-def test_spawner_uses_configured_access_policy_for_exact_resource_list(
-    monkeypatch: pytest.MonkeyPatch, access_policy: str, expected_resources: list[str]
-) -> None:
+def test_spawner_uses_shared_group_mapping_without_auth_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     groups_test = load_groups_test_module(monkeypatch)
     spawner_type = load_spawner(monkeypatch, groups_test.groups)
     spawner = object.__new__(spawner_type)
     spawner.user = groups_test.DummyUser([groups_test.DummyGroup("team-gpu")], name="native-user")
     spawner.team_resource_mapping = {"team-gpu": ["gpu"], "native-users": ["cpu"]}
     spawner.resource_images = {"cpu": "cpu-image", "gpu": "gpu-image", "code-cpu": "code-image"}
-    spawner.access_policy = access_policy
     spawner.log = types.SimpleNamespace(debug=lambda _message: None)
 
-    assert asyncio.run(spawner.get_user_resources()) == expected_resources
+    assert asyncio.run(spawner.get_user_resources()) == ["gpu"]
 
 
-@pytest.mark.parametrize(
-    ("access_policy", "expected_resources"),
-    (("all", ["code-cpu", "cpu", "gpu"]), ("group-mapped", ["gpu"])),
-)
-def test_resources_api_uses_configured_access_policy_for_exact_resource_list(
-    monkeypatch: pytest.MonkeyPatch, access_policy: str, expected_resources: list[str]
-) -> None:
+def test_resources_api_uses_shared_group_mapping_without_auth_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     groups_test = load_groups_test_module(monkeypatch)
     monkeypatch.delitem(sys.modules, "tornado", raising=False)
     monkeypatch.delitem(sys.modules, "tornado.web", raising=False)
@@ -111,9 +98,7 @@ def test_resources_api_uses_configured_access_policy_for_exact_resource_list(
         config_module.HubConfig = type("HubConfig", (), {"get": staticmethod(lambda: config)})
         monkeypatch.setitem(sys.modules, "core.config", config_module)
         monkeypatch.setitem(sys.modules, "core.groups", groups_test.groups)
-        loaded.handlers.configure_handlers(
-            team_resource_mapping={"team-gpu": ["gpu"], "native-users": ["cpu"]}, access_policy=access_policy
-        )
+        loaded.handlers.configure_handlers(team_resource_mapping={"team-gpu": ["gpu"], "native-users": ["cpu"]})
         handler = object.__new__(loaded.handlers.ResourcesAPIHandler)
         handler.current_user = groups_test.DummyUser([groups_test.DummyGroup("team-gpu")], name="native-user")
         response: dict[str, str] = {}
@@ -122,10 +107,10 @@ def test_resources_api_uses_configured_access_policy_for_exact_resource_list(
 
         asyncio.run(handler.get())
 
-    assert [resource["key"] for resource in json.loads(response["body"])["resources"]] == expected_resources
+    assert [resource["key"] for resource in json.loads(response["body"])["resources"]] == ["gpu"]
 
 
-def test_configure_handlers_replaces_optional_policy_and_mapping_state(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_configure_handlers_replaces_mapping_state_without_auth_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delitem(sys.modules, "tornado", raising=False)
     monkeypatch.delitem(sys.modules, "tornado.web", raising=False)
     with load_handlers(monkeypatch) as loaded:
@@ -133,11 +118,10 @@ def test_configure_handlers_replaces_optional_policy_and_mapping_state(monkeypat
             accelerator_options={"gpu": {}},
             quota_rates={"gpu": 2},
             team_resource_mapping={"team": ["gpu"]},
-            access_policy="all",
         )
-        loaded.handlers.configure_handlers(access_policy="group-mapped")
+        loaded.handlers.configure_handlers()
 
         assert loaded.handlers._handler_config["accelerator_options"] == {}
         assert loaded.handlers._handler_config["quota_rates"] == {}
         assert loaded.handlers._handler_config["team_resource_mapping"] == {}
-        assert loaded.handlers._handler_config["access_policy"] == "group-mapped"
+        assert "auth_mode" not in loaded.handlers._handler_config

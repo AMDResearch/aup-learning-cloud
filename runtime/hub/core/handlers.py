@@ -32,7 +32,7 @@ from __future__ import annotations
 import asyncio
 import json
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from urllib.parse import urlencode, urlparse, urlunparse
 
 from jupyterhub.apihandlers import APIHandler
@@ -62,9 +62,6 @@ from core.stats_handlers import (
     StatsUserHandler,
 )
 
-if TYPE_CHECKING:
-    from core.config import ResourceAccessPolicy
-
 # =============================================================================
 # Module-level configuration (set via configure_handlers)
 # =============================================================================
@@ -76,8 +73,6 @@ _handler_config: dict[str, Any] = {
     "minimum_quota_to_start": 10,
     "default_quota": 0,
     "team_resource_mapping": {},
-    "auth_mode": "auto-login",
-    "access_policy": "group-mapped",
     "platform_name": "AUP Learning Cloud",
 }
 
@@ -140,8 +135,6 @@ def configure_handlers(
     default_quota: int = 0,
     team_resource_mapping: dict[str, list[str]] | None = None,
     github_org: str = "",
-    auth_mode: str = "auto-login",
-    access_policy: ResourceAccessPolicy = "group-mapped",
     platform_name: str = "AUP Learning Cloud",
 ) -> None:
     """Configure handler module with runtime settings."""
@@ -152,8 +145,6 @@ def configure_handlers(
     _handler_config["default_quota"] = default_quota
     _handler_config["team_resource_mapping"] = team_resource_mapping or {}
     _handler_config["github_org"] = github_org
-    _handler_config["auth_mode"] = auth_mode
-    _handler_config["access_policy"] = access_policy
     _handler_config["platform_name"] = platform_name
 
 
@@ -1140,8 +1131,6 @@ class ResourcesAPIHandler(APIHandler):
             resolve_resources_for_user(
                 self.current_user,
                 _handler_config.get("team_resource_mapping", {}),
-                _handler_config["access_policy"],
-                list(config.resources.images.keys()),
             )
         )
 

@@ -28,35 +28,30 @@ from core.authenticators.firstuse import CustomFirstUseAuthenticator
 from core.authenticators.github_app import GITHUB_USERNAME_PREFIX, CustomGitHubOAuthenticator
 from core.authenticators.jwt import RemoteLabAuthenticator
 from core.authenticators.multi import CustomMultiAuthenticator
-from core.config import AuthCapabilities, AuthConfigurationError, LegacyAuthMode
+from core.config import AuthCapabilities, AuthConfigurationError
 
 LOCAL_ACCOUNT_PREFIX = "LocalAccount"
 
 
-def create_authenticator(auth: AuthCapabilities | LegacyAuthMode) -> type | str:
+def create_authenticator(auth: AuthCapabilities) -> type | str:
     """Select the JupyterHub authenticator class for validated capabilities."""
 
     match auth:
-        case AuthCapabilities(auto_login=True, dummy=False, native=False, github=False) | "auto-login":
+        case AuthCapabilities(auto_login=True, dummy=False, native=False, github=False):
             return AutoLoginAuthenticator
-        case AuthCapabilities(auto_login=False, dummy=True, native=False, github=False) | "dummy":
+        case AuthCapabilities(auto_login=False, dummy=True, native=False, github=False):
             return "dummy"
-        case AuthCapabilities(auto_login=False, dummy=False, native=True, github=False) | "local":
+        case AuthCapabilities(auto_login=False, dummy=False, native=True, github=False):
             return CustomFirstUseAuthenticator
-        case AuthCapabilities(auto_login=False, dummy=False, native=False, github=True) | "github":
+        case AuthCapabilities(auto_login=False, dummy=False, native=False, github=True):
             return CustomGitHubOAuthenticator
-        case AuthCapabilities(auto_login=False, dummy=False, native=True, github=True) | "multi":
+        case AuthCapabilities(auto_login=False, dummy=False, native=True, github=True):
             return CustomMultiAuthenticator
         case AuthCapabilities():
             raise AuthConfigurationError("auth must enable one exclusive provider or native + github")
-        # Todo 13: remove the effective-mode compatibility boundary after Todo 6 consumes config.auth.
-        case str():
-            raise ValueError(f"Unknown authentication mode: {auth}")
-        case bool():
-            raise AuthConfigurationError("authentication capabilities cannot be boolean values")
         case unsupported:
             raise AuthConfigurationError(
-                f"authentication capabilities must be AuthCapabilities or a supported effective mode, got {type(unsupported).__name__}"
+                f"authentication capabilities must be AuthCapabilities, got {type(unsupported).__name__}"
             )
 
 

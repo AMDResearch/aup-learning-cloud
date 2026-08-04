@@ -9,11 +9,9 @@ GITHUB_SETTINGS = {
 }
 
 
-def make_config(auth: object, access_policy: str) -> types.SimpleNamespace:
+def make_config(auth: object) -> types.SimpleNamespace:
     return types.SimpleNamespace(
         auth=auth,
-        auth_mode=auth.effective_mode,
-        resources=types.SimpleNamespace(effective_access_policy=access_policy),
         accelerators={},
         build_quota_rates=lambda: {},
         quota_enabled=True,

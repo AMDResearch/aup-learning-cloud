@@ -92,7 +92,9 @@ def test_login_renders_enabled_authentication_controls(
     ]
     visible_text = " ".join(probe.text)
 
-    assert ("username" in input_names and "password" in input_names) is (variant in {"dummy", "native", "native-github"})
+    assert ("username" in input_names and "password" in input_names) is (
+        variant in {"dummy", "native", "native-github"}
+    )
     assert len(password_toggles) == (1 if variant in {"dummy", "native", "native-github"} else 0)
     assert all(button.get("aria-label") == "Show password" for button in password_toggles)
     if variant == "dummy":
@@ -185,6 +187,7 @@ def test_attribution_footer_is_after_all_template_blocks_and_renders() -> None:
     footer_offset = source.index('<footer id="auplc-powered-by-footer">')
 
     assert footer_offset > source.rfind("{% endblock")
-    assert "auplc-powered-by-footer" in probe_html(
-        template_environment().get_template("page.html").render(**base_context())
-    ).ids
+    assert (
+        "auplc-powered-by-footer"
+        in probe_html(template_environment().get_template("page.html").render(**base_context())).ids
+    )

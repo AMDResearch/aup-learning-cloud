@@ -59,7 +59,7 @@ class AuthTemplateVars(TypedDict):
 
 
 def _build_auth_template_vars(auth: AuthCapabilities) -> AuthTemplateVars:
-    _ = auth.effective_mode
+    auth.validate()
     return {
         "auth_auto_login": auth.auto_login,
         "auth_dummy": auth.dummy,
@@ -263,8 +263,6 @@ def setup_hub(c: Any) -> None:
         default_quota=config.quota.defaultQuota,
         team_resource_mapping=dict(config.teams.mapping),
         github_org=config.github_org_name,
-        auth_mode=config.auth_mode,
-        access_policy=config.resources.effective_access_policy,
         platform_name=config.platform_display_name,
     )
 
@@ -401,13 +399,6 @@ def setup_hub(c: Any) -> None:
     if admin_password and not auth.native:
         raise RuntimeError("Administrator password bootstrap requires native authentication")
 
-    # =========================================================================
-    # Template Paths
-    # =========================================================================
-
-    template_path = os.environ.get("JUPYTERHUB_TEMPLATE_PATH", "/tmp/custom_templates")
-    c.JupyterHub.template_paths = [template_path]
-
     if admin_password:
         try:
             _bootstrap_admin_password(admin_username, admin_password)
@@ -421,6 +412,13 @@ def setup_hub(c: Any) -> None:
         print(f"[SETUP] Admin user configured: {admin_username}")
 
     # =========================================================================
+    # Template Paths
+    # =========================================================================
+
+    template_path = os.environ.get("JUPYTERHUB_TEMPLATE_PATH", "/tmp/custom_templates")
+    c.JupyterHub.template_paths = [template_path]
+
+    # =========================================================================
     # Template Vars
     # =========================================================================
 
@@ -430,5 +428,8 @@ def setup_hub(c: Any) -> None:
     c.JupyterHub.template_vars["cluster_name"] = config.cluster_name  # type: ignore[assignment]
     c.JupyterHub.template_vars["platform_name"] = config.platform_display_name  # type: ignore[assignment]
 
-    print(f"[SETUP] Hub setup complete: auth_mode={config.auth_mode}")
+    print(
+        "[SETUP] Hub setup complete: auth="
+        f"auto_login:{auth.auto_login},dummy:{auth.dummy},native:{auth.native},github:{auth.github}"
+    )
     print(f"[SETUP] template_vars: {c.JupyterHub.template_vars}")
