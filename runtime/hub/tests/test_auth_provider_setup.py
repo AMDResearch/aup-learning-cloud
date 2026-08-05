@@ -7,6 +7,7 @@ from pathlib import Path
 
 import anyio
 import pytest
+from github_authenticator_support import loaded_authenticators
 from provider_setup_support import GITHUB_SETTINGS, make_config
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -247,6 +248,25 @@ def test_github_prefixed_users_sync_teams_for_each_github_capability(
         anyio.run(state.c.Spawner.auth_state_hook, spawner, {"access_token": "token"})
 
         assert spawner.github_access_token == "token"
+        assert len(state.team_syncs) == 1
+        assert state.group_assignments == [("github:octo", "github-users")]
+
+
+def test_github_only_auth_result_syncs_teams_with_the_prefixed_local_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with _loaded_setup(monkeypatch, (False, False, False, True)) as state:
+        state.setup.setup_hub(state.c)
+        with loaded_authenticators(monkeypatch) as modules:
+            authenticator = modules.github.CustomGitHubOAuthenticator()
+            authenticator.allow_all = True
+            raw_model = anyio.run(authenticator.authenticate, None, {"login": "Octo"})
+            auth_model = anyio.run(authenticator.run_post_auth_hook, None, raw_model)
+        spawner = types.SimpleNamespace(user=types.SimpleNamespace(name=auth_model["name"], db=object()))
+
+        anyio.run(state.c.Spawner.auth_state_hook, spawner, {"access_token": "token"})
+
+        assert spawner.user.name == "github:octo"
         assert len(state.team_syncs) == 1
         assert state.group_assignments == [("github:octo", "github-users")]
 

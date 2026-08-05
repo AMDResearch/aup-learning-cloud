@@ -44,10 +44,14 @@ custom:
 - Auto-login provides a shared session with no credentials.
 - Dummy accepts any username/password and is for testing only.
 - Native provides administrator-managed accounts.
-- GitHub uses the GitHub App. Its `oauth_callback_url` ends in
-  `/hub/oauth_callback`.
-- Native plus GitHub puts both methods on one page. Its GitHub callback ends in
-  `/hub/github/oauth_callback`.
+- GitHub uses the GitHub App at `/hub/github/oauth_callback` in both GitHub-only
+  and native-plus-GitHub modes.
+
+GitHub users always have the local AUP Learning Cloud username
+`github:<normalized-login>` in both GitHub-only and native-plus-GitHub modes.
+Native users remain unprefixed. Configure GitHub `allowed_users`, `admin_users`,
+`blocked_users`, and `allowed_organizations` with raw GitHub logins and
+organizations, not the local `github:` username.
 
 All five combinations use `custom.teams.mapping` and the existing fallback
 groups for resource visibility. Provider selection doesn't change that policy.
@@ -126,9 +130,7 @@ token for scripts and isn't used by password bootstrap.
 1. **Create the App under the organization** (not a personal account):
    `https://github.com/organizations/<ORG>/settings/apps/new`.
 2. **Basic info:** name (e.g. `auplc-hub`), Homepage = Hub URL, **Callback URL**
-   matching the provider combination:
-   - native plus GitHub: `https://<domain>/hub/github/oauth_callback`
-   - GitHub only: `https://<domain>/hub/oauth_callback`
+   = `https://<domain>/hub/github/oauth_callback`.
 3. Check **Expire user authorization tokens** and **Request user authorization
    (OAuth) during installation**. Uncheck **Webhook → Active**.
 4. **Permissions:**
@@ -146,8 +148,14 @@ token for scripts and isn't used by password bootstrap.
 
 ## 4. GitHub App — configure the Hub
 
+Set `oauth_callback_url` to `https://<domain>/hub/github/oauth_callback` for
+both GitHub-only and native-plus-GitHub deployments.
+
 ```yaml
 custom:
+  auth:
+    native: true
+    github: true
   githubOrgName: "<YOUR-ORG-NAME>"
 
   gitClone:
@@ -171,6 +179,8 @@ hub:
 
 `scope: []` is correct for a GitHub App. `installation_id` can stay blank when
 the App is installed on the org (auto-discovered via `GET /orgs/{org}/installation`).
+For GitHub-only, set `custom.auth.github: true` without `native`; keep the same
+`https://<domain>/hub/github/oauth_callback` callback URL.
 
 ## 5. Team-to-group sync
 
