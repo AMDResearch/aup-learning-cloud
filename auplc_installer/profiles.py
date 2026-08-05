@@ -4,9 +4,9 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from enum import Enum
-from typing import assert_never
 
 from auplc_installer.auth import validate_local_admin_username
+from auplc_installer.typing_compat import assert_never
 from auplc_installer.util import InstallerError
 
 

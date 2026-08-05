@@ -14,7 +14,6 @@ from __future__ import annotations
 import re
 from io import StringIO
 from pathlib import Path
-from typing import NoReturn
 
 from auplc_installer.catalog import (
     BASE_TEAM_MAPPING,
@@ -24,6 +23,7 @@ from auplc_installer.catalog import (
 )
 from auplc_installer.gpu import GpuConfig, is_curated_sku
 from auplc_installer.profiles import AccessProfile, detect_installer_profile, resolve_access_settings
+from auplc_installer.typing_compat import assert_never
 from auplc_installer.util import InstallerError, log
 
 # Resource name → image basename (used by acceleratorOverrides emission
@@ -40,10 +40,6 @@ _RESOURCE_IMAGE_BASE: dict[str, str] = {
 
 
 GPU_RESOURCE_KEYS: tuple[str, ...] = tuple(_RESOURCE_IMAGE_BASE.keys())
-
-
-def _assert_never(value: NoReturn) -> NoReturn:
-    raise AssertionError(f"Expected unreachable value: {value!r}")
 
 
 def emit_overlay(
@@ -85,7 +81,7 @@ def emit_overlay(
             buf.write("  auth:\n")
             buf.write("    native: true\n")
         case unreachable:
-            _assert_never(unreachable)
+            assert_never(unreachable)
     buf.write("  runtimeLimitEnabled: false\n")
     buf.write("  adminUser:\n")
     match settings.profile:
@@ -96,7 +92,7 @@ def emit_overlay(
         case AccessProfile.PERSONAL:
             buf.write("    enabled: false\n")
         case unreachable:
-            _assert_never(unreachable)
+            assert_never(unreachable)
     buf.write("  quota:\n")
     buf.write(f"    enabled: {str(settings.quota_enabled).lower()}\n")
 
