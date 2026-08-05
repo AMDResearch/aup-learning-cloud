@@ -188,3 +188,97 @@ def test_start_schedules_shutdown_only_when_runtime_limit_enabled(
         assert timer_loop.calls == []
         assert spawner.environment["AUPLC_RUNTIME_UNLIMITED"] == "true"
         assert "JOB_RUN_TIME" not in spawner.environment
+
+
+def test_start_resolves_auto_with_authorized_keys_and_configures_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    class QuotaManager:
+        def start_usage_session(self, *_args: str) -> str:
+            return "usage-session"
+
+    metadata = types.SimpleNamespace(acceleratorKeys=["gpu-a", "gpu-b"], allowGitClone=False)
+    quota_module = types.SimpleNamespace(get_quota_manager=lambda: QuotaManager())
+    monkeypatch.setitem(sys.modules, "core.quota", quota_module)
+
+    async def base_start(_spawner: object) -> str:
+        return "started"
+
+    monkeypatch.setattr(kubernetes.KubeSpawner, "start", base_start, raising=False)
+
+    spawner = object.__new__(RemoteLabKubeSpawner)
+    spawner.user = types.SimpleNamespace(name="student")
+    spawner.user_options = {"runtime_minutes": 20, "resource_type": "gpu", "gpu_selection": "auto"}
+    spawner.resource_images = {"gpu": "gpu-image"}
+    spawner.resource_requirements = {"gpu": {"cpu": "1", "memory": "1Gi", "amd.com/gpu": "1"}}
+    spawner.accelerator_options = {"gpu-a": {}, "gpu-b": {}}
+    spawner.quota_enabled = False
+    spawner.runtime_limit_enabled = False
+    spawner.environment = {}
+    spawner.extra_pod_config = {}
+    spawner.notebook_allowed_origins = []
+    spawner._hub_config = types.SimpleNamespace(get_resource_metadata=lambda _resource_type: metadata)
+    spawner.log = types.SimpleNamespace(debug=lambda _message: None, info=lambda _message: None)
+    spawner._resolve_user_resources = lambda: ["gpu"]
+    spawner._launches_code_server = lambda _resource_type: False
+    spawner._resolve_target_path = lambda _resource_type, _custom_repo_path: None
+    spawner._apply_target_path_mapping = lambda _resource_type, _target_path: None
+
+    auto_calls: list[list[str]] = []
+    configure_calls: list[tuple[str, str | None]] = []
+
+    async def resolve_auto(resource_type: str, eligible_keys: list[str]) -> str:
+        assert resource_type == "gpu"
+        auto_calls.append(eligible_keys)
+        return "gpu-b"
+
+    def configure(resource_type: str, selection: str | None) -> None:
+        configure_calls.append((resource_type, selection))
+
+    spawner._resolve_auto_accelerator = resolve_auto
+    spawner._configure_spawner = configure
+
+    result = kubernetes.asyncio.run(spawner.start())
+
+    assert result == "started"
+    assert auto_calls == [["gpu-a", "gpu-b"]]
+    assert spawner.user_options["gpu_selection"] == "gpu-b"
+    assert configure_calls == [("gpu", "gpu-b")]
+
+
+@pytest.mark.parametrize(
+    ("auto_result", "error"),
+    [
+        ("gpu-x", "not authorized"),
+        ("gpu-unconfigured", "not configured"),
+        (None, "must return a concrete accelerator"),
+        ("", "must return a concrete accelerator"),
+        ("   ", "must return a concrete accelerator"),
+        ("auto", "must return a concrete accelerator"),
+    ],
+)
+def test_start_rejects_auto_result_that_is_not_an_authorized_concrete_accelerator(
+    auto_result: str | None, error: str
+) -> None:
+    metadata = types.SimpleNamespace(acceleratorKeys=["gpu-a", "gpu-unconfigured"], allowGitClone=False)
+
+    spawner = object.__new__(RemoteLabKubeSpawner)
+    spawner.user = types.SimpleNamespace(name="student")
+    spawner.user_options = {"runtime_minutes": 20, "resource_type": "gpu", "gpu_selection": "auto"}
+    spawner.resource_images = {"gpu": "gpu-image"}
+    spawner.resource_requirements = {"gpu": {"cpu": "1", "memory": "1Gi", "amd.com/gpu": "1"}}
+    spawner.accelerator_options = {"gpu-a": {}}
+    spawner.extra_pod_config = {}
+    spawner._hub_config = types.SimpleNamespace(get_resource_metadata=lambda _resource_type: metadata)
+    spawner._resolve_user_resources = lambda: ["gpu"]
+    auto_calls: list[list[str]] = []
+
+    async def resolve_auto(_resource_type: str, eligible_keys: list[str]) -> str | None:
+        auto_calls.append(eligible_keys)
+        return auto_result
+
+    spawner._resolve_auto_accelerator = resolve_auto
+    spawner._configure_spawner = lambda *_args: pytest.fail("invalid auto result configured the spawner")
+
+    with pytest.raises(RuntimeError, match=error):
+        kubernetes.asyncio.run(spawner.start())
+
+    assert auto_calls == [["gpu-a", "gpu-unconfigured"]]

@@ -214,6 +214,11 @@ class RemoteLabKubeSpawner(KubeSpawner):
         if not allowed_accelerators:
             raise RuntimeError(f"GPU resource '{resource_type}' has no authorized accelerators configured")
 
+        if selected_accelerator == "auto":
+            if len(allowed_accelerators) > 1:
+                return selected_accelerator
+            raise RuntimeError(f"GPU resource '{resource_type}' requires selecting an accelerator")
+
         if not selected_accelerator:
             if len(allowed_accelerators) == 1:
                 selected_accelerator = allowed_accelerators[0]
@@ -1001,7 +1006,6 @@ class RemoteLabKubeSpawner(KubeSpawner):
             self.user_options.get("gpu_selection"),
         )
         self.user_options["gpu_selection"] = gpu_selection
-        self._configure_spawner(resource_type, gpu_selection)
 
         # Ensure pod fails immediately (not retried) when an init container fails.
         # JupyterHub manages pod lifecycle; Kubernetes should not silently restart pods.
@@ -1016,6 +1020,9 @@ class RemoteLabKubeSpawner(KubeSpawner):
             metadata = self._hub_config.get_resource_metadata(resource_type) if self._hub_config else None
             eligible = list(metadata.acceleratorKeys) if metadata and metadata.acceleratorKeys else []
             gpu_selection = await self._resolve_auto_accelerator(resource_type, eligible)
+            if not isinstance(gpu_selection, str) or not gpu_selection.strip() or gpu_selection.strip() == "auto":
+                raise RuntimeError("Auto-selection must return a concrete accelerator")
+            gpu_selection = self._resolve_accelerator_selection(resource_type, gpu_selection)
             self.user_options["gpu_selection"] = gpu_selection
             self.log.info(f"Auto-selected accelerator '{gpu_selection}' for resource '{resource_type}'")
 
