@@ -8,7 +8,8 @@ import ipaddress
 import re
 
 from config_common import DEFAULT_ACCEL_LABELS, HEADER_HASH, die, require, yaml_quote
-from config_rendering import render_inventory, render_pxe_vars, render_values as _render_values
+from config_rendering import render_inventory, render_pxe_vars
+from config_rendering import render_values as _render_values
 
 __all__ = [
     "DEFAULT_ACCEL_LABELS",
