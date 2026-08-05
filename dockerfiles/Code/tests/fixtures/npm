@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+set -euo pipefail
+FAKE_COMMAND_LOG=${FAKE_COMMAND_LOG:?}
+printf -v command_record ' %q' "$@"
+printf 'npm%s\n' "$command_record" >>"$FAKE_COMMAND_LOG"

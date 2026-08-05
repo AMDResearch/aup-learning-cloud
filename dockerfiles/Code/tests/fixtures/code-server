@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+set -euo pipefail
+FAKE_CODE_EXIT_STATUS=${FAKE_CODE_EXIT_STATUS-}
+FAKE_COMMAND_LOG=${FAKE_COMMAND_LOG:?}
+FAKE_EVENT_DIR=${FAKE_EVENT_DIR:?}
+FAKE_INSTANCE=${FAKE_INSTANCE:?}
+printf -v command_record ' %q' "$@"
+printf 'code-server%s\n' "$command_record" >>"$FAKE_COMMAND_LOG"
+for argument in "$@"; do
+  if [ "$argument" = --install-extension ]; then
+    : >"$FAKE_EVENT_DIR/installer-invoked"
+    exit 0
+  fi
+done
+if [ -v PORT ]; then
+  printf '%s\n' "$PORT" >"$FAKE_EVENT_DIR/$FAKE_INSTANCE.code-port-env"
+else
+  printf '<unset>\n' >"$FAKE_EVENT_DIR/$FAKE_INSTANCE.code-port-env"
+fi
+on_term() {
+  event="$FAKE_EVENT_DIR/$FAKE_INSTANCE.code-term"
+  : >"$event.tmp.$$"
+  mv "$event.tmp.$$" "$event"
+  exit 0
+}
+trap on_term TERM INT
+ready="$FAKE_EVENT_DIR/$FAKE_INSTANCE.code-ready"
+printf '%s\n' "$$" >"$ready.tmp.$$"
+mv "$ready.tmp.$$" "$ready"
+if [ -n "$FAKE_CODE_EXIT_STATUS" ]; then
+  exec 8<>"$FAKE_EVENT_DIR/$FAKE_INSTANCE.code-exit.fifo"
+  IFS= read -r _ <&8
+  exit "$FAKE_CODE_EXIT_STATUS"
+fi
+exec 9<>"$FAKE_EVENT_DIR/$FAKE_INSTANCE.code.fifo"
+IFS= read -r _ <&9
