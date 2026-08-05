@@ -23,6 +23,8 @@ Authenticator Package
 Provides various authentication methods for JupyterHub.
 """
 
+from typing import Any
+
 from core.authenticators.auto_login import AutoLoginAuthenticator
 from core.authenticators.firstuse import CustomFirstUseAuthenticator
 from core.authenticators.github_app import GITHUB_USERNAME_PREFIX, CustomGitHubOAuthenticator
@@ -33,20 +35,30 @@ from core.config import AuthCapabilities, AuthConfigurationError
 LOCAL_ACCOUNT_PREFIX = "LocalAccount"
 
 
-def create_authenticator(auth: AuthCapabilities) -> type | str:
-    """Select the JupyterHub authenticator class for validated capabilities."""
+def configure_authenticator(c: Any, auth: AuthCapabilities) -> None:
+    """Configure the JupyterHub authenticator for validated capabilities."""
 
     match auth:
         case AuthCapabilities(auto_login=True, dummy=False, native=False, github=False):
-            return AutoLoginAuthenticator
+            c.JupyterHub.authenticator_class = AutoLoginAuthenticator
+            c.Authenticator.allow_all = True
         case AuthCapabilities(auto_login=False, dummy=True, native=False, github=False):
-            return "dummy"
+            c.JupyterHub.authenticator_class = "dummy"
         case AuthCapabilities(auto_login=False, dummy=False, native=True, github=False):
-            return CustomFirstUseAuthenticator
+            c.JupyterHub.authenticator_class = CustomFirstUseAuthenticator
+            c.Authenticator.allow_all = True
         case AuthCapabilities(auto_login=False, dummy=False, native=False, github=True):
-            return CustomGitHubOAuthenticator
+            c.JupyterHub.authenticator_class = CustomGitHubOAuthenticator
         case AuthCapabilities(auto_login=False, dummy=False, native=True, github=True):
-            return CustomMultiAuthenticator
+            c.JupyterHub.authenticator_class = CustomMultiAuthenticator
+            c.MultiAuthenticator.authenticators = [
+                {"authenticator_class": CustomGitHubOAuthenticator, "url_prefix": "/github"},
+                {
+                    "authenticator_class": CustomFirstUseAuthenticator,
+                    "url_prefix": "/native",
+                    "config": {"prefix": "", "allow_all": True},
+                },
+            ]
         case AuthCapabilities():
             raise AuthConfigurationError("auth must enable one exclusive provider or native + github")
         case unsupported:
@@ -61,7 +73,7 @@ __all__ = [
     "CustomGitHubOAuthenticator",
     "CustomFirstUseAuthenticator",
     "CustomMultiAuthenticator",
-    "create_authenticator",
+    "configure_authenticator",
     "LOCAL_ACCOUNT_PREFIX",
     "GITHUB_USERNAME_PREFIX",
 ]

@@ -117,9 +117,7 @@ def setup_hub(c: Any) -> None:
     from core import z2jh
     from core.authenticators import (
         GITHUB_USERNAME_PREFIX,
-        CustomFirstUseAuthenticator,
-        CustomGitHubOAuthenticator,
-        create_authenticator,
+        configure_authenticator,
     )
     from core.config import HubConfig
     from core.database import create_all_tables, init_database
@@ -234,22 +232,7 @@ def setup_hub(c: Any) -> None:
 
     c.Spawner.auth_state_hook = auth_state_hook
 
-    c.JupyterHub.authenticator_class = create_authenticator(auth)
-
-    if auth.auto_login or (auth.native and not auth.github):
-        c.Authenticator.allow_all = True
-    if auth.native and auth.github:
-        c.MultiAuthenticator.authenticators = [
-            {
-                "authenticator_class": CustomGitHubOAuthenticator,
-                "url_prefix": "/github",
-            },
-            {
-                "authenticator_class": CustomFirstUseAuthenticator,
-                "url_prefix": "/native",
-                "config": {"prefix": "", "allow_all": True},
-            },
-        ]
+    configure_authenticator(c, auth)
 
     # =========================================================================
     # Configure Handlers

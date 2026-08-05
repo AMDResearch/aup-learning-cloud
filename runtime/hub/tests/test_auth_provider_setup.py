@@ -79,22 +79,34 @@ def _loaded_setup(
         factory_inputs: list[object] = []
         authenticators = _module("core.authenticators")
         authenticators.GITHUB_USERNAME_PREFIX = "github:"
-        authenticators.CustomGitHubOAuthenticator = authenticator_types["github"]
-        authenticators.CustomFirstUseAuthenticator = authenticator_types["native"]
 
-        def create_authenticator(_input: object) -> type | str:
+        def configure_authenticator(c: object, _input: object) -> None:
             factory_inputs.append(_input)
             if auth.auto_login:
-                return authenticator_types["auto"]
+                c.JupyterHub.authenticator_class = authenticator_types["auto"]
+                c.Authenticator.allow_all = True
+                return
             if auth.dummy:
-                return "dummy"
+                c.JupyterHub.authenticator_class = "dummy"
+                return
             if auth.native and auth.github:
-                return authenticator_types["multi"]
+                c.JupyterHub.authenticator_class = authenticator_types["multi"]
+                c.MultiAuthenticator.authenticators = [
+                    {"authenticator_class": authenticator_types["github"], "url_prefix": "/github"},
+                    {
+                        "authenticator_class": authenticator_types["native"],
+                        "url_prefix": "/native",
+                        "config": {"prefix": "", "allow_all": True},
+                    },
+                ]
+                return
             if auth.github:
-                return authenticator_types["github"]
-            return authenticator_types["native"]
+                c.JupyterHub.authenticator_class = authenticator_types["github"]
+                return
+            c.JupyterHub.authenticator_class = authenticator_types["native"]
+            c.Authenticator.allow_all = True
 
-        authenticators.create_authenticator = create_authenticator
+        authenticators.configure_authenticator = configure_authenticator
         core.authenticators = authenticators
         module_patch.setitem(sys.modules, "core.authenticators", authenticators)
 

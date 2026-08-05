@@ -66,22 +66,36 @@ def test_factory_preserves_identity_prefix_contract(monkeypatch: pytest.MonkeyPa
 
 
 @pytest.mark.parametrize(
-    ("capabilities", "expected_name"),
+    ("capabilities", "expected_name", "allow_all"),
     [
-        ((True, False, False, False), "AutoLoginAuthenticator"),
-        ((False, True, False, False), "dummy"),
-        ((False, False, True, False), "CustomFirstUseAuthenticator"),
-        ((False, False, False, True), "CustomGitHubOAuthenticator"),
-        ((False, False, True, True), "CustomMultiAuthenticator"),
+        ((True, False, False, False), "AutoLoginAuthenticator", True),
+        ((False, True, False, False), "dummy", None),
+        ((False, False, True, False), "CustomFirstUseAuthenticator", True),
+        ((False, False, False, True), "CustomGitHubOAuthenticator", None),
+        ((False, False, True, True), "CustomMultiAuthenticator", None),
     ],
 )
-def test_factory_selects_authenticator_for_canonical_capabilities(
-    monkeypatch: pytest.MonkeyPatch, capabilities: tuple[bool, bool, bool, bool], expected_name: str
+def test_factory_configures_authenticator_for_canonical_capabilities(
+    monkeypatch: pytest.MonkeyPatch,
+    capabilities: tuple[bool, bool, bool, bool],
+    expected_name: str,
+    allow_all: bool | None,
 ) -> None:
     with _loaded_factory(monkeypatch) as (factory, config):
-        selected = factory.create_authenticator(config.AuthCapabilities(*capabilities))
+        c = types.SimpleNamespace(
+            JupyterHub=types.SimpleNamespace(),
+            Authenticator=types.SimpleNamespace(),
+            MultiAuthenticator=types.SimpleNamespace(),
+        )
+        factory.configure_authenticator(c, config.AuthCapabilities(*capabilities))
 
+        selected = c.JupyterHub.authenticator_class
         assert selected == "dummy" if expected_name == "dummy" else selected.__name__ == expected_name
+        if allow_all is not None:
+            assert c.Authenticator.allow_all is allow_all
+        if capabilities == (False, False, True, True):
+            assert c.MultiAuthenticator.authenticators[0]["url_prefix"] == "/github"
+            assert c.MultiAuthenticator.authenticators[1]["url_prefix"] == "/native"
 
 
 @pytest.mark.parametrize(
@@ -97,7 +111,7 @@ def test_factory_rejects_invalid_capabilities_before_authenticator_construction(
     monkeypatch: pytest.MonkeyPatch, capabilities: tuple[bool, bool, bool, bool]
 ) -> None:
     with _loaded_factory(monkeypatch) as (factory, config), pytest.raises(config.AuthConfigurationError):
-        factory.create_authenticator(config.AuthCapabilities(*capabilities))
+        factory.configure_authenticator(types.SimpleNamespace(), config.AuthCapabilities(*capabilities))
 
 
 @pytest.mark.parametrize(
@@ -106,7 +120,7 @@ def test_factory_rejects_invalid_capabilities_before_authenticator_construction(
 )
 def test_factory_rejects_malformed_runtime_inputs(monkeypatch: pytest.MonkeyPatch, malformed_auth) -> None:
     with _loaded_factory(monkeypatch) as (factory, config), pytest.raises(config.AuthConfigurationError):
-        factory.create_authenticator(malformed_auth)
+        factory.configure_authenticator(types.SimpleNamespace(), malformed_auth)
 
 
 def test_factory_module_cleanup_survives_a_forced_test_failure(monkeypatch: pytest.MonkeyPatch) -> None:
