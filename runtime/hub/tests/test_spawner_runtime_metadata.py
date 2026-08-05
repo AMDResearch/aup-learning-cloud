@@ -160,12 +160,17 @@ def test_start_schedules_shutdown_only_when_runtime_limit_enabled(
     spawner = object.__new__(RemoteLabKubeSpawner)
     spawner.user = types.SimpleNamespace(name="student")
     spawner.user_options = {"runtime_minutes": 120, "resource_type": "cpu"}
+    spawner.resource_images = {"cpu": "cpu-image"}
     spawner.quota_enabled = False
     spawner.runtime_limit_enabled = runtime_limit_enabled
     spawner.environment = {}
+    spawner.extra_pod_config = {}
     spawner.notebook_allowed_origins = []
     spawner._hub_config = None
     spawner.log = types.SimpleNamespace(debug=lambda _message: None)
+    spawner._resolve_user_resources = lambda: ["cpu"]
+    spawner._resolve_accelerator_selection = lambda _resource_type, _selection: None
+    spawner._configure_spawner = lambda _resource_type, _selection: None
     spawner._launches_code_server = lambda _resource_type: False
 
     result = kubernetes.asyncio.run(spawner.start())
