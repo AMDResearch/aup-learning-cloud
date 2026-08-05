@@ -40,9 +40,7 @@ def test_native_child_renders_inline_form_with_encoded_next(
     assert "required" in fields["password"]
     button_classes = [(button.get("class") or "").split() for button in probe.buttons]
     assert any("login-submit" in classes for classes in button_classes)
-    password_toggles = [
-        button for button in probe.buttons if "password-toggle" in (button.get("class") or "").split()
-    ]
+    password_toggles = [button for button in probe.buttons if "password-toggle" in (button.get("class") or "").split()]
     assert len(password_toggles) == 1
     assert password_toggles[0].get("type") == "button"
     assert password_toggles[0].get("aria-label") == "Show password"

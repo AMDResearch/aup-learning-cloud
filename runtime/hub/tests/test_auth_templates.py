@@ -87,9 +87,7 @@ def test_login_renders_enabled_authentication_controls(
     probe = probe_html(template_environment().get_template("login.html").render(**context))
     form_actions = {form.get("action") for form in probe.forms}
     input_names = {field.get("name") for field in probe.inputs}
-    password_toggles = [
-        button for button in probe.buttons if "password-toggle" in (button.get("class") or "").split()
-    ]
+    password_toggles = [button for button in probe.buttons if "password-toggle" in (button.get("class") or "").split()]
     visible_text = " ".join(probe.text)
 
     assert ("username" in input_names and "password" in input_names) is (

@@ -989,9 +989,7 @@ def test_generator_emits_canonical_auth_and_runtime_policy(
 
 
 @pytest.mark.parametrize("auth_mode", [None, 42, "unsupported"])
-def test_generator_rejects_invalid_auth_mode_before_discovery(
-    tmp_path: Path, auth_mode: str | int | None
-) -> None:
+def test_generator_rejects_invalid_auth_mode_before_discovery(tmp_path: Path, auth_mode: str | int | None) -> None:
     spec = generator_spec()
     spec["auth_mode"] = auth_mode
     spec_path = write_file(tmp_path / "spec.json", json.dumps(spec))
