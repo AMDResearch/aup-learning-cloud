@@ -51,10 +51,18 @@ jobs:
           python-version: '3.10'
 
       - name: Install test deps
-        run: pip install pytest
+        run: pip install pytest anyio pyyaml traitlets "pydantic>=2.0"
 
       - name: Run Hub regression tests
-        run: python -m pytest runtime/hub/tests/test_jupyterhub_config_startup.py runtime/hub/tests/test_spawner_gpu_access.py
+        run: |
+          python -m pytest -v \
+            runtime/hub/tests/test_jupyterhub_config_startup.py \
+            runtime/hub/tests/test_spawner_gpu_access.py \
+            runtime/hub/tests/test_spawner_runtime_metadata.py \
+            runtime/hub/tests/test_authenticator_factory.py \
+            runtime/hub/tests/test_auth_provider_setup.py \
+            runtime/hub/tests/test_github_authenticator.py \
+            runtime/hub/tests/test_native_authenticator.py
 
   frontend-lint:
     name: Frontend (ESLint + TypeScript)
