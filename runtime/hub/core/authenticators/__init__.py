@@ -44,13 +44,17 @@ def configure_authenticator(c: Any, auth: AuthCapabilities) -> None:
             c.Authenticator.allow_all = True
         case AuthCapabilities(auto_login=False, dummy=True, native=False, github=False):
             c.JupyterHub.authenticator_class = "dummy"
+            c.Authenticator.allow_all = True
         case AuthCapabilities(auto_login=False, dummy=False, native=True, github=False):
             c.JupyterHub.authenticator_class = CustomFirstUseAuthenticator
             c.Authenticator.allow_all = True
         case AuthCapabilities(auto_login=False, dummy=False, native=False, github=True):
             c.JupyterHub.authenticator_class = CustomGitHubOAuthenticator
+            c.GitHubOAuthenticator.allow_all = False
         case AuthCapabilities(auto_login=False, dummy=False, native=True, github=True):
             c.JupyterHub.authenticator_class = CustomMultiAuthenticator
+            c.GitHubOAuthenticator.allow_all = False
+            c.MultiAuthenticator.allow_all = True
             c.MultiAuthenticator.authenticators = [
                 {"authenticator_class": CustomGitHubOAuthenticator, "url_prefix": "/github"},
                 {

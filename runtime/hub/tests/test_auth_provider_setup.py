@@ -89,9 +89,12 @@ def _loaded_setup(
                 return
             if auth.dummy:
                 c.JupyterHub.authenticator_class = "dummy"
+                c.Authenticator.allow_all = True
                 return
             if auth.native and auth.github:
                 c.JupyterHub.authenticator_class = authenticator_types["multi"]
+                c.GitHubOAuthenticator.allow_all = False
+                c.MultiAuthenticator.allow_all = True
                 c.MultiAuthenticator.authenticators = [
                     {"authenticator_class": authenticator_types["github"], "url_prefix": "/github"},
                     {
@@ -103,6 +106,7 @@ def _loaded_setup(
                 return
             if auth.github:
                 c.JupyterHub.authenticator_class = authenticator_types["github"]
+                c.GitHubOAuthenticator.allow_all = False
                 return
             c.JupyterHub.authenticator_class = authenticator_types["native"]
             c.Authenticator.allow_all = True
@@ -173,6 +177,7 @@ def _loaded_setup(
         c = types.SimpleNamespace(
             JupyterHub=hub,
             Authenticator=types.SimpleNamespace(),
+            GitHubOAuthenticator=types.SimpleNamespace(),
             Spawner=types.SimpleNamespace(),
             MultiAuthenticator=types.SimpleNamespace(),
         )
@@ -289,6 +294,7 @@ def test_github_only_preserves_direct_callback_path(monkeypatch: pytest.MonkeyPa
         state.setup.setup_hub(state.c)
 
         assert state.c.JupyterHub.authenticator_class is state.authenticator_types["github"]
+        assert state.c.GitHubOAuthenticator.allow_all is False
         assert not hasattr(state.c.MultiAuthenticator, "authenticators")
 
 
@@ -299,6 +305,8 @@ def test_composed_auth_preserves_prefixed_github_and_unprefixed_native_callbacks
         state.setup.setup_hub(state.c)
 
         assert state.c.JupyterHub.authenticator_class is state.authenticator_types["multi"]
+        assert state.c.GitHubOAuthenticator.allow_all is False
+        assert state.c.MultiAuthenticator.allow_all is True
         assert state.c.MultiAuthenticator.authenticators == [
             {"authenticator_class": state.authenticator_types["github"], "url_prefix": "/github"},
             {

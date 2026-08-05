@@ -21,6 +21,21 @@ def test_direct_github_auth_authorizes_raw_login_then_prefixes_accepted_model(mo
         assert prefixed_model["admin"] is True
 
 
+def test_github_organization_policy_rejects_nonmember_when_allow_all_is_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with loaded_authenticators(monkeypatch) as modules:
+        authenticator = modules.github.CustomGitHubOAuthenticator()
+        authenticator.allowed_organizations = {"auplc"}
+        authenticator.organization_members = {"auplc": {"octo"}}
+
+        auth_model = anyio.run(authenticator.authenticate, None, {"login": "outside"})
+
+        assert authenticator.allow_all is False
+        assert auth_model is None
+        assert authenticator.policy_names == ["outside"]
+
+
 def test_github_post_auth_prefixing_copies_only_top_level_model_and_is_idempotent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
