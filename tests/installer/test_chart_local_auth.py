@@ -136,6 +136,21 @@ def test_multi_node_example_emits_canonical_auth_and_runtime_policy() -> None:
     assert custom["quota"]["enabled"] is True
 
 
+@pytest.mark.parametrize("values_file", ["runtime/values.yaml", "runtime/values-multi-nodes.yaml.example"])
+def test_maintained_values_omit_global_authenticator_bypass(values_file: str) -> None:
+    values = yaml.safe_load((ROOT / values_file).read_text(encoding="utf-8"))
+    config = values["hub"]["config"]
+
+    assert "allow_all" not in config.get("Authenticator", {})
+    assert config["GitHubOAuthenticator"]["allowed_organizations"] == ["<YOUR-ORG-NAME>"]
+
+
+def test_multi_node_example_preserves_admin_users() -> None:
+    values = yaml.safe_load((ROOT / "runtime/values-multi-nodes.yaml.example").read_text(encoding="utf-8"))
+
+    assert values["hub"]["config"]["Authenticator"]["admin_users"] == ["your-github-username"]
+
+
 @pytest.mark.parametrize(
     ("runtime_limit_enabled", "quota_enabled"),
     [(True, True), (True, False), (False, False)],

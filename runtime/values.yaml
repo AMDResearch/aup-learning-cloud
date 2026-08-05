@@ -602,9 +602,6 @@ hub:
       # Users can access their running server via the "My Server" button on Home.
       redirect_to_server: false
 
-    Authenticator:
-      allow_all: true
-
     # ---- GitHub App ----
     GitHubOAuthenticator:
       oauth_callback_url: "https://<Your.domain>/hub/github/oauth_callback"

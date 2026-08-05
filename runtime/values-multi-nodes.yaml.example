@@ -516,7 +516,6 @@ hub:
       redirect_to_server: false
 
     Authenticator:
-      allow_all: true
       admin_users:
         - your-github-username
 
