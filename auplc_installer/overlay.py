@@ -14,7 +14,7 @@ from __future__ import annotations
 import re
 from io import StringIO
 from pathlib import Path
-from typing import assert_never
+from typing import NoReturn
 
 from auplc_installer.catalog import (
     BASE_TEAM_MAPPING,
@@ -40,6 +40,10 @@ _RESOURCE_IMAGE_BASE: dict[str, str] = {
 
 
 GPU_RESOURCE_KEYS: tuple[str, ...] = tuple(_RESOURCE_IMAGE_BASE.keys())
+
+
+def _assert_never(value: NoReturn) -> NoReturn:
+    raise AssertionError(f"Expected unreachable value: {value!r}")
 
 
 def emit_overlay(
@@ -80,6 +84,8 @@ def emit_overlay(
         case AccessProfile.LOCAL:
             buf.write("  auth:\n")
             buf.write("    native: true\n")
+        case unreachable:
+            _assert_never(unreachable)
     buf.write("  runtimeLimitEnabled: false\n")
     buf.write("  adminUser:\n")
     match settings.profile:
@@ -90,7 +96,7 @@ def emit_overlay(
         case AccessProfile.PERSONAL:
             buf.write("    enabled: false\n")
         case unreachable:
-            assert_never(unreachable)
+            _assert_never(unreachable)
     buf.write("  quota:\n")
     buf.write(f"    enabled: {str(settings.quota_enabled).lower()}\n")
 
