@@ -174,6 +174,7 @@ COPY ./course_data /ryzers/notebooks
 COPY ./course_data/lemonade_env.sh \
      ./course_data/manipulation_demo_headless.sh \
      ./course_data/manipulation_demo_streamlit.py \
+     ./course_data/notebook_demo.py \
      /ryzers/
 
 RUN ln -s /ryzers/notebooks/tests/test_ros.sh /ryzers/test_ros.sh \
