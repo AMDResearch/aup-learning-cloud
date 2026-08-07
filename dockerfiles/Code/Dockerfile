@@ -20,7 +20,7 @@
 ARG NODE_IMAGE=docker.io/library/node:22-bookworm-slim
 ARG BASE_IMAGE=ghcr.io/amdresearch/auplc-default:latest
 ARG IMAGE_FLAVOR=cpu
-ARG CODE_SERVER_VERSION=4.96.4
+ARG CODE_SERVER_VERSION=4.131.0
 
 FROM ${NODE_IMAGE} AS node-runtime
 
@@ -43,7 +43,7 @@ RUN pnpm --filter @auplc/runtime-status run build && \
 
 FROM ${BASE_IMAGE}
 
-ARG CODE_SERVER_VERSION=4.96.4
+ARG CODE_SERVER_VERSION=4.131.0
 ARG IMAGE_FLAVOR
 ARG NPM_REGISTRY=
 ARG PNPM_VERSION=10.27.0
@@ -80,6 +80,7 @@ COPY --from=hub-link-builder /build/runtime/code-server/extensions/auplc-hub-lin
 COPY dockerfiles/Code/start-code-server.sh /usr/local/bin/start-code-server.sh
 
 RUN chmod +x /usr/local/bin/start-code-server.sh && \
+    code-server --help | grep -F -- '--link-protection-trusted-domains' && \
     mkdir -p \
         /opt/auplc/extensions/local \
         /opt/auplc/extensions/staging \

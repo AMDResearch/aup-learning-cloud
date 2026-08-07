@@ -52,7 +52,7 @@ make -C dockerfiles code
 
 `code-cpu` builds `ghcr.io/amdresearch/auplc-code-cpu:latest`. `code-gpu` builds `ghcr.io/amdresearch/auplc-code-gpu:latest` and tags the selected GPU target, for example `ghcr.io/amdresearch/auplc-code-gpu:latest-gfx1151`. The aggregate `code` target builds both.
 
-The Dockerfile pins code-server to version `4.96.4` so builds use a known editor runtime instead of silently changing when a new upstream release appears.
+The Dockerfile pins code-server to version `4.131.0` so builds use a known editor runtime instead of silently changing when a new upstream release appears. The image build also verifies that the binary supports the trusted-domain CLI option required by the launcher.
 
 Additional build arguments customize the shared development toolchain:
 
