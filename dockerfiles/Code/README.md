@@ -141,15 +141,22 @@ cluster administration for kernel modules, GPU/NPU drivers, device plugins,
 udev rules, system services, or packages that must write to root-owned system
 directories.
 
-Extensions are installed into `/opt/auplc/code-server/extensions` during image
-build. At runtime, code-server uses the persistent user extension directory
-`/home/jovyan/.local/share/code-server/extensions` by default. Before
-code-server starts, the launcher seeds the default extension IDs from
-`/opt/auplc/extensions/extensions.txt` into that persistent directory by calling
-`code-server --install-extension`. Marketplace extensions are installed with
-`--force` so code-server handles upgrades instead of the launcher comparing
-versions itself; local `.vsix` packages are installed without `--force` to avoid
-downgrading a user-installed newer copy.
+Extensions resolved from the Marketplace and local `.vsix` packages during the
+image build are installed as root-owned system extensions under
+`/usr/lib/code-server/lib/vscode/extensions`. User-installed extensions remain
+in the persistent directory
+`/home/jovyan/.local/share/code-server/extensions`.
+
+Runtime startup does not install, copy, merge, stage, or lock extension data,
+and it does not access an extension marketplace. Existing user data is left
+untouched, including extension copies installed or seeded by earlier images.
+When the system and user directories contain the same extension ID, native VS
+Code extension precedence determines which copy is active.
+
+`PORT` remains the nginx public-listen input, but the launcher removes it from
+the code-server child environment before passing the explicit loopback
+`--bind-addr`. This prevents code-server's environment precedence from binding
+the nginx-facing public port.
 
 `--auth none` is acceptable only because JupyterHub and the JupyterHub proxy remain the authentication boundary. The user pod's port `8888` must stay private to the Hub/proxy path and must not be exposed directly through an unauthenticated service, ingress, or port-forward shared with untrusted users.
 
@@ -160,8 +167,6 @@ the proxied code-server root route. Hub spawn completion, however, redirects the
 browser to the server base URL, and code-server doesn't consume
 `JUPYTERHUB_DEFAULT_URL` by itself. AUPLC therefore keeps `AUPLC_CODE_WORKDIR` as
 the reliable adapter between Hub resource selection and the code-server process.
-The local proof is recorded in
-`.sisyphus/evidence/task-1-codeserver-default-url-proof.md`.
 
 Official Code images are checked by the resource contract verifier:
 
@@ -191,13 +196,15 @@ charliermarsh.ruff
 
 This baseline keeps Python and Jupyter support for course work, Debugpy for Python debugging, and Ruff for Python linting and formatting. YAML is retained so users can read and edit course, Kubernetes, and other configuration files without adding their own support first. GitLens is retained on purpose so researchers can learn Git history, blame, and commit discipline inside the same workspace they use for code.
 
-Extension versions are not pinned in this iteration. code-server resolves the current compatible extension releases during each image build, while only the code-server package itself is pinned.
+Extension versions are not pinned in this iteration. During each image build,
+code-server resolves the current compatible Marketplace releases and installs
+them with local `.vsix` packages into the root-owned system extension directory.
+Only the code-server package itself is pinned.
 
-User-installed extensions are kept under the user's persistent home volume. When
-a new image adds a default extension, existing users receive it on their next
-code-server start. Existing marketplace extensions from `extensions.txt` are
-updated by code-server's own installer. The launcher does not parse extension
-directories or compare semantic versions itself.
+User-installed extensions are kept under the user's persistent home volume.
+Image startup does not alter this directory. Copies installed by users or seeded
+by earlier images remain in place, and native VS Code extension precedence
+applies when a user copy and a system copy share an extension ID.
 
 Default editor settings are also not baked into the image in this iteration. User workspaces and profiles should keep control over editor preferences.
 

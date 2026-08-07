@@ -125,6 +125,8 @@ hub:
     JupyterHub:
       admin_access: true
       authenticator_class: dummy
+    Spawner:
+      http_timeout: 60
   service:
     type: ClusterIP
     annotations: {}
@@ -139,7 +141,7 @@ hub:
   nodeSelector: {}
   tolerations: []
   concurrentSpawnLimit: 64
-  consecutiveFailureLimit: 5
+  consecutiveFailureLimit: 0
   activeServerLimit:
   deploymentStrategy:
     ## type: Recreate

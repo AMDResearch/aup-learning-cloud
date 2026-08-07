@@ -22,8 +22,8 @@ jobs:
       - name: Run Ruff formatter check
         run: ruff format --check .
 
-  installer-tests:
-    name: Installer Unit Tests
+  python-tests:
+    name: Python Unit Tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -36,8 +36,10 @@ jobs:
       - name: Install test deps
         run: pip install pytest pyyaml "pydantic>=2.0"
 
-      - name: Run installer unit tests
-        run: python -m pytest tests/installer -v
+      - name: Run Python unit tests
+        run: >-
+          python -m pytest tests/installer -v
+          runtime/hub/tests/test_spawn_defaults.py
 
   hub-regression-tests:
     name: Hub Regression Tests
@@ -108,6 +110,11 @@ jobs:
             grep -v node_modules | \
             grep -v .git | \
             xargs -r shellcheck
+
+      - name: Run shell tests
+        run: |
+          dockerfiles/Code/tests/test_runtime_extension_model.sh
+          dockerfiles/Code/tests/test_service_lifecycle.sh
 
   yaml-lint:
     name: YAML (yamllint)
