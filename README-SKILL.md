@@ -43,7 +43,7 @@ logins, manage users, and control network/storage exposure.
 | [`upgrade-aup-learning-cloud`](skills/upgrade-aup-learning-cloud/SKILL.md) | Upgrade the JupyterHub chart/values/images and the k3s cluster on a running deployment, in a safe order with rollback. | in-repo |
 | [`troubleshoot-aup-learning-cloud`](skills/troubleshoot-aup-learning-cloud/SKILL.md) | Diagnose netboot, node-join, GPU scheduling, storage, and auth failures from runtime evidence, then hand off the fix. | in-repo |
 | [`monitor-aup-learning-cloud`](skills/monitor-aup-learning-cloud/SKILL.md) | Wire the Hub into Prometheus + Grafana: ServiceMonitor, authenticated metrics, dashboards, alert rules, and the metrics NetworkPolicy. | in-repo |
-| [`configure-aup-learning-cloud-auth`](skills/configure-aup-learning-cloud-auth/SKILL.md) | Configure the auth mode (auto-login/dummy/github/multi), the GitHub App / OAuth + team sync, native accounts, and admin bootstrap. | in-repo |
+| [`configure-aup-learning-cloud-auth`](skills/configure-aup-learning-cloud-auth/SKILL.md) | Configure auto-login, dummy, native, GitHub, or native plus GitHub providers, along with GitHub team sync and first-run admin bootstrap. | in-repo |
 | [`manage-aup-learning-cloud-users`](skills/manage-aup-learning-cloud-users/SKILL.md) | Day-2 user/group/quota operations via the admin console and `manage_users.py`: bulk onboarding, passwords, admins, and quota grants/refresh. | in-repo |
 | [`expose-aup-learning-cloud`](skills/expose-aup-learning-cloud/SKILL.md) | Take a deployment past the local defaults: NodePort/LoadBalancer/ingress + TLS, CORS origins, externally-terminated TLS, and shared NFS storage. | in-repo |
 

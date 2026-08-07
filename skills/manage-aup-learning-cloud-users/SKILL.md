@@ -12,7 +12,7 @@ description: >-
   manage_users.py, generate_users_template.py, users.csv, passwords_output.csv,
   /hub/admin, jupyterhub-admin-credentials, JUPYTERHUB_URL, JUPYTERHUB_TOKEN,
   set-admin, set-passwords, set-quota, add-quota, list-quota, refreshRules,
-  "onboard a class", and "bulk users". Do not use to choose auth mode, configure
+  "onboard a class", and "bulk users". Do not use to choose auth providers, configure
   course visibility/quota rates, or install/deploy a cluster.
 ---
 
@@ -42,12 +42,16 @@ in **[reference.md](reference.md)**.
   scripts.
 - `manage_users.py` requires `JUPYTERHUB_URL` and `JUPYTERHUB_TOKEN` for every
   subcommand. The bundled `scripts/hub-api-env.sh` derives both from the
-  `jupyterhub-admin-credentials` secret and checks reachability.
+  admin credentials Secret and checks reachability. Set `HUB_ADMIN_SECRET` when
+  `custom.adminUser.existingSecret` uses a non-default name.
 - Quota subcommands use the Hub admin API. `kubectl` is only needed to bootstrap
   an API token from `jupyterhub-admin-credentials` or inspect scheduled quota
   refresh CronJobs.
-- Native-user creation/password reset requires `authMode: multi` (or another
-  mode with native accounts). Password actions never apply to GitHub identities.
+- Native-user creation and password reset require `custom.auth.native: true`.
+  Password actions never apply to GitHub identities. The admin Secret's
+  `admin-password` seeds only a missing administrator password row. The database
+  hash is authoritative afterward, and changing the Secret doesn't rotate or
+  reconcile it. The separate `api-token` key supplies CLI API access.
 
 ## Two surfaces
 
@@ -80,8 +84,8 @@ current admin are protected from deletion.
    ```
 
    (Or export `JUPYTERHUB_URL`/`JUPYTERHUB_TOKEN` yourself — see reference.)
-   Use `HUB_URL="https://hub.example.com"` and `HUB_NAMESPACE=<namespace>` when
-   the Hub is not the default local NodePort in namespace `jupyterhub`.
+   Use `HUB_URL="https://hub.example.com"`, `HUB_NAMESPACE=<namespace>`, and
+   `HUB_ADMIN_SECRET=<secret-name>` when the deployment uses non-default values.
 3. **Generate a roster template**:
 
    ```bash
@@ -140,8 +144,8 @@ refresh). Quota **rates and enable/disable knobs** (`custom.quota.*`,
 - **Quota refresh rules apply broadly.** A global Refresh Quota or a broad
   `refreshRules` filter touches many users; confirm before applying.
 - CLI quota commands call the Hub admin API; they need a valid API token and a
-  reachable Hub, not `kubectl` access. Use `kubectl` only for the secret
-  bootstrap or scheduled-refresh CronJob inspection described above.
+  reachable Hub, not the administrator password. `kubectl` reads the separately
+  delivered `api-token` from the Secret or inspects scheduled-refresh CronJobs.
 
 ## Reference
 

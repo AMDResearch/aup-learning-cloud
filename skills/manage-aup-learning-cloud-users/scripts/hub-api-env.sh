@@ -8,19 +8,21 @@
 #   HUB_URL="https://hub.example.com" source scripts/hub-api-env.sh
 #
 # Environment inputs (all optional):
-#   HUB_URL        Hub base URL          (default: http://localhost:30890)
-#   HUB_NAMESPACE  Kubernetes namespace  (default: jupyterhub)
+#   HUB_URL           Hub base URL          (default: http://localhost:30890)
+#   HUB_NAMESPACE     Kubernetes namespace  (default: jupyterhub)
+#   HUB_ADMIN_SECRET  Admin Secret name     (default: jupyterhub-admin-credentials)
 #
 # Exports on success: JUPYTERHUB_URL, JUPYTERHUB_TOKEN
 
 _auplc_ns="${HUB_NAMESPACE:-jupyterhub}"
 _auplc_url="${HUB_URL:-http://localhost:30890}"
+_auplc_secret="${HUB_ADMIN_SECRET:-jupyterhub-admin-credentials}"
 
-_auplc_token="$(kubectl -n "$_auplc_ns" get secret jupyterhub-admin-credentials \
+_auplc_token="$(kubectl -n "$_auplc_ns" get secret "$_auplc_secret" \
   -o jsonpath='{.data.api-token}' 2>/dev/null | base64 -d 2>/dev/null)"
 
 if [ -z "$_auplc_token" ]; then
-  echo "hub-api-env: could not read api-token from secret 'jupyterhub-admin-credentials'" >&2
+  echo "hub-api-env: could not read api-token from secret '$_auplc_secret'" >&2
   echo "  - is custom.adminUser.enabled: true and the Hub deployed?" >&2
   echo "  - is your kube context/namespace ('$_auplc_ns') correct?" >&2
   # This file is meant to be sourced; `return` exits the caller's shell. The
@@ -45,4 +47,4 @@ fi
 
 echo "hub-api-env: exported JUPYTERHUB_URL=$JUPYTERHUB_URL and JUPYTERHUB_TOKEN (hidden)"
 
-unset _auplc_ns _auplc_url _auplc_token _auplc_code
+unset _auplc_ns _auplc_url _auplc_secret _auplc_token _auplc_code

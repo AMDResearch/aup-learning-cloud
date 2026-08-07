@@ -8,12 +8,15 @@ import ipaddress
 import re
 
 from config_common import DEFAULT_ACCEL_LABELS, HEADER_HASH, die, require, yaml_quote
-from config_rendering import render_inventory, render_pxe_vars, render_values
+from config_rendering import render_inventory, render_pxe_vars
+from config_rendering import render_values as _render_values
 
 __all__ = [
     "DEFAULT_ACCEL_LABELS",
     "HEADER_HASH",
+    "AUTH_MODE_PROVIDERS",
     "SCHEMA",
+    "auth_providers",
     "die",
     "render_inventory",
     "render_pxe_vars",
@@ -55,6 +58,24 @@ HOSTNAME_PATTERN = re.compile(
 )
 K3S_VERSION_PATTERN = re.compile(r"v[0-9]+\.[0-9]+\.[0-9]+\+k3s[0-9]+\Z")
 IMAGE_KEY_PATTERN = re.compile(r"[A-Za-z][A-Za-z0-9_-]*\Z")
+AUTH_MODE_PROVIDERS = {
+    "auto-login": ("autoLogin",),
+    "dummy": ("dummy",),
+    "github": ("github",),
+    "local": ("native",),
+    "multi": ("native", "github"),
+}
+
+
+def auth_providers(spec: dict) -> tuple[str, ...]:
+    auth_mode = spec.get("auth_mode", "auto-login")
+    if not isinstance(auth_mode, str) or auth_mode not in AUTH_MODE_PROVIDERS:
+        die("spec.auth_mode must be one of: auto-login, dummy, github, local, multi")
+    return AUTH_MODE_PROVIDERS[auth_mode]
+
+
+def render_values(spec: dict) -> str:
+    return _render_values(spec, auth_providers(spec))
 
 
 def validate_accelerators(spec: dict) -> None:
@@ -142,8 +163,7 @@ def _validate_agents(spec: dict, server_name: str) -> None:
 
 
 def _validate_rendered_options(spec: dict) -> None:
-    if "auth_mode" in spec:
-        _safe_text(spec["auth_mode"], "spec.auth_mode")
+    auth_providers(spec)
     if "storage" in spec and "class" in spec["storage"]:
         _safe_text(spec["storage"]["class"], "spec.storage.class")
     if "proxy" in spec and "node_port" in spec["proxy"]:

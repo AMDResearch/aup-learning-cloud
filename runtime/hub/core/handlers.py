@@ -73,7 +73,6 @@ _handler_config: dict[str, Any] = {
     "minimum_quota_to_start": 10,
     "default_quota": 0,
     "team_resource_mapping": {},
-    "auth_mode": "auto-login",
     "platform_name": "AUP Learning Cloud",
 }
 
@@ -136,21 +135,16 @@ def configure_handlers(
     default_quota: int = 0,
     team_resource_mapping: dict[str, list[str]] | None = None,
     github_org: str = "",
-    auth_mode: str = "auto-login",
     platform_name: str = "AUP Learning Cloud",
 ) -> None:
     """Configure handler module with runtime settings."""
-    if accelerator_options is not None:
-        _handler_config["accelerator_options"] = accelerator_options
-    if quota_rates is not None:
-        _handler_config["quota_rates"] = quota_rates
+    _handler_config["accelerator_options"] = accelerator_options or {}
+    _handler_config["quota_rates"] = quota_rates or {}
     _handler_config["quota_enabled"] = quota_enabled
     _handler_config["minimum_quota_to_start"] = minimum_quota_to_start
     _handler_config["default_quota"] = default_quota
-    if team_resource_mapping is not None:
-        _handler_config["team_resource_mapping"] = team_resource_mapping
+    _handler_config["team_resource_mapping"] = team_resource_mapping or {}
     _handler_config["github_org"] = github_org
-    _handler_config["auth_mode"] = auth_mode
     _handler_config["platform_name"] = platform_name
 
 
@@ -217,12 +211,8 @@ class CheckForcePasswordChangeHandler(BaseHandler):
         if ":" in username:
             username = username.split(":", 1)[1]
 
-        needs_change = False
-        if isinstance(self.authenticator, MultiAuthenticator):
-            for authenticator in self.authenticator._authenticators:
-                if isinstance(authenticator, CustomFirstUseAuthenticator):
-                    needs_change = authenticator.needs_password_change(username)
-                    break
+        firstuse_auth = _find_firstuse_authenticator(self.authenticator)
+        needs_change = firstuse_auth.needs_password_change(username) if firstuse_auth else False
 
         self.set_header("Content-Type", "application/json")
         self.finish(json.dumps({"needs_password_change": needs_change}))
@@ -243,12 +233,8 @@ class ChangePasswordHandler(BaseHandler):
         if ":" in username:
             username = username.split(":", 1)[1]
 
-        is_forced = False
-        if isinstance(self.authenticator, MultiAuthenticator):
-            for authenticator in self.authenticator._authenticators:
-                if isinstance(authenticator, CustomFirstUseAuthenticator):
-                    is_forced = authenticator.needs_password_change(username)
-                    break
+        firstuse_auth = _find_firstuse_authenticator(self.authenticator)
+        is_forced = firstuse_auth.needs_password_change(username) if firstuse_auth else False
 
         html = await self.render_template(
             "change-password.html", password_changed=password_changed, forced_change=is_forced or forced
@@ -288,12 +274,7 @@ class ChangePasswordHandler(BaseHandler):
             self.set_status(400)
             return self.finish(html)
 
-        firstuse_auth = None
-        if isinstance(self.authenticator, MultiAuthenticator):
-            for authenticator in self.authenticator._authenticators:
-                if isinstance(authenticator, CustomFirstUseAuthenticator):
-                    firstuse_auth = authenticator
-                    break
+        firstuse_auth = _find_firstuse_authenticator(self.authenticator)
 
         if not firstuse_auth:
             html = await _render_error("Password change not available")
@@ -340,7 +321,7 @@ class AdminResetPasswordHandler(BaseHandler):
         from jupyterhub.orm import User
 
         for user in self.db.query(User).all():
-            if not user.name.startswith(GITHUB_USERNAME_PREFIX) and user.name != "admin":
+            if not user.name.startswith(GITHUB_USERNAME_PREFIX) and not user.admin:
                 native_users.append(user.name)
 
         html = await self.render_template(
@@ -380,12 +361,7 @@ class AdminResetPasswordHandler(BaseHandler):
                 + f"admin/reset-password?user={target_user}&error=Cannot+reset+password+for+GitHub+users"
             )
 
-        firstuse_auth = None
-        if isinstance(self.authenticator, MultiAuthenticator):
-            for authenticator in self.authenticator._authenticators:
-                if isinstance(authenticator, CustomFirstUseAuthenticator):
-                    firstuse_auth = authenticator
-                    break
+        firstuse_auth = _find_firstuse_authenticator(self.authenticator)
 
         if not firstuse_auth:
             return self.redirect(self.hub.base_url + "admin/reset-password?error=Password+reset+not+available")
@@ -461,12 +437,7 @@ class AdminAPISetPasswordHandler(APIHandler):
                 self.set_header("Content-Type", "application/json")
                 return self.finish(json.dumps({"error": "Cannot set password for GitHub users"}))
 
-            firstuse_auth = None
-            if isinstance(self.authenticator, MultiAuthenticator):
-                for authenticator in self.authenticator._authenticators:
-                    if isinstance(authenticator, CustomFirstUseAuthenticator):
-                        firstuse_auth = authenticator
-                        break
+            firstuse_auth = _find_firstuse_authenticator(self.authenticator)
 
             if not firstuse_auth:
                 self.set_status(500)
@@ -551,13 +522,7 @@ class AdminAPIBatchSetPasswordHandler(APIHandler):
                     return self.finish(
                         json.dumps({"error": f"Cannot set password for GitHub user: {entry['username']}"})
                     )
-
-            firstuse_auth = None
-            if isinstance(self.authenticator, MultiAuthenticator):
-                for authenticator in self.authenticator._authenticators:
-                    if isinstance(authenticator, CustomFirstUseAuthenticator):
-                        firstuse_auth = authenticator
-                        break
+            firstuse_auth = _find_firstuse_authenticator(self.authenticator)
 
             if not firstuse_auth:
                 self.set_status(500)
@@ -717,8 +682,8 @@ class AdminAPIProvisionUsersHandler(APIHandler):
                     results["failed"] += 1
                     results["results"].append(result)
                     continue
-                if not self.authenticator.validate_username(username):
-                    result["error"] = f"Invalid username: {username}"
+                if not self.authenticator.validate_username(requested_username):
+                    result["error"] = f"Invalid username: {requested_username}"
                     results["failed"] += 1
                     results["results"].append(result)
                     continue
@@ -1166,8 +1131,6 @@ class ResourcesAPIHandler(APIHandler):
             resolve_resources_for_user(
                 self.current_user,
                 _handler_config.get("team_resource_mapping", {}),
-                _handler_config.get("auth_mode", "auto-login"),
-                list(config.resources.images.keys()),
             )
         )
 

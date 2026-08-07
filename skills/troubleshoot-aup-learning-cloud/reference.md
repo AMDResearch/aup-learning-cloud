@@ -49,9 +49,9 @@ Method and safety gates are in [SKILL.md](SKILL.md).
 
 | Symptom | Likely cause | First checks |
 | --- | --- | --- |
-| Login page 404s | `custom.authMode: dummy` | Use `auto-login` (single machine) or a real OAuth mode |
+| Login page 404s | Dummy provider selected or invalid provider combination | Check `custom.auth`; use exactly auto-login, dummy, native, GitHub, or native plus GitHub |
 | GitHub login loops/fails | OAuth callback URL or org/team config | `hub.config.GitHubOAuthenticator`, `custom.githubOrgName`, callback URL matches host |
-| User sees no courses | Team mapping empty for their group | `custom.teams.mapping`, group membership in Admin console |
+| User sees no courses | Team mapping empty for their group | `custom.teams.mapping`, group membership and existing fallback group in Admin console; providers don't bypass mapping |
 | Can't reach admin console | Wrong admin user | `custom.adminUser`, `/hub/admin` |
 
 ## kubeconfig / access

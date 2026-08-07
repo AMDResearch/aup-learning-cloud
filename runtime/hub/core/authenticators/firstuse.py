@@ -49,6 +49,7 @@ class CustomFirstUseAuthenticator(FirstUseAuthenticator):
     service_name = "Native"
     login_service = "Native"
     create_users = False
+    DUMMY_PASSWORD_HASH = b"$2b$12$HxnZoJ.V..l/07wvD0EsOOBq14vGDBJ0ls0k8uKDH/PTVjFK.tXVi"
 
     def normalize_username(self, username):
         """Normalize username to lowercase."""
@@ -56,21 +57,18 @@ class CustomFirstUseAuthenticator(FirstUseAuthenticator):
             return username
         return username.lower()
 
-    def _user_exists(self, username):
+    def _user_exists(self, username: str) -> bool | None:
         """Check if user exists in JupyterHub database."""
-        if self.db is None:
-            if hasattr(self, "parent") and self.parent:
-                db = self.parent.db
-                if db is None:
-                    return True
-            else:
-                return True
-        else:
-            db = self.db
+        db = getattr(self, "db", None)
+        if db is None:
+            db = getattr(getattr(self, "parent", None), "db", None)
+        if db is None:
+            self.log.warning("Native authentication denied because Hub database is unavailable")
+            return None
 
         from jupyterhub.orm import User
 
-        return db.query(User).filter_by(name=username).first() is not None
+        return bool(db.query(User).filter_by(name=username).first())
 
     def _get_user_password(self, username: str) -> UserPassword | None:
         """Get user password record from database."""
@@ -258,7 +256,11 @@ class CustomFirstUseAuthenticator(FirstUseAuthenticator):
             return None
 
         # Check if user exists in JupyterHub
-        if not self._user_exists(username):
+        user_exists = self._user_exists(username)
+        if user_exists is None:
+            return None
+        if not user_exists:
+            bcrypt.checkpw(password.encode("utf8"), self.DUMMY_PASSWORD_HASH)
             self.log.warning(f"User {username} not found in JupyterHub database")
             return None
 

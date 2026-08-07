@@ -49,6 +49,8 @@ Then collect and confirm:
    diskless agents have AMD GPUs. This explicit yes or no is the sole PXE GPU
    policy input because agent hardware can't be inferred from the controller.
 5. Shared storage location and the Hub access method.
+6. Authentication providers: auto-login, dummy, native, GitHub, or native plus
+   GitHub. The canonical multi-node example uses native plus GitHub.
 
 Confirm detected GPU product labels before mapping them to accelerator keys in
 the runtime values.
@@ -58,6 +60,11 @@ the runtime values.
 Create a fresh schema and fill only its current fields. Run the generator rather
 than writing inventory or GPU policy by hand.
 
+The schema temporarily accepts `auth_mode` as a one-release generator
+compatibility input. It isn't Helm configuration. The generator always writes
+the selected providers as canonical `custom.auth` flags; see the migration
+table in [reference.md](reference.md).
+
 For SSH, generation performs read-only discovery on every managed host and
 publishes canonical artifacts after GPU evidence is consistent.
 
@@ -66,6 +73,12 @@ and GPU resolution report directly as desired deployment inputs. Their existence
 does not prove rootfs provisioning succeeded. Review, install, and validate those
 files, then run the controller playbook with the canonical inventory and PXE
 vars; the playbook must complete successfully before proceeding.
+
+The generated runtime overlay includes canonical `custom.auth`,
+`custom.runtimeLimitEnabled: true`, and `custom.quota.enabled: true`. It also
+maps detected GPU labels to accelerator selectors, defines notebook images and
+shared storage, and keeps resource visibility tied to `custom.teams.mapping`
+and its fallback groups regardless of the selected authentication providers.
 
 Follow the complete topology command sequence in the
 [skill scripts guide](scripts/README.md). Don't substitute the human direct-edit

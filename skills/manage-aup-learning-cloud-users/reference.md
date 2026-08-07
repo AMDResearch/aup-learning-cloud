@@ -28,7 +28,8 @@ admin-credentials secret (requires `custom.adminUser.enabled`):
 
 ```bash
 export JUPYTERHUB_URL="http://localhost:30890"
-export JUPYTERHUB_TOKEN=$(kubectl -n jupyterhub get secret jupyterhub-admin-credentials \
+export HUB_ADMIN_SECRET="jupyterhub-admin-credentials"
+export JUPYTERHUB_TOKEN=$(kubectl -n jupyterhub get secret "$HUB_ADMIN_SECRET" \
   -o jsonpath='{.data.api-token}' | base64 -d)
 ```
 
@@ -39,11 +40,19 @@ it (don't execute) so the exports land in your shell:
 source skills/manage-aup-learning-cloud-users/scripts/hub-api-env.sh
 # override the URL if not localhost:30890:
 HUB_URL="https://hub.example.com" source skills/manage-aup-learning-cloud-users/scripts/hub-api-env.sh
+# also set HUB_ADMIN_SECRET when custom.adminUser.existingSecret is non-default:
+HUB_ADMIN_SECRET="external-admin" source skills/manage-aup-learning-cloud-users/scripts/hub-api-env.sh
 ```
 
 CLI **quota** commands call the Hub admin API, so they need a valid API token
 and a reachable Hub. `kubectl` is only needed to bootstrap the token from the
 secret above or inspect scheduled quota refresh CronJobs.
+
+The Secret's `admin-password` is first-run input used only when the
+administrator has no password row. An existing database hash is authoritative;
+changing the Secret doesn't rotate or reconcile it. The separate `api-token`
+key delivers the token used for `JUPYTERHUB_TOKEN` and isn't part of password
+bootstrap.
 
 ## Python dependencies
 

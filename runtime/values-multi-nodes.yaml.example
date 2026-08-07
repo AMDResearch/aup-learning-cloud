@@ -51,12 +51,13 @@
 # ============================================================================
 
 custom:
-  # Authentication mode
-  # - auto-login: No credentials required, auto-login as 'student' (for single-node dev)
-  # - dummy: Accept any username/password (for testing)
-  # - github: GitHub App authentication
-  # - multi: GitHub App + native first-use accounts
-  authMode: "multi"
+  # Authentication providers: native accounts and GitHub App sign-in.
+  auth:
+    native: true
+    github: true
+
+  # Enforce selected session runtimes and automatically shut down expired Pods.
+  runtimeLimitEnabled: true
 
   # Cluster display name (optional). Appended to "AUP Learning Cloud" in the UI.
   # Example: "City/University" → "AUP Learning Cloud City/University"
@@ -464,7 +465,7 @@ custom:
         - Course-LLM
         - Course-PhySim
 
-  # Native users in multi auth mode are managed by the built-in admin UI or the
+  # Native users are managed by the built-in admin UI or the
   # batch scripts under scripts/. New native users are automatically assigned to
   # the native-users group, which controls their default resource access above.
 
@@ -472,7 +473,7 @@ custom:
   # Quota Management
   # --------------------------------------------------------------------------
   quota:
-    enabled: null  # auto-disabled for auto-login/dummy modes
+    enabled: true
     cpuRate: 1
     minimumToStart: 10
     defaultQuota: 0
@@ -515,7 +516,6 @@ hub:
       redirect_to_server: false
 
     Authenticator:
-      allow_all: true
       admin_users:
         - your-github-username
 

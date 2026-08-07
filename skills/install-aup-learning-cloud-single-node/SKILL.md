@@ -50,6 +50,16 @@ table, offline flow, and troubleshooting are in **[reference.md](reference.md)**
    (local from `dockerfiles/`). For a quick demo prefer `pull`.
 4. **Online or offline**: a normal machine with internet, or an air-gapped one
    that needs a `pack` bundle (see reference).
+5. **Access mode**: interactive and scripted installs default to the `personal`
+   shared student session. Select the `local` installer profile for managed
+   accounts with `--access-mode=local --admin-username=<name>`.
+
+`personal` and `local` are installer UX profiles, not values for the runtime
+authentication configuration. The generated overlay emits canonical
+`custom.auth` provider flags plus explicit `custom.runtimeLimitEnabled: false`
+and `custom.quota.enabled: false` settings. In runtime/quota order, this
+`false/false` pair disables both automatic session shutdown and credit
+enforcement.
 
 ## Phase 2 — Verify the environment
 
@@ -84,9 +94,19 @@ kubectl get nodes                       # the node is Ready
 kubectl get pods -n jupyterhub          # hub + proxy Running, no CrashLoop/ImagePull
 ```
 
-Open `http://localhost:30890` — the default values auto-log-in as `student`
-(NodePort 30890, `local-path` storage, ingress disabled). Spawn a CPU notebook,
-then a GPU notebook, and confirm the GPU pod schedules.
+Open `http://localhost:30890`. Installs using the `local` profile display a login form;
+sign in with the configured administrator credentials. Scripted `personal`
+installs retain the compatibility shared student session. The NodePort is 30890,
+storage is `local-path`, and ingress is disabled. Spawn a CPU notebook, then a
+GPU notebook, and confirm the GPU pod schedules.
+
+If Helm fails, inspect `helm status jupyterhub -n jupyterhub` before retrying.
+For a Hub-only retry, use `./auplc-installer rt upgrade` or
+`./auplc-installer rt reinstall`; both reuse `jupyterhub-admin-credentials`.
+The `admin-password` seeds only a missing administrator password row. An
+existing database hash is authoritative, so changing the Secret doesn't rotate
+or reconcile that password. Its separate `api-token` key supplies API access
+for scripts.
 
 ## Safety
 
@@ -97,8 +117,13 @@ Stop and get explicit confirmation before:
 - Switching `--runtime` (docker ↔ containerd) on an existing install.
 - Any `--image-source=build` run on a slow/low-disk box (large local builds).
 
-Never commit changes to the checkout. The installer writes a local values
-overlay (e.g. `values.local.yaml`); do not commit it.
+Never commit changes to the checkout. The installer writes
+`values.local.yaml` as generated operational output. User edits are unsupported
+across upgrade or reinstall and may be silently overwritten.
+
+The `local` installer profile remains localhost-oriented MVP guidance only. It
+does not configure TLS or restrict NodePort LAN reachability, so credentials
+are not a network authorization boundary.
 
 ## Reference
 

@@ -39,7 +39,7 @@ def test_full_install_gates_gpu_access_without_passing_it_to_the_overlay(
     monkeypatch.setattr(cli, "deploy_rocm_gpu_device_plugin", lambda **kwargs: events.append("device-plugin"))
     monkeypatch.setattr(cli, "refine_gpu_config_from_node_labels", lambda *args, **kwargs: events.append("refine"))
     monkeypatch.setattr(cli, "deploy_runtime", lambda *args, **kwargs: events.append("runtime"))
-    monkeypatch.setattr(cli, "_print_success_banner", lambda: events.append("success"))
+    monkeypatch.setattr(cli, "_print_success_banner", lambda **_kwargs: events.append("success"))
 
     cli._cmd_install_inner(state, pull=True)
 

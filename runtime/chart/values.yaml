@@ -31,20 +31,26 @@ enabled:
 # custom can contain anything you want to pass to the hub pod, as all passed
 # Helm template values will be made available there.
 custom:
-  # Authentication mode: "auto-login" | "dummy" | "github" | "multi"
+  # Authentication defaults to compatibility auto-login when neither the
+  # canonical custom.auth object nor deprecated custom.authMode is provided.
+  # Deprecated authMode values retained for one release:
+  #   "auto-login" | "dummy" | "github" | "local" | "multi"
   #   - auto-login: No credentials required, auto-login as 'student' (default, for single-node)
   #   - dummy: Accept any username/password (for testing)
   #   - github: GitHub App authentication
-  #   - multi: GitHub App + Local accounts
-  authMode: "auto-login"
-
+  #   - local: Native accounts without GitHub authentication
+  #   - multi: GitHub App + native accounts
   # Cluster display name (optional). Appended to "AUP Learning Cloud" in the UI.
   # Example: "City/University" → "AUP Learning Cloud City/University"
   clusterName: ""
 
-  # Auto-create admin user on first install (optional)
+  # Bootstrap the admin user for native authentication modes (optional).
+  # Leave existingSecret empty for the chart-generated Secret, or provide an
+  # external Secret with admin-password and optional api-token keys.
   adminUser:
     enabled: false
+    username: "admin"
+    existingSecret: ""
 
   # Accelerator configuration (GPU/NPU nodes)
   # Define these in runtime/values.yaml, not here
@@ -162,20 +168,7 @@ hub:
   args: []
   extraConfig: {}
   extraFiles: {}
-  extraEnv:
-    # Environment variables from secrets (for auto-admin feature)
-    JUPYTERHUB_API_TOKEN:
-      valueFrom:
-        secretKeyRef:
-          name: jupyterhub-admin-credentials
-          key: api-token
-          optional: true
-    JUPYTERHUB_ADMIN_PASSWORD:
-      valueFrom:
-        secretKeyRef:
-          name: jupyterhub-admin-credentials
-          key: admin-password
-          optional: true
+  extraEnv: {}
   extraContainers: []
   extraVolumes: []
   extraVolumeMounts: []

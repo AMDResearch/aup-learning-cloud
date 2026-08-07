@@ -171,3 +171,60 @@ def test_unauthorized_gpu_selection_is_rejected_before_spawner_configuration():
 
     with pytest.raises(RuntimeError, match="not authorized"):
         spawner.options_from_form({"runtime": ["20"], "resource_type": ["gpu"], "gpu_selection_gpu": ["gpu-a"]})
+
+
+def test_auto_accelerator_is_a_gpu_sentinel_only_for_multiple_authorized_keys():
+    spawner = make_spawner()
+    spawner._hub_config = types.SimpleNamespace(
+        get_resource_metadata=lambda _resource_type: types.SimpleNamespace(acceleratorKeys=["gpu-a", "gpu-b"])
+    )
+    spawner.accelerator_options = {"gpu-a": {}, "gpu-b": {}}
+
+    assert spawner._resolve_accelerator_selection("gpu", "auto") == "auto"
+
+
+@pytest.mark.parametrize("selection", [None, "", "   "])
+def test_single_authorized_accelerator_defaults_blank_selection(selection: str | None):
+    spawner = make_spawner()
+
+    assert spawner._resolve_accelerator_selection("gpu", selection) == "gpu-a"
+
+
+@pytest.mark.parametrize(
+    ("resource_type", "accelerator_keys", "selection", "error"),
+    [
+        ("cpu", ["gpu-a", "gpu-b"], "auto", "does not allow GPU selection"),
+        ("gpu", ["gpu-a"], "auto", "requires selecting an accelerator"),
+    ],
+)
+def test_auto_accelerator_is_rejected_outside_multiple_authorized_gpu_keys(
+    resource_type: str, accelerator_keys: list[str], selection: str, error: str
+):
+    spawner = make_spawner()
+    spawner._hub_config = types.SimpleNamespace(
+        get_resource_metadata=lambda _resource_type: types.SimpleNamespace(acceleratorKeys=accelerator_keys)
+    )
+
+    with pytest.raises(RuntimeError, match=error):
+        spawner._resolve_accelerator_selection(resource_type, selection)
+
+
+@pytest.mark.parametrize(
+    ("accelerator_keys", "accelerator_options", "selection", "error"),
+    [
+        (["gpu-a"], {"gpu-a": {}}, "gpu-x", "not authorized"),
+        (["gpu-a"], {"gpu-a": {}, "gpu-b": {}}, "gpu-b", "not authorized"),
+        (["gpu-a", "gpu-b"], {"gpu-a": {}}, "gpu-b", "not configured"),
+    ],
+)
+def test_concrete_accelerator_requires_resource_authorization_and_global_configuration(
+    accelerator_keys: list[str], accelerator_options: dict[str, dict[str, str]], selection: str, error: str
+):
+    spawner = make_spawner()
+    spawner._hub_config = types.SimpleNamespace(
+        get_resource_metadata=lambda _resource_type: types.SimpleNamespace(acceleratorKeys=accelerator_keys)
+    )
+    spawner.accelerator_options = accelerator_options
+
+    with pytest.raises(RuntimeError, match=error):
+        spawner._resolve_accelerator_selection("gpu", selection)

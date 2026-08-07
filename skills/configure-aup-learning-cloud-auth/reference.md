@@ -13,19 +13,89 @@ Workflow and gates are in [SKILL.md](SKILL.md).
 The live `runtime/values.yaml` and `runtime/chart/values.schema.yaml` are the
 source of truth; verify keys against them.
 
-## 1. Auth modes (`custom.authMode`)
+## 1. Provider combinations (`custom.auth`)
 
+Choose exactly one document below. Omitted provider keys are false.
+
+<!-- auplc-auth-examples: canonical -->
 ```yaml
 custom:
-  authMode: "auto-login"   # auto-login | dummy | github | multi
+  auth:
+    autoLogin: true
+---
+custom:
+  auth:
+    dummy: true
+---
+custom:
+  auth:
+    native: true
+---
+custom:
+  auth:
+    github: true
+---
+custom:
+  auth:
+    native: true
+    github: true
 ```
 
-- `auto-login` — shared, no credentials. Quota auto-disables unless explicitly
-  enabled. Checked-in single-node default.
-- `dummy` — accepts any username/password. Testing only.
-- `github` — GitHub App only. `oauth_callback_url` ends in `/hub/oauth_callback`.
-- `multi` — GitHub App + native accounts on one page. `oauth_callback_url` ends
-  in `/hub/github/oauth_callback`.
+- Auto-login provides a shared session with no credentials.
+- Dummy accepts any username/password and is for testing only.
+- Native provides administrator-managed accounts.
+- GitHub uses the GitHub App at `/hub/github/oauth_callback` in both GitHub-only
+  and native-plus-GitHub modes.
+
+GitHub users always have the local AUP Learning Cloud username
+`github:<normalized-login>` in both GitHub-only and native-plus-GitHub modes.
+Native users remain unprefixed. Configure GitHub `allowed_users`, `admin_users`,
+`blocked_users`, and `allowed_organizations` with raw GitHub logins and
+organizations, not the local `github:` username.
+
+All five combinations use `custom.teams.mapping` and the existing fallback
+groups for resource visibility. Provider selection doesn't change that policy.
+
+## Runtime timer and credit enforcement
+
+`custom.runtimeLimitEnabled: true` enforces each selected session duration and
+automatically shuts down the session when its timer expires. `false` disables
+automatic runtime shutdown. `custom.quota.enabled` controls credit enforcement
+only: `true` enforces credit balances and `false` disables credit enforcement.
+It never enables or disables the session timer.
+
+The pair order below is always runtime limit first, quota second. The installer
+`personal` and `local` profiles use `false/false`. Online deployment examples
+use `true/true`. `true/false` keeps the timer without credit enforcement.
+`false/true` is rejected by both the chart schema and Hub parser.
+
+<!-- auplc-runtime-quota-matrix: canonical -->
+```yaml
+controls:
+  runtimeLimitEnabled:
+    true: enforce-session-timer
+    false: disable-session-timer
+  quota.enabled:
+    true: enforce-credits
+    false: disable-credit-enforcement
+runtimeQuotaPairs:
+  - runtimeLimitEnabled: true
+    quotaEnabled: true
+    valid: true
+    examples: [online]
+  - runtimeLimitEnabled: true
+    quotaEnabled: false
+    valid: true
+    examples: []
+  - runtimeLimitEnabled: false
+    quotaEnabled: false
+    valid: true
+    examples: [installer-personal, installer-local]
+  - runtimeLimitEnabled: false
+    quotaEnabled: true
+    valid: false
+    examples: []
+```
 
 ## 2. Admin bootstrap (`custom.adminUser`)
 
@@ -35,8 +105,12 @@ custom:
     enabled: true
 ```
 
-The chart creates the `jupyterhub-admin-credentials` secret and bootstraps the
-`admin` user. Retrieve:
+Native and native plus GitHub accept the same contract. Leave `existingSecret` empty for
+the chart-created `jupyterhub-admin-credentials`, or create the named external
+Secret before Helm runs. An external Secret must contain `admin-password`; an
+`api-token` is optional for direct Helm startup. The installer creates and
+retains its external Secret for explicit local installs.
+Retrieve chart-created credentials:
 
 ```bash
 kubectl -n jupyterhub get secret jupyterhub-admin-credentials \
@@ -45,14 +119,18 @@ kubectl -n jupyterhub get secret jupyterhub-admin-credentials \
   -o jsonpath='{.data.api-token}' | base64 -d && echo
 ```
 
-## 3. GitHub App — create it (github/multi)
+The `admin-password` is first-run bootstrap input. It seeds a password only
+when the administrator has no password row. Once that row exists, its database
+hash is authoritative. Changing the Secret doesn't rotate, overwrite, or
+reconcile the existing password. The separate `api-token` key delivers an API
+token for scripts and isn't used by password bootstrap.
+
+## 3. GitHub App setup
 
 1. **Create the App under the organization** (not a personal account):
    `https://github.com/organizations/<ORG>/settings/apps/new`.
 2. **Basic info:** name (e.g. `auplc-hub`), Homepage = Hub URL, **Callback URL**
-   matching the mode:
-   - `multi`: `https://<domain>/hub/github/oauth_callback`
-   - single `github`: `https://<domain>/hub/oauth_callback`
+   = `https://<domain>/hub/github/oauth_callback`.
 3. Check **Expire user authorization tokens** and **Request user authorization
    (OAuth) during installation**. Uncheck **Webhook → Active**.
 4. **Permissions:**
@@ -70,8 +148,14 @@ kubectl -n jupyterhub get secret jupyterhub-admin-credentials \
 
 ## 4. GitHub App — configure the Hub
 
+Set `oauth_callback_url` to `https://<domain>/hub/github/oauth_callback` for
+both GitHub-only and native-plus-GitHub deployments.
+
 ```yaml
 custom:
+  auth:
+    native: true
+    github: true
   githubOrgName: "<YOUR-ORG-NAME>"
 
   gitClone:
@@ -95,6 +179,8 @@ hub:
 
 `scope: []` is correct for a GitHub App. `installation_id` can stay blank when
 the App is installed on the org (auto-discovered via `GET /orgs/{org}/installation`).
+For GitHub-only, set `custom.auth.github: true` without `native`; keep the same
+`https://<domain>/hub/github/oauth_callback` callback URL.
 
 ## 5. Team-to-group sync
 
@@ -108,7 +194,10 @@ groups is the configure-courses skill.
 GitHub users without a matched team fall into a `github-users` fallback group;
 native users can be assigned `native-users`.
 
-## 6. Native accounts (multi)
+The same mapping and fallback resolver applies to auto-login, dummy, native,
+GitHub, and native plus GitHub.
+
+## 6. Native accounts
 
 - The first-use authenticator sets `create_users = False` — accounts must exist
   before login (create them via the manage-users skill or `/hub/admin`).
@@ -141,16 +230,44 @@ kubectl rollout status -n jupyterhub deploy/hub
 kubectl logs -n jupyterhub deployment/hub | grep -i -E 'admin|github|oauth'
 ```
 
+If Helm reports a failed release, inspect it before retrying:
+
+```bash
+helm status jupyterhub -n jupyterhub
+```
+
+On a single-node host, `rt upgrade` and `rt reinstall` reuse the installer
+Secret. Reusing or changing it doesn't replace an existing database password.
+
+## One-release `authMode` migration
+
+`custom.authMode` is accepted for one release as migration input. Don't combine
+it with `custom.auth`. Translate legacy values as follows, then remove the
+legacy field from the overlay:
+
+| Legacy value | Canonical `custom.auth` |
+| --- | --- |
+| `auto-login` | `autoLogin: true` |
+| `dummy` | `dummy: true` |
+| `github` | `github: true` |
+| `local` | `native: true` |
+| `multi` | `native: true`, `github: true` |
+
+```yaml
+custom:
+  authMode: multi
+```
+
 ## Troubleshooting
 
 | Symptom | Likely cause | First checks |
 | --- | --- | --- |
-| Login 404 / no login page | `authMode: dummy`, or wrong mode for the deploy | Set `github`/`multi`/`auto-login`; re-apply |
-| OAuth callback error | `oauth_callback_url` mismatch (mode or http/https) | Match the App's Callback URL exactly to the mode |
+| Login 404 / no login page | Dummy selected or providers don't match the deployment | Set the intended `custom.auth` flags; re-apply |
+| OAuth callback error | `oauth_callback_url` mismatch | Match the App's Callback URL to GitHub-only or native plus GitHub |
 | `Resource not accessible by integration` | App missing `Members: Read-only` | Add the org permission; an org owner must approve the updated install |
 | GitHub users see no/wrong resources | `githubOrgName`, `allowed_organizations`, `teams.mapping`, or team membership | Verify all four; confirm the user's GitHub teams |
 | Configured team skipped in sync | Team doesn't exist on GitHub | The Hub only syncs teams that exist; create it or fix the key |
 | Installation token unavailable | `app_id`/`private_key_file` wrong or App not installed on org | Verify both and the org installation |
 | No admin user created | `custom.adminUser.enabled` not true | Set it, re-apply, `kubectl logs … | grep -i admin` |
-| Native user can't log in | Not `multi`, user not pre-created, or no local password | Confirm mode + that an admin created the account |
+| Native user can't log in | Native isn't enabled, user not pre-created, or no password | Confirm `custom.auth.native: true` and that an admin created the account |
 | Password change keeps failing | New password fails the strength policy | Re-check length + upper/lower/digit/special |

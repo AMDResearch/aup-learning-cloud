@@ -52,6 +52,9 @@ class InstallerState:
     # Course selection (drives image filtering + teams.mapping override)
     courses: CourseSelection = field(default_factory=CourseSelection.default)
 
+    access_mode: str = ""
+    admin_username: str = ""
+
     # Non-interactive / scripted mode
     assume_yes: bool = False
 
@@ -86,6 +89,8 @@ class InstallerState:
             mirror_npm=os.environ.get("MIRROR_NPM", ""),
             image_registry=os.environ.get("IMAGE_REGISTRY", DEFAULT_IMAGE_REGISTRY),
             image_tag=os.environ.get("IMAGE_TAG", DEFAULT_IMAGE_TAG),
+            access_mode=os.environ.get("AUPLC_ACCESS_MODE", ""),
+            admin_username=os.environ.get("AUPLC_ADMIN_USERNAME", ""),
             assume_yes=os.environ.get("AUPLC_YES", "0") == "1",
             verbose=os.environ.get("AUPLC_VERBOSE", "0") == "1",
         )
