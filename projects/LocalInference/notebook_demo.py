@@ -19,6 +19,7 @@ import rclpy
 if not rclpy.ok():
     rclpy.init()
 
+import contextlib  # noqa: E402
 import os  # noqa: E402
 import re  # noqa: E402
 import subprocess  # noqa: E402
@@ -28,6 +29,12 @@ import time  # noqa: E402
 import traceback  # noqa: E402
 import warnings  # noqa: E402
 from pathlib import Path  # noqa: E402
+
+# matplotlib and timm both warn while the imports below load them, and neither
+# is actionable here - they would otherwise be the first thing in the cell,
+# before any progress message. Registered before the imports that trigger them.
+warnings.filterwarnings("ignore", message="Unable to import Axes3D")
+warnings.filterwarnings("ignore", message=".*timm\\.models\\.layers is deprecated")
 
 import ipywidgets as widgets  # noqa: E402
 import requests  # noqa: E402
@@ -69,6 +76,78 @@ SCENARIO_NAMES = {
 GREETING = "Hi! I am a robotic arm. What can I do for you?"
 
 
+LAUNCH_LOG = "/tmp/demo_launch.log"
+_launch_log_handle = None
+
+
+def _log_file(path: str = LAUNCH_LOG):
+    """One append handle for the whole session.
+
+    Kept open deliberately: the logging handler installed below holds a
+    reference to it and keeps writing long after the launch call returns.
+    """
+    global _launch_log_handle
+    if _launch_log_handle is None or _launch_log_handle.closed:
+        _launch_log_handle = open(path, "a", buffering=1)  # noqa: SIM115
+    return _launch_log_handle
+
+
+def quiet_ros_logging(path: str = LAUNCH_LOG) -> None:
+    """Stop ROS 2 from writing to the notebook cell.
+
+    Two separate sources, neither of which a file-descriptor swap can catch:
+
+    The "[move_group-4] ..." lines are child process output that the launch
+    service reads off a pipe and re-emits through Python logging. launch builds
+    exactly one screen handler, lazily, bound to whatever sys.stdout was at the
+    time - in a kernel that is ipykernel's ZMQ stream. Replacing the handler
+    points all of it at a file instead, permanently, which matters because the
+    launch service keeps running in the background after build_demo returns.
+
+    The unprefixed lines - tf2's TF_OLD_DATA, the connector's INFO - come from
+    rcl inside this process, so they take a severity bump instead.
+    """
+    import launch.logging
+
+    # launch's own StreamHandler subclass, not logging.StreamHandler: it carries
+    # setFormatterFor(), which get_output_loggers() calls on whatever it finds.
+    handler = launch.logging.handlers.StreamHandler(_log_file(path))
+    formatter = getattr(launch.logging.launch_config, "screen_formatter", None)
+    if formatter is not None:
+        handler.setFormatter(formatter)
+    launch.logging.launch_config.screen_handler = handler
+
+    rclpy.logging.set_logger_level("", rclpy.logging.LoggingSeverity.ERROR)
+
+
+@contextlib.contextmanager
+def quiet(log_path: str = LAUNCH_LOG):
+    """Divert this process's stdout/stderr to a log file.
+
+    Has to be done at the file-descriptor level. The ROS 2 launch service, the
+    O3DE process and rcl's C++ logger all write to fd 1/2 directly, so
+    contextlib.redirect_stdout never sees them - and ipykernel captures those
+    fds, which is why their output lands in the cell at all.
+
+    print() is unaffected: in a kernel sys.stdout is a ZMQ stream that does not
+    go through fd 1, so progress messages still reach the notebook.
+    """
+    sys.stdout.flush()
+    sys.stderr.flush()
+    saved_out, saved_err = os.dup(1), os.dup(2)
+    log = open(log_path, "a")  # noqa: SIM115
+    try:
+        os.dup2(log.fileno(), 1)
+        os.dup2(log.fileno(), 2)
+        yield log_path
+    finally:
+        os.dup2(saved_out, 1)
+        os.dup2(saved_err, 2)
+        os.close(saved_out)
+        os.close(saved_err)
+        log.close()
+
+
 # ---------------------------------------------------------------------------
 # Environment: Lemonade, headless display, camera stream
 # ---------------------------------------------------------------------------
@@ -101,7 +180,7 @@ def ensure_lemonade(model: str = DEFAULT_MODEL) -> None:
         else:
             raise RuntimeError("Lemonade did not come up - see /tmp/lemond.log")
 
-    subprocess.run(["lemonade", "load", model], check=True)
+    subprocess.run(["lemonade", "load", model], check=True, capture_output=True)
 
     # RAI reads the backend out of config.toml, not the environment
     config = RAI_DIR / "config.toml"
@@ -352,12 +431,25 @@ class ManipulationDemo:
         )
         self.clear_button.on_click(self._on_clear)
 
+        # "overflow", not "overflow_y": ipywidgets 8 removed the per-axis traits,
+        # so overflow_y was silently dropped and the log never clipped. It kept a
+        # 360px box for layout while its content ran past it, painting over the
+        # input row underneath. With overflow set the log scrolls inside its box
+        # and the row below stays put.
         self.log = widgets.Output(
-            layout=widgets.Layout(height="360px", overflow_y="auto", border="1px solid #ddd", padding="6px")
+            layout=widgets.Layout(
+                height="360px",
+                overflow="auto",
+                border="1px solid #ddd",
+                padding="6px",
+                flex="0 0 auto",
+            )
         )
         self.entry = widgets.Text(
             placeholder="Tell the arm what to do, then press Enter",
-            layout=widgets.Layout(width="100%"),
+            # flex rather than width=100%: at 100% the entry and the button add up
+            # to more than the row, which pushes Send out and scrolls the panel
+            layout=widgets.Layout(width="auto", flex="1 1 auto"),
         )
         # on_submit is the only hook for the Enter key; ipywidgets 8 deprecates
         # it without offering a replacement, so just keep the notice out of the
@@ -366,7 +458,11 @@ class ManipulationDemo:
             warnings.simplefilter("ignore", DeprecationWarning)
             self.entry.on_submit(self._on_submit)
 
-        self.send_button = widgets.Button(description="Send", button_style="primary")
+        self.send_button = widgets.Button(
+            description="Send",
+            button_style="primary",
+            layout=widgets.Layout(width="90px", flex="0 0 auto", margin="0 0 0 6px"),
+        )
         self.send_button.on_click(lambda _: self._on_submit(self.entry))
 
         self.log.append_stdout(f"assistant: {GREETING}\n\n")
@@ -379,22 +475,32 @@ class ManipulationDemo:
                 widgets.HBox([self.reload_button, self.clear_button]),
             ]
         )
+        # The margin is the gap the log must never close on: the log is a fixed
+        # 360px block and this row a fixed-height one after it, so the entry sits
+        # at the bottom of the panel no matter how much the agent logs.
+        self.input_row = widgets.HBox(
+            [self.entry, self.send_button],
+            layout=widgets.Layout(
+                width="100%",
+                margin="10px 0 0 0",
+                flex="0 0 auto",
+                align_items="center",
+            ),
+        )
         right = widgets.VBox(
-            [
-                self.log,
-                widgets.HBox(
-                    [self.entry, self.send_button],
-                    layout=widgets.Layout(width="100%"),
-                ),
-            ],
-            layout=widgets.Layout(width="100%"),
+            [self.log, self.input_row],
+            layout=widgets.Layout(width="100%", overflow="hidden"),
         )
         self.ui = widgets.HBox([left, right])
 
     def display(self):
+        """Start the camera and show the UI.
+
+        Returns nothing on purpose - returning self would make Jupyter echo the
+        repr under the widget.
+        """
         self._start_camera()
         display(self.ui)
-        return self
 
     # -- camera -----------------------------------------------------------
 
@@ -535,13 +641,19 @@ def build_demo(
     agent_version: str = "v2",
     model: str = DEFAULT_MODEL,
     progress=print,
+    verbose: bool = False,
 ) -> ManipulationDemo:
     """Everything the Streamlit page did at startup, in one call.
 
     Takes a few minutes: the scene has to render and the ROS 2 stack has to come
     up before the agent can see anything.
+
+    The launch is loud - MoveIt, O3DE and the perception services between them
+    print hundreds of lines. That goes to LAUNCH_LOG unless verbose is set, so
+    the cell shows the progress messages and then the demo.
     """
     os.chdir(RAI_DIR)
+    hush = contextlib.nullcontext if verbose else quiet
 
     progress("Starting Lemonade and pointing RAI at it...")
     ensure_lemonade(model)
@@ -554,15 +666,24 @@ def build_demo(
         raise ValueError(f"Unknown layout {layout!r} - pick one of {list(layouts)}")
 
     progress("Launching the simulation and the ROS 2 stack (a few minutes)...")
-    o3de, scenario = initialize_o3de(layouts[layout], agent_version=agent_version)
+    if not verbose:
+        # Must happen before the launch: launch caches its screen handler the
+        # first time a process logs, and O3DE inherits fd 1/2 when it is spawned
+        quiet_ros_logging()
+    with hush():
+        o3de, scenario = initialize_o3de(layouts[layout], agent_version=agent_version)
 
     progress("Building the agent...")
-    # Imported here rather than at module scope: manipulation_common reads RAI's
-    # config.toml, which ensure_lemonade has only just pointed at Lemonade.
-    sys.path.insert(0, str(RAI_DIR / "examples"))
-    from manipulation_common import create_agent
+    with hush():
+        # Imported here rather than at module scope: manipulation_common reads
+        # RAI's config.toml, which ensure_lemonade has only just pointed at
+        # Lemonade.
+        sys.path.insert(0, str(RAI_DIR / "examples"))
+        from manipulation_common import create_agent
 
-    agent, camera_tool = create_agent(version=agent_version)
+        agent, camera_tool = create_agent(version=agent_version)
 
+    if not verbose:
+        progress(f"  (launch output in {LAUNCH_LOG})")
     progress("Ready.")
     return ManipulationDemo(o3de, scenario, agent, camera_tool)
