@@ -13,6 +13,12 @@
 
 set -e
 
+# --infra-only brings up the headless display and the camera stream, then exits
+# and leaves them running. The notebook builds the UI itself in that mode, so
+# there is no Streamlit page and no second browser tab.
+INFRA_ONLY=0
+[ "${1:-}" = "--infra-only" ] && INFRA_ONLY=1
+
 RAI_DIR=/ryzers/rai
 WESTON_LOG=/tmp/weston.log
 VIDEO_PORT=8080
@@ -27,7 +33,12 @@ mkdir -p -m 1777 /tmp/.X11-unix
 
 cleanup() {
     [ -n "$WESTON_PID" ] && kill "$WESTON_PID" 2>/dev/null
-    [ -n "$VIDEO_PID" ] && kill "$VIDEO_PID" 2>/dev/null
+    [ -n "$WATCHDOG_PID" ] && kill "$WATCHDOG_PID" 2>/dev/null
+    # $VIDEO_PID is the "ros2 run" wrapper, not the server binary it forks, and a
+    # wedged server ignores SIGTERM (rclcpp's shutdown handler never gets to run).
+    # Match on the name and SIGKILL, or the orphan keeps :$VIDEO_PORT and the next
+    # launch dies with "Address already in use".
+    pkill -9 -f web_video_server 2>/dev/null
     return 0
 }
 trap cleanup EXIT
@@ -62,9 +73,49 @@ source install/setup.bash
 
 # 3. Republish the simulation camera as MJPEG for the browser
 echo "Starting web_video_server on port $VIDEO_PORT..."
-ros2 run web_video_server web_video_server --ros-args -p port:=$VIDEO_PORT \
-    > /tmp/web_video_server.log 2>&1 &
-VIDEO_PID=$!
+start_video_server() {
+    ros2 run web_video_server web_video_server --ros-args -p port:=$VIDEO_PORT \
+        >> /tmp/web_video_server.log 2>&1 &
+    VIDEO_PID=$!
+}
+# Clear anything left over from an earlier run before claiming the port
+if pkill -9 -f web_video_server 2>/dev/null; then sleep 2; fi
+start_video_server
+
+# web_video_server wedges when a stream client vanishes mid-frame - a crashed
+# notebook kernel, a closed browser tab. It keeps the listen socket, spins at
+# 100% CPU and stops answering, so the simulation panel and the notebook
+# recorder both hang until someone restarts it by hand. Health-check the
+# snapshot endpoint instead and respawn when it stops responding.
+(
+    sleep 30
+    while true; do
+        # Ask for the topic index, not the camera: the camera topic does not
+        # exist until the simulation is up, but a wedged server stops answering
+        # every request, this one included.
+        if ! curl -fsS --max-time 10 -o /dev/null "http://localhost:$VIDEO_PORT/"; then
+            echo "$(date -Is) web_video_server unresponsive - restarting" \
+                >> /tmp/web_video_server.log
+            pkill -9 -f web_video_server 2>/dev/null || true
+            sleep 2
+            start_video_server
+            sleep 20  # give it time to come up before the next check
+        fi
+        sleep 15
+    done
+# Redirect the whole subshell, not just the echo: it outlives this script, and
+# anything reading our stdout through a pipe would block until it exits.
+) >> /tmp/web_video_server.log 2>&1 &
+WATCHDOG_PID=$!
+
+if [ "$INFRA_ONLY" = "1" ]; then
+    # Hand weston, web_video_server and the watchdog over to the notebook by
+    # dropping the trap - otherwise they die with this shell.
+    trap - EXIT
+    echo "DISPLAY=$DISPLAY"
+    echo "Infrastructure ready - build the UI from the notebook"
+    exit 0
+fi
 
 # 4. Streamlit page: simulation view + agent chat
 echo "Starting the demo - open http://localhost:8501 once the scene has loaded"
