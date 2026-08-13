@@ -17,41 +17,31 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-# Use a verified ROCm PyTorch image as base
 ARG BASE_IMAGE=ghcr.io/amdresearch/auplc-base:latest
 FROM ${BASE_IMAGE}
 
+ARG GENESIS_WORLD_VERSION=1.3.1
+
+ENV ROCM_PYTHON_LIB=/opt/rocm-python/lib
+ENV LD_LIBRARY_PATH="${ROCM_PYTHON_LIB}:${LD_LIBRARY_PATH}"
+
 USER root
-# Vulkan backend and GUI
+RUN SDK_LIB=$(python3 -c "import _rocm_sdk_core, os; print(os.path.join(os.path.dirname(_rocm_sdk_core.__file__), 'lib'))") && \
+    mkdir -p /opt/rocm-python && \
+    ln -s "${SDK_LIB}" "${ROCM_PYTHON_LIB}" && \
+    ln -sf libamdhip64.so.7 "${SDK_LIB}/libamdhip64.so" && \
+    ln -sf /opt/rocm/lib/llvm/bin/ld.lld /usr/local/bin/ld.lld
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl wget git ca-certificates locales \
     ffmpeg \
     libgl1 libglx-mesa0 libgl1-mesa-dri libegl1 libgbm1 libglib2.0-0 \
-    libvulkan1 mesa-vulkan-drivers vulkan-tools \
- && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/*
 
-RUN ln -sf /opt/rocm/lib/llvm/bin/ld.lld /usr/local/bin/ld.lld
-
-# IMPORTANT: must remain under USER root here. pip install as jovyan silently
-# falls back to ~/.local/, which gets masked by the PVC mount at runtime.
-
-# Pinning to <2.4 restores the expected behaviour.
 RUN pip3 install --no-cache-dir \
     "numpy>=1.26.4,<2.4" \
-    "numba>=0.61"
+    "genesis-world==${GENESIS_WORLD_VERSION}"
 
-# Install Genesis related packages
-RUN pip3 install --no-cache-dir \
-    loguru \
-    omegaconf \
-    gstaichi \
-    "genesis-world==0.4.6"
+COPY --chown=jovyan:1000 ./course_data /opt/workspace/PhySim
 
-# Copy related rocm notebooks into the docker
-RUN mkdir -p /opt/workspace/PhySim
-COPY ./course_data /opt/workspace/PhySim
-
-USER root
-RUN chown -R jovyan:1000 /opt/workspace
 USER jovyan
 WORKDIR /opt/workspace/PhySim

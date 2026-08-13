@@ -69,6 +69,9 @@ def format_configuration_summary(state: InstallerState, *, image_source_label: s
     lines.append(f"  PyPI mirror      : {state.mirror_pip or '(default)'}")
     lines.append(f"  npm mirror       : {state.mirror_npm or '(default)'}")
     lines.append(f"  Environments     : {state.courses.description()}")
+    lines.append(f"  Access mode      : {state.access_mode or 'personal'}")
+    if state.access_mode == "local":
+        lines.append(f"  Admin username   : {state.admin_username or 'admin'}")
     return "\n".join(lines)
 
 
@@ -105,4 +108,7 @@ def format_configuration_summary_colored(state: InstallerState, *, image_source_
     else:
         lines.append(row("npm mirror", "(default)", faint=True))
     lines.append(row("Environments", state.courses.description(), accent=True))
+    lines.append(row("Access mode", state.access_mode or "personal", accent=True))
+    if state.access_mode == "local":
+        lines.append(row("Admin username", state.admin_username or "admin"))
     return "\n".join(lines)

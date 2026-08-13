@@ -85,11 +85,14 @@ pxe_apt_mirror: "http://tw.archive.ubuntu.com/ubuntu"
 pxe_rootfs_force_rebuild: true
 # Run apt-get upgrade inside rootfs during chroot setup
 pxe_rootfs_upgrade: false
+# Explicitly enable GPU access only for a rootfs intended for GPU workers.
+pxe_gpu_access_enabled: false
 
 # ============================================================
 # Paths
 # ============================================================
 pxe_nfs_root: "/srv/nfs/rootfs"
+pxe_nfs_allowed_root: "/srv/nfs"
 pxe_tftp_root: "/srv/tftp"
 pxe_web_root: "/var/www/html"
 

@@ -19,6 +19,11 @@ from pathlib import Path
 
 from auplc_installer.catalog import HUB_IMAGE_NAME, CourseSelection
 from auplc_installer.gpu import GpuConfig, detect_and_configure_gpu
+from auplc_installer.gpu_access import (
+    AMD_GPU_UDEV_PACKAGE_FILENAME,
+    AMD_GPU_UDEV_PACKAGE_SHA256,
+    AMD_GPU_UDEV_PACKAGE_URL,
+)
 from auplc_installer.images import (
     EXTERNAL_IMAGES,
     pull_and_tag,
@@ -119,6 +124,14 @@ def pack_download_k3s_images(staging: Path) -> None:
             str(images_dir / "k3s-airgap-images-amd64.tar.zst"),
         ]
     )
+
+
+def pack_download_gpu_access_package(staging: Path) -> None:
+    packages_dir = staging / "packages"
+    packages_dir.mkdir(parents=True, exist_ok=True)
+    deb = packages_dir / AMD_GPU_UDEV_PACKAGE_FILENAME
+    run(["wget", "-q", AMD_GPU_UDEV_PACKAGE_URL, "-O", str(deb)])
+    verify_sha256(deb, AMD_GPU_UDEV_PACKAGE_SHA256)
 
 
 def pack_save_manifests(staging: Path) -> None:
@@ -461,6 +474,7 @@ def pack_bundle(
 
     pack_download_binaries(staging)
     pack_download_k3s_images(staging)
+    pack_download_gpu_access_package(staging)
     pack_save_manifests(staging)
 
     if local_build:

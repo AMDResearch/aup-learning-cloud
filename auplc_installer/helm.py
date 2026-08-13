@@ -10,12 +10,18 @@ plus the dev-mode helpers (``dev_deploy``, ``dev_upgrade``, ``dev_quick``).
 
 from __future__ import annotations
 
+import base64
+import json
+import re
+import secrets
 from dataclasses import dataclass
 from pathlib import Path
 
-from auplc_installer.util import log, run_streaming
+from auplc_installer.auth import validate_local_admin_username
+from auplc_installer.util import InstallerError, log, run, run_streaming
 
 DEV_VALUES_PATH = "runtime/values-dev.yaml"
+_KUBECTL_ERROR_CATEGORY_RE = re.compile(r"\(([^()]+)\):")
 
 
 @dataclass
@@ -51,12 +57,129 @@ def _helm_install_args(paths: RuntimePaths, *, dev: bool = False) -> list[str]:
     return args
 
 
-def deploy_runtime(paths: RuntimePaths, *, dev: bool = False) -> None:
+def _ensure_namespace() -> None:
+    existing = _run_kubectl_inspection(["kubectl", "get", "namespace", "jupyterhub"])
+    if existing.returncode == 0:
+        return
+    created = run(["kubectl", "create", "namespace", "jupyterhub"], check=False)
+    if created.returncode == 0 or "AlreadyExists" in (created.stdout or ""):
+        return
+    raise InstallerError("Failed to create jupyterhub namespace")
+
+
+def _run_kubectl_inspection(command: list[str]):
+    return run(command, check=False, capture_output=True)
+
+
+def _decode_secret_value(data: dict[str, object], key: str) -> str:
+    encoded_value = data.get(key)
+    if not isinstance(encoded_value, str) or not encoded_value:
+        raise InstallerError(f"Existing local admin credentials Secret has an invalid {key}")
+    try:
+        value = base64.b64decode(encoded_value, validate=True).decode("utf-8")
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise InstallerError(f"Existing local admin credentials Secret has an invalid {key}") from exc
+    if not value:
+        raise InstallerError(f"Existing local admin credentials Secret has an invalid {key}")
+    return value
+
+
+def _parse_existing_local_admin_secret(secret_json: str) -> tuple[str | None, str, str]:
+    try:
+        payload = json.loads(secret_json)
+    except json.JSONDecodeError as exc:
+        raise InstallerError("Unable to inspect existing local admin credentials Secret") from exc
+    if not isinstance(payload, dict) or not isinstance(payload.get("data"), dict):
+        raise InstallerError("Existing local admin credentials Secret has an invalid data object")
+    data = payload["data"]
+    password = _decode_secret_value(data, "admin-password")
+    api_token = _decode_secret_value(data, "api-token")
+    if "admin-username" not in data:
+        return None, password, api_token
+    return _decode_secret_value(data, "admin-username"), password, api_token
+
+
+def _kubectl_error_category(output: str | None) -> str:
+    if not output:
+        return "unknown kubectl error"
+    match = _KUBECTL_ERROR_CATEGORY_RE.search(output)
+    return match.group(1) if match else "unknown kubectl error"
+
+
+def ensure_local_admin_secret(admin_username: str) -> str | None:
+    """Create the local admin credentials Secret, returning only a new password."""
+    secret_name = "jupyterhub-admin-credentials"
+    admin_username = validate_local_admin_username(admin_username)
+    _ensure_namespace()
+    existing = _run_kubectl_inspection(
+        ["kubectl", "get", "secret", secret_name, "--namespace", "jupyterhub", "-o", "json"],
+    )
+    if existing.returncode == 0:
+        stored_username, _, _ = _parse_existing_local_admin_secret(existing.stdout)
+        if stored_username is None:
+            run(
+                [
+                    "kubectl",
+                    "patch",
+                    "secret",
+                    secret_name,
+                    "--namespace",
+                    "jupyterhub",
+                    "--type",
+                    "merge",
+                    "--patch",
+                    json.dumps({"stringData": {"admin-username": admin_username}}, separators=(",", ":")),
+                ]
+            )
+            return None
+        validate_local_admin_username(stored_username)
+        if stored_username != admin_username:
+            raise InstallerError(
+                "Existing local admin credentials Secret belongs to a different administrator username"
+            )
+        return None
+    if "NotFound" not in (existing.stdout or ""):
+        category = _kubectl_error_category(existing.stdout)
+        raise InstallerError(
+            f"Unable to inspect local admin credentials Secret ({category}); verify Kubernetes access and RBAC"
+        )
+
+    password = secrets.token_urlsafe(24)
+    api_token = secrets.token_urlsafe(32)
+    payload = json.dumps(
+        {
+            "apiVersion": "v1",
+            "kind": "Secret",
+            "metadata": {"name": secret_name, "namespace": "jupyterhub"},
+            "type": "Opaque",
+            "stringData": {"admin-username": admin_username, "admin-password": password, "api-token": api_token},
+        }
+    )
+    created = run(
+        ["kubectl", "create", "--namespace", "jupyterhub", "--filename=-"],
+        check=False,
+        input_text=payload,
+    )
+    if created.returncode == 0:
+        return password
+    if "AlreadyExists" in (created.stdout or ""):
+        return ensure_local_admin_secret(admin_username)
+    raise InstallerError("Failed to create local admin credentials Secret")
+
+
+def deploy_runtime(
+    paths: RuntimePaths,
+    *,
+    dev: bool = False,
+    access_mode: str = "personal",
+    admin_username: str = "admin",
+) -> str | None:
     """Initial Helm install of JupyterHub. Waits for hub/proxy/scheduler ready."""
     msg = "Deploying AUP Learning Cloud Runtime"
     if dev:
         msg += " (dev mode)"
     log(msg + "...")
+    admin_password = ensure_local_admin_secret(admin_username) if access_mode == "local" else None
     cmd = [
         "helm",
         "install",
@@ -86,10 +209,19 @@ def deploy_runtime(paths: RuntimePaths, *, dev: bool = False) -> None:
     if dev:
         log("")
         log("Dev deployment ready.  Admin UI: http://localhost:30890/hub/admin/users")
+    return admin_password
 
 
-def upgrade_runtime(paths: RuntimePaths, *, dev: bool = False) -> None:
+def upgrade_runtime(
+    paths: RuntimePaths,
+    *,
+    dev: bool = False,
+    access_mode: str = "personal",
+    admin_username: str = "admin",
+) -> None:
     """Helm upgrade. Used after values changes."""
+    if access_mode == "local":
+        ensure_local_admin_secret(admin_username)
     cmd = [
         "helm",
         "upgrade",
@@ -101,6 +233,7 @@ def upgrade_runtime(paths: RuntimePaths, *, dev: bool = False) -> None:
         *_helm_install_args(paths, dev=dev),
     ]
     run_streaming(cmd)
+    run_streaming(["kubectl", "rollout", "status", "deployment/hub", "--namespace", "jupyterhub", "--timeout=600s"])
 
 
 def remove_runtime() -> None:

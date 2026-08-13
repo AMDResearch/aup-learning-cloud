@@ -15,6 +15,7 @@ import sys
 import time
 from collections.abc import Sequence
 from pathlib import Path
+from typing import NoReturn
 
 from auplc_installer import __version__
 from auplc_installer.catalog import parse_selection_spec
@@ -22,6 +23,8 @@ from auplc_installer.gpu import (
     detect_and_configure_gpu,
     refine_gpu_config_from_node_labels,
 )
+from auplc_installer.gpu_access import provision_gpu_access
+from auplc_installer.gpu_hardware import GpuHardware, classify_gpu_hardware
 from auplc_installer.helm import (
     deploy_runtime,
     dev_quick_rollout,
@@ -35,8 +38,13 @@ from auplc_installer.images import (
     pull_external_images,
 )
 from auplc_installer.k3s import install_k3s_single_node, install_tools, remove_k3s
-from auplc_installer.overlay import generate_values_overlay, try_load_courses_from_overlay
+from auplc_installer.overlay import (
+    generate_values_overlay,
+    try_load_access_settings_from_overlay,
+    try_load_courses_from_overlay,
+)
 from auplc_installer.pack import pack_bundle
+from auplc_installer.profiles import resolve_access_settings
 from auplc_installer.progress import stage
 from auplc_installer.rocm import deploy_rocm_gpu_device_plugin
 from auplc_installer.state import InstallerState
@@ -152,6 +160,14 @@ Options (can also be set via environment variables):
                       <list>  - comma-separated keys, e.g. cpu,gpu,Course-CV
                     Env: AUPLC_COURSES
 
+  --access-mode=MODE
+                    local    - closed local accounts; installer creates an admin credential
+                    personal - shared student session (legacy non-interactive default)
+                    Env: AUPLC_ACCESS_MODE
+  --admin-username=NAME
+                    Local-mode administrator username (default: admin).
+                    Env: AUPLC_ADMIN_USERNAME
+
   -y, --yes         Assume yes to all prompts (for scripted/CI use).
                     Env: AUPLC_YES=1
 
@@ -226,6 +242,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--mirror-pip", dest="mirror_pip", default=None)
     p.add_argument("--mirror-npm", dest="mirror_npm", default=None)
     p.add_argument("--courses", dest="courses", default=None)
+    p.add_argument("--access-mode", dest="access_mode", choices=("local", "personal"), default=None)
+    p.add_argument("--admin-username", dest="admin_username", default=None)
     p.add_argument("-y", "--yes", dest="assume_yes", action="store_true")
     p.add_argument("--dry-run", "--try-run", dest="dry_run", action="store_true")
     p.add_argument(
@@ -269,6 +287,10 @@ def _apply_global_flags(state: InstallerState, args: argparse.Namespace) -> None
         state.mirror_npm = args.mirror_npm
     if args.courses is not None:
         state.courses = parse_selection_spec(args.courses)
+    if args.access_mode is not None:
+        state.access_mode = args.access_mode
+    if args.admin_username is not None:
+        state.admin_username = args.admin_username
     if args.assume_yes:
         state.assume_yes = True
     if args.verbose:
@@ -292,6 +314,7 @@ def _install_pull_and_label(
 
 def cmd_install_plan(state: InstallerState, *, legacy_pull: bool = False) -> None:
     """Print the install Configuration summary without side effects."""
+    _resolve_access_settings(state)
     _, label = _install_pull_and_label(state, legacy_pull=legacy_pull)
     sys.stdout.write(format_configuration_summary(state, image_source_label=label) + "\n")
 
@@ -319,6 +342,22 @@ def cmd_install(state: InstallerState, *, pull: bool) -> None:
         keepalive.stop()
 
 
+def _raise_unreachable_gpu_hardware(hardware: GpuHardware) -> NoReturn:
+    raise AssertionError(f"Unhandled GPU hardware classification: {hardware!r}")
+
+
+def _provision_gpu_access_for_local_hardware(*, offline_mode: bool, bundle_dir: Path | None) -> None:
+    match classify_gpu_hardware():
+        case GpuHardware.GPU:
+            provision_gpu_access(offline_mode=offline_mode, bundle_dir=bundle_dir)
+        case GpuHardware.CPU:
+            return
+        case GpuHardware.UNKNOWN:
+            raise InstallerError("Could not determine local AMD GPU hardware; refusing to modify installer state")
+        case unreachable:
+            _raise_unreachable_gpu_hardware(unreachable)
+
+
 def _cmd_install_inner(state: InstallerState, *, pull: bool) -> None:
     """Body of ``cmd_install`` after sudo session has been primed."""
     # Pre-compute the image-stage label so the user knows up-front which path
@@ -330,13 +369,17 @@ def _cmd_install_inner(state: InstallerState, *, pull: bool) -> None:
     else:
         image_stage_label = "Pulling external images & building custom images"
 
-    total = 8
+    total = 9
 
     with stage("Detecting GPU", idx=1, total=total):
         detect_and_configure_gpu(state.gpu, gpu_type_override=state.gpu_type)
-    paths = state.runtime_paths()
 
-    with stage("Generating values overlay (initial)", idx=2, total=total):
+    with stage("Provisioning GPU device access", idx=2, total=total):
+        _provision_gpu_access_for_local_hardware(offline_mode=state.offline_mode, bundle_dir=state.bundle_dir)
+    paths = state.runtime_paths()
+    access_mode, admin_username = _resolve_access_settings(state)
+
+    with stage("Generating values overlay (initial)", idx=3, total=total):
         # First pass: use local detection so image pulls / builds get the
         # right GPU_TARGET. Overlay is regenerated again below from
         # labeller-published labels.
@@ -345,14 +388,16 @@ def _cmd_install_inner(state: InstallerState, *, pull: bool) -> None:
             image_registry=state.image_registry,
             image_tag=state.image_tag,
             courses=state.courses,
+            access_mode=access_mode,
+            admin_username=admin_username,
             offline_mode=state.offline_mode,
             overlay_path=paths.overlay_path,
         )
 
-    with stage("Installing helm + k9s", idx=3, total=total):
+    with stage("Installing helm + k9s", idx=4, total=total):
         install_tools(offline_mode=state.offline_mode, bundle_dir=state.bundle_dir)
 
-    with stage("Installing K3s (single-node)", idx=4, total=total):
+    with stage("Installing K3s (single-node)", idx=5, total=total):
         install_k3s_single_node(
             offline_mode=state.offline_mode,
             bundle_dir=state.bundle_dir,
@@ -360,7 +405,7 @@ def _cmd_install_inner(state: InstallerState, *, pull: bool) -> None:
             mirror_prefix=state.mirror_prefix,
         )
 
-    with stage(image_stage_label, idx=5, total=total):
+    with stage(image_stage_label, idx=6, total=total):
         if state.offline_mode and state.bundle_dir is not None:
             load_offline_images(state.bundle_dir)
         elif pull:
@@ -397,30 +442,36 @@ def _cmd_install_inner(state: InstallerState, *, pull: bool) -> None:
                 k3s_images_dir=state.k3s_images_dir,
             )
 
-    with stage("Deploying ROCm GPU device plugin + node labeller", idx=6, total=total):
+    with stage("Deploying ROCm GPU device plugin + node labeller", idx=7, total=total):
         deploy_rocm_gpu_device_plugin(
             offline_mode=state.offline_mode,
             bundle_dir=state.bundle_dir,
         )
 
-    with stage("Refreshing values overlay from node labels", idx=7, total=total):
+    with stage("Refreshing values overlay from node labels", idx=8, total=total):
         refine_gpu_config_from_node_labels(state.gpu)
         generate_values_overlay(
             state.gpu,
             image_registry=state.image_registry,
             image_tag=state.image_tag,
             courses=state.courses,
+            access_mode=access_mode,
+            admin_username=admin_username,
             offline_mode=state.offline_mode,
             overlay_path=paths.overlay_path,
         )
 
-    with stage("Deploying JupyterHub runtime (helm install + wait)", idx=8, total=total):
-        deploy_runtime(paths)
+    with stage("Deploying JupyterHub runtime (helm install + wait)", idx=9, total=total):
+        admin_password = deploy_runtime(
+            paths,
+            access_mode=access_mode,
+            admin_username=admin_username,
+        )
 
-    _print_success_banner()
+    _print_success_banner(access_mode=access_mode, admin_username=admin_username, admin_password=admin_password)
 
 
-def _print_success_banner() -> None:
+def _print_success_banner(*, access_mode: str, admin_username: str, admin_password: str | None) -> None:
     """Show the post-install celebration / next-steps panel.
 
     The full "AUP Learning Cloud" figlet logo, a "ready" message, and the
@@ -447,10 +498,29 @@ def _print_success_banner() -> None:
     log("    " + bold_green("You have successfully installed AUP Learning Cloud!"))
     log("")
     log("    " + bold("Open in your browser: ") + bold_cyan("http://localhost:30890"))
-    log("    " + dim("(auto-logged-in as 'student' — no login needed)"))
+    if access_mode == "local":
+        log("    " + dim(f"Sign in with local credentials for '{admin_username}'."))
+        _print_created_admin_password(admin_password)
+    else:
+        log("    " + dim("Shared student session: no login needed."))
     log("")
     log("    " + dim("kubectl is configured at $HOME/.kube/config; try ") + cyan("`kubectl get nodes`"))
     log("")
+
+
+def _print_created_admin_password(admin_password: str | None) -> None:
+    if admin_password is not None and sys.stdout.isatty():
+        from auplc_installer.colors import bold, bold_green
+
+        log("    " + bold("Temporary admin password (shown once): ") + bold_green(admin_password))
+    elif admin_password is not None:
+        log(
+            "    Retrieve credentials safely: kubectl -n jupyterhub get secret jupyterhub-admin-credentials -o jsonpath='{.data.admin-password}' | base64 -d && echo"
+        )
+    else:
+        log(
+            "    Existing credentials were preserved. Retrieve the password: kubectl -n jupyterhub get secret jupyterhub-admin-credentials -o jsonpath='{.data.admin-password}' | base64 -d && echo"
+        )
 
 
 def cmd_uninstall(state: InstallerState) -> None:
@@ -582,37 +652,50 @@ def cmd_dev_quick(state: InstallerState) -> None:
 
 
 def cmd_dev_deploy(state: InstallerState) -> None:
+    _provision_gpu_access_for_local_hardware(offline_mode=state.offline_mode, bundle_dir=state.bundle_dir)
     detect_and_configure_gpu(state.gpu, gpu_type_override=state.gpu_type)
     paths = state.runtime_paths()
     refine_gpu_config_from_node_labels(state.gpu)
+    access_mode, admin_username = _resolve_access_settings(state)
     generate_values_overlay(
         state.gpu,
         image_registry=state.image_registry,
         image_tag=state.image_tag,
         courses=state.courses,
+        access_mode=access_mode,
+        admin_username=admin_username,
         offline_mode=state.offline_mode,
         overlay_path=paths.overlay_path,
     )
-    deploy_runtime(paths, dev=True)
+    _print_created_admin_password(
+        deploy_runtime(paths, dev=True, access_mode=access_mode, admin_username=admin_username)
+    )
 
 
 def cmd_dev_upgrade(state: InstallerState) -> None:
+    _provision_gpu_access_for_local_hardware(offline_mode=state.offline_mode, bundle_dir=state.bundle_dir)
     detect_and_configure_gpu(state.gpu, gpu_type_override=state.gpu_type)
     paths = state.runtime_paths()
     refine_gpu_config_from_node_labels(state.gpu)
     _preserve_courses_for_upgrade(state, paths.overlay_path)
+    _preserve_access_settings_for_upgrade(state, paths.overlay_path)
+    access_mode, admin_username = _resolve_access_settings(state)
     generate_values_overlay(
         state.gpu,
         image_registry=state.image_registry,
         image_tag=state.image_tag,
         courses=state.courses,
+        access_mode=access_mode,
+        admin_username=admin_username,
         offline_mode=state.offline_mode,
         overlay_path=paths.overlay_path,
     )
-    upgrade_runtime(paths, dev=True)
+    upgrade_runtime(paths, dev=True, access_mode=access_mode, admin_username=admin_username)
 
 
 def cmd_dev_reinstall(state: InstallerState) -> None:
+    _preserve_access_settings_for_upgrade(state, state.runtime_paths().overlay_path)
+    _provision_gpu_access_for_local_hardware(offline_mode=state.offline_mode, bundle_dir=state.bundle_dir)
     with contextlib.suppress(InstallerError):
         remove_runtime()
     time.sleep(0.5)
@@ -623,34 +706,43 @@ def cmd_dev_reinstall(state: InstallerState) -> None:
 
 
 def cmd_rt_install(state: InstallerState) -> None:
+    _provision_gpu_access_for_local_hardware(offline_mode=state.offline_mode, bundle_dir=state.bundle_dir)
     detect_and_configure_gpu(state.gpu, gpu_type_override=state.gpu_type)
     paths = state.runtime_paths()
     refine_gpu_config_from_node_labels(state.gpu)
+    access_mode, admin_username = _resolve_access_settings(state)
     generate_values_overlay(
         state.gpu,
         image_registry=state.image_registry,
         image_tag=state.image_tag,
         courses=state.courses,
+        access_mode=access_mode,
+        admin_username=admin_username,
         offline_mode=state.offline_mode,
         overlay_path=paths.overlay_path,
     )
-    deploy_runtime(paths)
+    _print_created_admin_password(deploy_runtime(paths, access_mode=access_mode, admin_username=admin_username))
 
 
 def cmd_rt_upgrade(state: InstallerState) -> None:
+    _provision_gpu_access_for_local_hardware(offline_mode=state.offline_mode, bundle_dir=state.bundle_dir)
     detect_and_configure_gpu(state.gpu, gpu_type_override=state.gpu_type)
     paths = state.runtime_paths()
     refine_gpu_config_from_node_labels(state.gpu)
     _preserve_courses_for_upgrade(state, paths.overlay_path)
+    _preserve_access_settings_for_upgrade(state, paths.overlay_path)
+    access_mode, admin_username = _resolve_access_settings(state)
     generate_values_overlay(
         state.gpu,
         image_registry=state.image_registry,
         image_tag=state.image_tag,
         courses=state.courses,
+        access_mode=access_mode,
+        admin_username=admin_username,
         offline_mode=state.offline_mode,
         overlay_path=paths.overlay_path,
     )
-    upgrade_runtime(paths)
+    upgrade_runtime(paths, access_mode=access_mode, admin_username=admin_username)
 
 
 def _preserve_courses_for_upgrade(state: InstallerState, overlay_path: Path) -> None:
@@ -673,11 +765,30 @@ def _preserve_courses_for_upgrade(state: InstallerState, overlay_path: Path) -> 
     log(f"Preserving previous course selection: {previous.description()}")
 
 
+def _preserve_access_settings_for_upgrade(state: InstallerState, overlay_path: Path) -> None:
+    previous = try_load_access_settings_from_overlay(overlay_path)
+    if state.access_mode:
+        if state.access_mode == "local" and not state.admin_username and previous and previous[0] == "local":
+            state.admin_username = previous[1]
+        return
+    if previous is None:
+        return
+    state.access_mode, state.admin_username = previous
+    log(f"Preserving previous access mode: {state.access_mode}")
+
+
+def _resolve_access_settings(state: InstallerState) -> tuple[str, str]:
+    settings = resolve_access_settings(state.access_mode, state.admin_username)
+    return settings.access_mode, settings.admin_username
+
+
 def cmd_rt_remove(state: InstallerState) -> None:
     remove_runtime()
 
 
 def cmd_rt_reinstall(state: InstallerState) -> None:
+    _preserve_access_settings_for_upgrade(state, state.runtime_paths().overlay_path)
+    _provision_gpu_access_for_local_hardware(offline_mode=state.offline_mode, bundle_dir=state.bundle_dir)
     with contextlib.suppress(InstallerError):
         remove_runtime()
     time.sleep(0.5)
@@ -758,6 +869,8 @@ def main(argv: Sequence[str] | None = None) -> None:
             or tok.startswith("--mirror-pip=")
             or tok.startswith("--mirror-npm=")
             or tok.startswith("--courses=")
+            or tok.startswith("--access-mode=")
+            or tok.startswith("--admin-username=")
             or tok in ("-y", "--yes", "-v", "--verbose", "--version", "--dry-run", "--try-run")
         ):
             flags.append(tok)
@@ -770,6 +883,8 @@ def main(argv: Sequence[str] | None = None) -> None:
     try:
         state = InstallerState.from_environment(script_dir=script_dir)
         _apply_global_flags(state, args)
+        if args.command not in (None, "tui") and not state.access_mode:
+            log("No --access-mode supplied; defaulting to personal shared student access.")
         _dispatch(args.command, list(args.rest), state, source_root=script_dir, dry_run=args.dry_run)
     except InstallerError as exc:
         log_error(str(exc))

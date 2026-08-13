@@ -48,8 +48,8 @@ PRODUCT_NAME_TO_SKU: dict[str, SkuRow] = {
 # Accelerator keys defined in runtime/values.yaml custom.accelerators. When
 # the resolved accel_key is not in this list, ``overlay.py`` injects a full
 # minimal accelerator stanza so helm install succeeds without values.yaml
-# edits (useful for ad-hoc SKUs like 9600gre).
-GPU_CURATED_SKU_KEYS = ("phx", "strix", "strix-halo", "9070xt", "r9700")
+# edits (useful for ad-hoc SKUs not yet promoted to the default values).
+GPU_CURATED_SKU_KEYS = ("phx", "strix", "strix-halo", "9070xt", "r9700", "9600gre")
 
 
 def is_curated_sku(key: str) -> bool:

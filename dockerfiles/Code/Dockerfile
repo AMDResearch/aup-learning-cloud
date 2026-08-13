@@ -20,7 +20,7 @@
 ARG NODE_IMAGE=docker.io/library/node:22-bookworm-slim
 ARG BASE_IMAGE=ghcr.io/amdresearch/auplc-default:latest
 ARG IMAGE_FLAVOR=cpu
-ARG CODE_SERVER_VERSION=4.96.4
+ARG CODE_SERVER_VERSION=4.131.0
 
 FROM ${NODE_IMAGE} AS node-runtime
 
@@ -43,7 +43,7 @@ RUN pnpm --filter @auplc/runtime-status run build && \
 
 FROM ${BASE_IMAGE}
 
-ARG CODE_SERVER_VERSION=4.96.4
+ARG CODE_SERVER_VERSION=4.131.0
 ARG IMAGE_FLAVOR
 ARG NPM_REGISTRY=
 ARG PNPM_VERSION=10.27.0
@@ -80,9 +80,10 @@ COPY --from=hub-link-builder /build/runtime/code-server/extensions/auplc-hub-lin
 COPY dockerfiles/Code/start-code-server.sh /usr/local/bin/start-code-server.sh
 
 RUN chmod +x /usr/local/bin/start-code-server.sh && \
+    code-server --help | grep -F -- '--link-protection-trusted-domains' && \
     mkdir -p \
         /opt/auplc/extensions/local \
-        /opt/auplc/code-server/extensions \
+        /opt/auplc/extensions/staging \
         /home/jovyan/.cache \
         /home/jovyan/.config \
         /home/jovyan/.local/bin \
@@ -96,10 +97,56 @@ USER jovyan
 RUN set -eu; \
     while IFS= read -r extension_id || [ -n "${extension_id}" ]; do \
         case "${extension_id}" in ''|'#'*) continue ;; esac; \
-        code-server --extensions-dir /opt/auplc/code-server/extensions --install-extension "${extension_id}"; \
+        code-server --extensions-dir /opt/auplc/extensions/staging --install-extension "${extension_id}"; \
     done < /opt/auplc/extensions/extensions.txt; \
     find /opt/auplc/extensions/local -type f -name '*.vsix' -print0 | \
-        xargs -0 -r -n 1 code-server --extensions-dir /opt/auplc/code-server/extensions --install-extension
+        xargs -0 -r -n 1 code-server --extensions-dir /opt/auplc/extensions/staging --install-extension
+
+USER root
+
+RUN set -eu; \
+    system_root=/usr/lib/code-server/lib/vscode/extensions; \
+    staging_root=/opt/auplc/extensions/staging; \
+    test -d "${system_root}"; \
+    test -d "${staging_root}"; \
+    seen_ids=/tmp/auplc-extension-ids; \
+    seen_basenames=/tmp/auplc-extension-basenames; \
+    : > "${seen_ids}"; \
+    : > "${seen_basenames}"; \
+    trap 'rm -f "${seen_ids}" "${seen_basenames}"' EXIT; \
+    while IFS= read -r -d '' staging_entry; do \
+        entry_name="${staging_entry##*/}"; \
+        case "${entry_name}" in \
+            extensions.json) test -f "${staging_entry}" && [ ! -L "${staging_entry}" ]; continue ;; \
+        esac; \
+        test -d "${staging_entry}" && [ ! -L "${staging_entry}" ]; \
+        test -f "${staging_entry}/package.json" && [ ! -L "${staging_entry}/package.json" ]; \
+        extension_id="$(python3 -c 'import json, sys; package = json.load(open(sys.argv[1], encoding="utf-8")); publisher = package.get("publisher"); name = package.get("name"); (isinstance(publisher, str) and publisher and isinstance(name, str) and name) or sys.exit("package.json must define non-empty publisher and name"); print(f"{publisher}.{name}")' "${staging_entry}/package.json")"; \
+        if grep -Fxq "${extension_id}" "${seen_ids}"; then \
+            printf 'duplicate extension ID in staging: %s\\n' "${extension_id}" >&2; \
+            exit 1; \
+        fi; \
+        if grep -Fxq "${entry_name}" "${seen_basenames}" || [ -e "${system_root}/${entry_name}" ] || [ -L "${system_root}/${entry_name}" ]; then \
+            printf 'extension directory basename collision: %s\\n' "${entry_name}" >&2; \
+            exit 1; \
+        fi; \
+        printf '%s\\n' "${extension_id}" >> "${seen_ids}"; \
+        printf '%s\\n' "${entry_name}" >> "${seen_basenames}"; \
+        cp -a -- "${staging_entry}" "${system_root}/${entry_name}"; \
+        chown -R root:root "${system_root}/${entry_name}"; \
+        chmod -R u=rwX,go=rX "${system_root}/${entry_name}"; \
+    done < <(LC_ALL=C find -P "${staging_root}" -mindepth 1 -maxdepth 1 -print0 | LC_ALL=C sort -z); \
+    rm -rf -- "${staging_root}"
+
+RUN --network=none set -eu; \
+    system_root=/usr/lib/code-server/lib/vscode/extensions; \
+    staging_root=/opt/auplc/extensions/staging; \
+    test -d "${system_root}"; \
+    test ! -e "${system_root}/extensions.json"; \
+    test ! -e "${staging_root}" && test ! -L "${staging_root}"; \
+    python3 -c 'import json, pathlib, sys; system_root = pathlib.Path(sys.argv[1]); extension_list = pathlib.Path(sys.argv[2]); expected = {line.strip() for line in extension_list.read_text(encoding="utf-8").splitlines() if line.strip() and not line.lstrip().startswith("#")} | {"amdresearch.auplc-hub-link"}; manifests = [json.loads((extension_dir / "package.json").read_text(encoding="utf-8")) for extension_dir in system_root.iterdir() if extension_dir.is_dir() and not extension_dir.is_symlink() and (extension_dir / "package.json").is_file()]; ids = [str(manifest.get("publisher")) + "." + str(manifest.get("name")) for manifest in manifests]; invalid = {extension_id: ids.count(extension_id) for extension_id in expected if ids.count(extension_id) != 1}; not invalid or sys.exit(f"system extension manifest count mismatch: {invalid}")' "${system_root}" /opt/auplc/extensions/extensions.txt
+
+USER jovyan
 
 EXPOSE 8888
 WORKDIR /home/jovyan

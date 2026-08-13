@@ -42,15 +42,8 @@
 # ============================================================================
 
 custom:
-  # Authentication mode
-  # - auto-login: No credentials required, auto-login as 'student' (for single-node dev)
-  # - dummy: Accept any username/password (for testing)
-  # - github: GitHub App authentication
-  # - multi: GitHub App + Local accounts
-  authMode: "auto-login"
-
   # GitHub organization name for team-based resource access
-  # Required for github and multi auth modes.
+  # Required when custom.auth.github is enabled.
   # githubOrgName: "<YOUR-ORG-NAME>"
 
   # Cluster display name (optional). Appended to "AUP Learning Cloud" in the UI.
@@ -60,6 +53,8 @@ custom:
   # Auto-create admin user on first install
   adminUser:
     enabled: false
+    username: "admin"
+    existingSecret: ""
 
   # ============================================================================
   # Notifications
@@ -268,6 +263,13 @@ custom:
         amd.com/gpu.product-name: "AMD_Radeon_AI_PRO_R9700"
       env: {}
       quotaRate: 4
+    9600gre:
+      displayName: "AMD Radeon™ RX 9600 GRE (Desktop GPU)"
+      description: "RDNA 4.0 (gfx120x) | Compute Units 32 | 12GB GDDR6"
+      nodeSelector:
+        amd.com/gpu.product-name: "AMD_Radeon_RX_9600_GRE"
+      env: {}
+      quotaRate: 4
 
   # ============================================================================
   # Course Resources Configuration
@@ -374,8 +376,28 @@ custom:
         description: "Basic GPU Environment"
         subDescription: "GPU Accelerated Environment"
         accelerator: "GPU"
+        # Add only accelerators that this deployment should expose to users.
+        # Image overrides for the curated accelerators are preconfigured below,
+        # so enabling another GPU family normally only requires adding its key
+        # here from custom.accelerators.
+        # If you override GPU resource images with custom tags or registries,
+        # also override the matching acceleratorOverrides entries so accelerator
+        # selection does not fall back to the default latest-* images.
         acceleratorKeys:
           - strix-halo
+        acceleratorOverrides:
+          phx:
+            image: "ghcr.io/amdresearch/auplc-base:latest-gfx110x"
+          strix:
+            image: "ghcr.io/amdresearch/auplc-base:latest-gfx1150"
+          strix-halo:
+            image: "ghcr.io/amdresearch/auplc-base:latest-gfx1151"
+          9070xt:
+            image: "ghcr.io/amdresearch/auplc-base:latest-gfx120x"
+          r9700:
+            image: "ghcr.io/amdresearch/auplc-base:latest-gfx120x"
+          9600gre:
+            image: "ghcr.io/amdresearch/auplc-base:latest-gfx120x"
         allowGitClone: true
         defaultPath: "/home/jovyan"
         resourceType: "notebook"
@@ -386,6 +408,19 @@ custom:
         accelerator: "GPU"
         acceleratorKeys:
           - strix-halo
+        acceleratorOverrides:
+          phx:
+            image: "ghcr.io/amdresearch/auplc-code-gpu:latest-gfx110x"
+          strix:
+            image: "ghcr.io/amdresearch/auplc-code-gpu:latest-gfx1150"
+          strix-halo:
+            image: "ghcr.io/amdresearch/auplc-code-gpu:latest-gfx1151"
+          9070xt:
+            image: "ghcr.io/amdresearch/auplc-code-gpu:latest-gfx120x"
+          r9700:
+            image: "ghcr.io/amdresearch/auplc-code-gpu:latest-gfx120x"
+          9600gre:
+            image: "ghcr.io/amdresearch/auplc-code-gpu:latest-gfx120x"
         allowGitClone: true
         launchMode: "code-server"
         defaultPath: "/home/jovyan"
@@ -397,11 +432,19 @@ custom:
         accelerator: "GPU"
         acceleratorKeys:
           - strix-halo
-        # acceleratorOverrides: (optional) per-accelerator image and env overrides
-        #   9070xt:
-        #     image: "ghcr.io/your-org/auplc-cv:<tag-for-9070xt>"
-        #   r9700:
-        #     image: "ghcr.io/your-org/auplc-cv:<tag-for-r9700>"
+        acceleratorOverrides:
+          phx:
+            image: "ghcr.io/amdresearch/auplc-cv:latest-gfx110x"
+          strix:
+            image: "ghcr.io/amdresearch/auplc-cv:latest-gfx1150"
+          strix-halo:
+            image: "ghcr.io/amdresearch/auplc-cv:latest-gfx1151"
+          9070xt:
+            image: "ghcr.io/amdresearch/auplc-cv:latest-gfx120x"
+          r9700:
+            image: "ghcr.io/amdresearch/auplc-cv:latest-gfx120x"
+          9600gre:
+            image: "ghcr.io/amdresearch/auplc-cv:latest-gfx120x"
         defaultPath: "/opt/workspace/CV"
         resourceType: "notebook"
       Course-DL:
@@ -411,6 +454,19 @@ custom:
         accelerator: "GPU"
         acceleratorKeys:
           - strix-halo
+        acceleratorOverrides:
+          phx:
+            image: "ghcr.io/amdresearch/auplc-dl:latest-gfx110x"
+          strix:
+            image: "ghcr.io/amdresearch/auplc-dl:latest-gfx1150"
+          strix-halo:
+            image: "ghcr.io/amdresearch/auplc-dl:latest-gfx1151"
+          9070xt:
+            image: "ghcr.io/amdresearch/auplc-dl:latest-gfx120x"
+          r9700:
+            image: "ghcr.io/amdresearch/auplc-dl:latest-gfx120x"
+          9600gre:
+            image: "ghcr.io/amdresearch/auplc-dl:latest-gfx120x"
         defaultPath: "/opt/workspace/DL"
         resourceType: "notebook"
       Course-LLM:
@@ -420,6 +476,19 @@ custom:
         accelerator: "GPU"
         acceleratorKeys:
           - strix-halo
+        acceleratorOverrides:
+          phx:
+            image: "ghcr.io/amdresearch/auplc-llm:latest-gfx110x"
+          strix:
+            image: "ghcr.io/amdresearch/auplc-llm:latest-gfx1150"
+          strix-halo:
+            image: "ghcr.io/amdresearch/auplc-llm:latest-gfx1151"
+          9070xt:
+            image: "ghcr.io/amdresearch/auplc-llm:latest-gfx120x"
+          r9700:
+            image: "ghcr.io/amdresearch/auplc-llm:latest-gfx120x"
+          9600gre:
+            image: "ghcr.io/amdresearch/auplc-llm:latest-gfx120x"
         defaultPath: "/opt/workspace/LLM"
         resourceType: "notebook"
       Course-PhySim:
@@ -429,6 +498,19 @@ custom:
         accelerator: "GPU"
         acceleratorKeys:
           - strix-halo
+        acceleratorOverrides:
+          phx:
+            image: "ghcr.io/amdresearch/auplc-physim:latest-gfx110x"
+          strix:
+            image: "ghcr.io/amdresearch/auplc-physim:latest-gfx1150"
+          strix-halo:
+            image: "ghcr.io/amdresearch/auplc-physim:latest-gfx1151"
+          9070xt:
+            image: "ghcr.io/amdresearch/auplc-physim:latest-gfx120x"
+          r9700:
+            image: "ghcr.io/amdresearch/auplc-physim:latest-gfx120x"
+          9600gre:
+            image: "ghcr.io/amdresearch/auplc-physim:latest-gfx120x"
         defaultPath: "/opt/workspace/PhySim"
         resourceType: "notebook"
       Course-Finetuning:
@@ -512,7 +594,7 @@ custom:
   # Quota Management
   # ============================================================================
   quota:
-    # Enable quota system (auto-disabled for auto-login/dummy modes if not set)
+    # Enable quota enforcement independently from the session runtime limit.
     enabled: null
     # CPU-only quota consumption rate
     cpuRate: 1
@@ -558,9 +640,6 @@ hub:
       # Always show Home page first, even when a server is already running.
       # Users can access their running server via the "My Server" button on Home.
       redirect_to_server: false
-
-    Authenticator:
-      allow_all: true
 
     # ---- GitHub App ----
     GitHubOAuthenticator:
@@ -620,14 +699,9 @@ monitoring:
     enabled: false
 
 singleuser:
-  # Security context for user pods to access GPU devices
-  # supplementalGroups grants container access to host's render group (GID 993)
-  # This allows non-root users to access /dev/kfd and /dev/dri devices
-  extraPodConfig:
-    securityContext:
-      fsGroup: 100
-      supplementalGroups:
-        - 990 # render group for ROCm GPU access
+  # Storage ownership only. AUPLC runtime does not inject GPU groups.
+  # amd.com/gpu requests allocate devices; host udev policy controls node modes.
+  fsGid: 100
 
   storage:
     dynamic:

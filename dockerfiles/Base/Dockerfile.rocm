@@ -226,14 +226,6 @@ RUN if getent passwd 1000 > /dev/null; then \
 RUN useradd -m -s /bin/bash -N -u $NB_UID -g $NB_GID $NB_USER && \
     echo "$NB_USER ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
-# Add jovyan to video and render groups for ROCm access
-RUN if getent group render; then \
-        groupmod -g 992 render; \
-    else \
-        groupadd -g 992 render; \
-    fi
-RUN usermod -aG video,render ${NB_USER}
-
 # Create necessary Jupyter directories with correct permissions
 RUN mkdir -p /home/$NB_USER/.jupyter && \
     mkdir -p /home/$NB_USER/.local/share/jupyter/runtime && \
@@ -250,15 +242,8 @@ RUN echo '#!/bin/bash' > /home/$NB_USER/start-jupyter.sh && \
     # Verify the file exists (will fail build if not)
     ls -la /home/$NB_USER/start-jupyter.sh
 
-# Set proper permissions for ROCm devices
-RUN mkdir -p /etc/udev/rules.d && \
-    echo 'SUBSYSTEM=="kfd", GROUP="video", MODE="0666"' > /etc/udev/rules.d/70-kfd.rules && \
-    echo 'SUBSYSTEM=="dri", GROUP="video", MODE="0666"' > /etc/udev/rules.d/70-dri.rules
-
-# Create entrypoint script to set permissions and start services
+# Create entrypoint script to start services
 RUN echo '#!/bin/bash' > /entrypoint.sh && \
-    echo 'chmod 666 /dev/kfd 2>/dev/null || true' >> /entrypoint.sh && \
-    echo 'chmod 666 /dev/dri/renderD* 2>/dev/null || true' >> /entrypoint.sh && \
     echo 'export USER=jovyan' >> /entrypoint.sh && \
     echo 'export SHELL=/bin/bash' >> /entrypoint.sh && \
     echo 'exec python3 -m jupyterhub.singleuser --ip=0.0.0.0 --port=8888 "$@"' >> /entrypoint.sh && \

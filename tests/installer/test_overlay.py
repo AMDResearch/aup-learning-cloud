@@ -27,6 +27,7 @@ from auplc_installer.catalog import (
 )
 from auplc_installer.gpu import GpuConfig, SkuEntry, append_product
 from auplc_installer.overlay import (
+    GPU_RESOURCE_KEYS,
     emit_overlay,
     generate_values_overlay,
     try_load_courses_from_overlay,
@@ -106,6 +107,22 @@ def test_default_selection_round_trips_valid_yaml() -> None:
     assert "teams" not in parsed["custom"]
 
 
+def test_overlay_keeps_gpu_resources_without_gpu_access_contract() -> None:
+    text, parsed = _render(
+        _strix_halo_cfg(),
+        courses=CourseSelection.default(),
+    )
+
+    custom = parsed["custom"]
+    assert "gpuAccess" not in custom
+    assert "renderGid" not in text
+    assert "supplementalGroups" not in text
+    assert set(custom["resources"]["images"]) == set(GPU_RESOURCE_KEYS)
+    assert set(custom["resources"]["metadata"]) == set(GPU_RESOURCE_KEYS)
+    assert "teams" not in custom
+    assert "profiles" not in custom
+
+
 def test_resource_images_use_primary_tag() -> None:
     _, parsed = _render(_strix_halo_cfg(), courses=CourseSelection.default())
     images = parsed["custom"]["resources"]["images"]
@@ -117,11 +134,34 @@ def test_resource_images_use_primary_tag() -> None:
     assert images["Course-LocalInference"] == "ghcr.io/amdresearch/auplc-localinference:v1.0-gfx1151"
 
 
+def test_homogeneous_target_emits_matching_accelerator_overrides() -> None:
+    _, parsed = _render(_strix_halo_cfg(), courses=CourseSelection.default())
+    gpu_metadata = parsed["custom"]["resources"]["metadata"]["gpu"]
+    overrides = gpu_metadata["acceleratorOverrides"]
+    assert overrides == {
+        "strix-halo": {
+            "image": "ghcr.io/amdresearch/auplc-base:v1.0-gfx1151",
+        },
+    }
+
+
 def test_curated_sku_with_product_name_emits_node_selector() -> None:
     _, parsed = _render(_strix_halo_cfg(), courses=CourseSelection.default())
     accelerators = parsed["custom"]["accelerators"]
     assert "strix-halo" in accelerators
     assert accelerators["strix-halo"]["nodeSelector"]["amd.com/gpu.product-name"] == "AMD_Radeon_8060S_Graphics"
+
+
+def test_9600gre_uses_curated_overlay_path() -> None:
+    cfg = GpuConfig()
+    append_product(cfg, "AMD_Radeon_RX_9600_GRE")
+    text, parsed = _render(cfg, courses=CourseSelection.default())
+    accel = parsed["custom"]["accelerators"]["9600gre"]
+    assert accel["nodeSelector"]["amd.com/gpu.product-name"] == "AMD_Radeon_RX_9600_GRE"
+    assert "displayName" not in accel
+    assert "description" not in accel
+    assert "quotaRate" not in accel
+    assert "SKU '9600gre' is not curated in values.yaml" not in text
 
 
 def test_basic_emits_filtered_teams_mapping() -> None:
@@ -196,6 +236,7 @@ def test_mixed_targets_emit_accelerator_overrides() -> None:
     gpu_metadata = parsed["custom"]["resources"]["metadata"]["gpu"]
     assert "acceleratorOverrides" in gpu_metadata
     overrides = gpu_metadata["acceleratorOverrides"]
+    assert overrides["strix-halo"]["image"] == "ghcr.io/amdresearch/auplc-base:v1.0-gfx1151"
     assert "r9700" in overrides
     assert overrides["r9700"]["image"] == "ghcr.io/amdresearch/auplc-base:v1.0-gfx120x"
 

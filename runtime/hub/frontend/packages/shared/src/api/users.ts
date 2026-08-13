@@ -21,6 +21,8 @@ import type {
   User,
   UsersResponse,
   Group,
+  ProvisionUsersRequest,
+  ProvisionUsersResponse,
   SetPasswordRequest,
 } from "../types/user.js";
 import type { HubInfo } from "../types/hub.js";
@@ -99,6 +101,15 @@ export async function createUsers(
   return apiRequest<User[]>("/users", {
     method: "POST",
     body: JSON.stringify({ usernames, admin }),
+  });
+}
+
+export async function provisionUsers(
+  data: ProvisionUsersRequest
+): Promise<ProvisionUsersResponse> {
+  return adminApiRequest<ProvisionUsersResponse>("/provision-users", {
+    method: "POST",
+    body: JSON.stringify(data),
   });
 }
 
@@ -218,9 +229,16 @@ export async function addUserToGroup(
   groupName: string,
   username: string
 ): Promise<Group> {
+  return addUsersToGroup(groupName, [username]);
+}
+
+export async function addUsersToGroup(
+  groupName: string,
+  usernames: string[]
+): Promise<Group> {
   return adminApiRequest<Group>(`/groups/${encodeURIComponent(groupName)}/users`, {
     method: "POST",
-    body: JSON.stringify({ users: [username] }),
+    body: JSON.stringify({ users: usernames }),
   });
 }
 
@@ -228,8 +246,15 @@ export async function removeUserFromGroup(
   groupName: string,
   username: string
 ): Promise<Group> {
+  return removeUsersFromGroup(groupName, [username]);
+}
+
+export async function removeUsersFromGroup(
+  groupName: string,
+  usernames: string[]
+): Promise<Group> {
   return adminApiRequest<Group>(`/groups/${encodeURIComponent(groupName)}/users`, {
     method: "DELETE",
-    body: JSON.stringify({ users: [username] }),
+    body: JSON.stringify({ users: usernames }),
   });
 }

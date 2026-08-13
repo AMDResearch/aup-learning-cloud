@@ -630,6 +630,21 @@ def _flow_select_envs(state: InstallerState, *, allow_back: bool = False) -> boo
         return True
 
 
+def _flow_select_access(state: InstallerState) -> None:
+    state.access_mode = _ask_select(
+        "Access mode",
+        (
+            Choice("personal", "personal - shared student session without a login (default)"),
+            Choice("local", "local    - sign in with managed local credentials"),
+        ),
+        default_value="personal",
+    )
+    if state.access_mode == "local":
+        state.admin_username = _ask_text("Administrator username", default=state.admin_username or "admin")
+    else:
+        state.admin_username = ""
+
+
 # Back-compat alias for any external callers.
 _flow_select_courses = _flow_select_envs
 
@@ -672,6 +687,7 @@ def _flow_install(state: InstallerState) -> None:
             # Back from env selection in offline mode returns to GPU step.
             _flow_select_gpu(state)
 
+    _flow_select_access(state)
     log("\n" + format_configuration_summary_colored(state, image_source_label=image_source_label) + "\n")
     if not _ask_confirm("Proceed with installation?", default=True):
         raise _CancelledError
@@ -775,6 +791,7 @@ def _flow_dev(state: InstallerState) -> None:
         if sub == "deploy":
             while True:
                 if _flow_select_envs(state, allow_back=True):
+                    _flow_select_access(state)
                     cmd_dev_deploy(state)
                     return
                 break
@@ -784,6 +801,7 @@ def _flow_dev(state: InstallerState) -> None:
                 raise _CancelledError
             while True:
                 if _flow_select_envs(state, allow_back=True):
+                    _flow_select_access(state)
                     cmd_dev_reinstall(state)
                     return
                 break
@@ -820,6 +838,7 @@ def _flow_rt(state: InstallerState) -> None:
         if sub == "install":
             while True:
                 if _flow_select_envs(state, allow_back=True):
+                    _flow_select_access(state)
                     cmd_rt_install(state)
                     return
                 break
@@ -832,6 +851,7 @@ def _flow_rt(state: InstallerState) -> None:
                 raise _CancelledError
             while True:
                 if _flow_select_envs(state, allow_back=True):
+                    _flow_select_access(state)
                     cmd_rt_reinstall(state)
                     return
                 break
