@@ -632,6 +632,10 @@ singleuser:
   storage:
     dynamic:
       storageClass: local-path
+    # Workshop assets are BAKED INTO the finetuning course image (see
+    # dockerfiles/Courses/Finetuning/Dockerfile: HF cache under /opt/auplc-hf, reference
+    # checkpoint under /opt/auplc-ref). No shared host mount or spawn-time link step is needed;
+    # the image is fully self-contained and distributes to every node on its own.
     # Containers get a 64Mi /dev/shm by default, which is far too small for the
     # ROS 2 courses - Fast-DDS allocates its shared-memory transport there and
     # fails with "open_and_lock_file failed", silently degrading to UDP.
