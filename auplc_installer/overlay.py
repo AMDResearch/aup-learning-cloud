@@ -38,6 +38,7 @@ _RESOURCE_IMAGE_BASE: dict[str, str] = {
     "Course-PhySim": "auplc-physim",
     "Course-Finetuning": "auplc-finetuning",
     "Course-LocalInference": "auplc-localinference",
+    "Course-RLLearning": "auplc-rl-learning",
 }
 
 

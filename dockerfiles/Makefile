@@ -128,7 +128,7 @@ code-gpu:
 	$(MAKE) save-image IMAGE=ghcr.io/amdresearch/auplc-code-gpu:latest
 
 # --- Course Images ---
-courses: cv dl llm physim finetuning local-inference
+courses: cv dl llm physim finetuning local-inference rl-learning
 
 cv:
 	@echo "-------------------------------------------"; \
@@ -193,6 +193,15 @@ local-inference:
 	cd Courses/LocalInference && BASE_IMAGE=$(GPU_BASE_IMAGE) bash ./build.sh
 	docker tag ghcr.io/amdresearch/auplc-localinference:latest ghcr.io/amdresearch/auplc-localinference:latest-$(GPU_TARGET)
 	$(MAKE) save-image IMAGE=ghcr.io/amdresearch/auplc-localinference:latest
+
+rl-learning:
+	@echo "-------------------------------------------"; \
+		echo "Building ROSCon RL Learning Course Image..."; \
+		echo "-------------------------------------------";
+
+	cd Courses/RLLearning && BASE_IMAGE=$(GPU_BASE_IMAGE) bash ./build.sh
+	docker tag ghcr.io/amdresearch/auplc-rl-learning:latest ghcr.io/amdresearch/auplc-rl-learning:latest-$(GPU_TARGET)
+	$(MAKE) save-image IMAGE=ghcr.io/amdresearch/auplc-rl-learning:latest
 
 # --- Export Images ---
 save-image:

@@ -65,6 +65,13 @@ COURSE_CATALOG: tuple[Course, ...] = (
         "local-inference",
         "Local inference of embodied AI",
     ),
+    Course(
+        "Course-RLLearning",
+        "auplc-rl-learning",
+        True,
+        "rl-learning",
+        "Reinforcement learning for robotics",
+    ),
 )
 
 COURSE_KEYS_ALL: tuple[str, ...] = tuple(c.key for c in COURSE_CATALOG)
@@ -103,6 +110,7 @@ BASE_TEAM_MAPPING: dict[str, list[str]] = {
         "Course-PhySim",
         "Course-Finetuning",
         "Course-LocalInference",
+        "Course-RLLearning",
     ],
     "official": [
         "cpu",
@@ -115,6 +123,7 @@ BASE_TEAM_MAPPING: dict[str, list[str]] = {
         "Course-PhySim",
         "Course-Finetuning",
         "Course-LocalInference",
+        "Course-RLLearning",
     ],
     "AUP": [
         "Course-CV",
@@ -123,6 +132,7 @@ BASE_TEAM_MAPPING: dict[str, list[str]] = {
         "Course-PhySim",
         "Course-Finetuning",
         "Course-LocalInference",
+        "Course-RLLearning",
     ],
     "native-users": [
         "code-cpu",
@@ -133,6 +143,7 @@ BASE_TEAM_MAPPING: dict[str, list[str]] = {
         "Course-PhySim",
         "Course-Finetuning",
         "Course-LocalInference",
+        "Course-RLLearning",
         "cpu",
         "gpu",
     ],
@@ -147,6 +158,7 @@ BASE_TEAM_MAPPING: dict[str, list[str]] = {
         "Course-PhySim",
         "Course-Finetuning",
         "Course-LocalInference",
+        "Course-RLLearning",
     ],
 }
 

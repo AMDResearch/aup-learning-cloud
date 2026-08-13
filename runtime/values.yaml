@@ -288,6 +288,7 @@ custom:
       Course-PhySim: "ghcr.io/amdresearch/auplc-physim:latest"
       Course-Finetuning: "ghcr.io/amdresearch/auplc-finetuning:latest"
       Course-LocalInference: "ghcr.io/amdresearch/auplc-localinference:latest"
+      Course-RLLearning: "ghcr.io/amdresearch/auplc-rl-learning:latest"
       # Custom-URL: "ghcr.io/amdresearch/auplc-cv:latest"
 
     # Optional spawn/Home group display order. Groups not listed here are shown
@@ -338,6 +339,10 @@ custom:
         memory: "0Gi"
         amd.com/gpu: "1"
       Course-LocalInference:
+        cpu: "0"
+        memory: "0Gi"
+        amd.com/gpu: "1"
+      Course-RLLearning:
         cpu: "0"
         memory: "0Gi"
         amd.com/gpu: "1"
@@ -531,6 +536,15 @@ custom:
           - strix-halo
         defaultPath: "/ryzers/notebooks"
         resourceType: "notebook"
+      Course-RLLearning:
+        group: "ROSCON 2026"
+        description: "Reinforcement learning for robotics"
+        subDescription: "Course materials under development"
+        accelerator: "GPU"
+        acceleratorKeys:
+          - strix-halo
+        defaultPath: "/ryzers/notebooks"
+        resourceType: "notebook"
 
   # ============================================================================
   # Team Permission Configuration
@@ -549,6 +563,7 @@ custom:
         - Course-PhySim
         - Course-Finetuning
         - Course-LocalInference
+        - Course-RLLearning
       official:
         - cpu
         - gpu
@@ -560,6 +575,7 @@ custom:
         - Course-PhySim
         - Course-Finetuning
         - Course-LocalInference
+        - Course-RLLearning
       AUP:
         - Course-CV
         - Course-DL
@@ -567,6 +583,7 @@ custom:
         - Course-PhySim
         - Course-Finetuning
         - Course-LocalInference
+        - Course-RLLearning
       native-users:
         - code-cpu
         - code-gpu
@@ -576,6 +593,7 @@ custom:
         - Course-PhySim
         - Course-Finetuning
         - Course-LocalInference
+        - Course-RLLearning
         - cpu
         - gpu
       github-users:
@@ -589,6 +607,7 @@ custom:
         - Course-PhySim
         - Course-Finetuning
         - Course-LocalInference
+        - Course-RLLearning
 
   # ============================================================================
   # Quota Management
