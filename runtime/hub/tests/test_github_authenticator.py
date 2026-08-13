@@ -1,3 +1,4 @@
+import sys
 from types import SimpleNamespace
 
 import anyio
@@ -99,7 +100,7 @@ def test_github_allow_existing_users_uses_raw_logins_for_add_and_delete(monkeypa
         authenticator = modules.github.CustomGitHubOAuthenticator()
         user = SimpleNamespace(name="github:octo")
 
-        authenticator.add_user(user)
+        anyio.run(authenticator.add_user, user)
         authenticator.delete_user(user)
 
         assert authenticator.child_add_names == ["octo"]
@@ -111,18 +112,21 @@ def test_multi_delegates_prefixed_github_lifecycle_to_the_raw_login_child(monkey
     with loaded_authenticators(monkeypatch) as modules:
         github = modules.github.CustomGitHubOAuthenticator()
         github.username_prefix = "github:"
-        native = SimpleNamespace(username_prefix="")
+        native_add_names: list[str] = []
+        native = SimpleNamespace(username_prefix="", add_user=native_add_names.append)
         authenticator = modules.multi.CustomMultiAuthenticator()
         authenticator._authenticators = [github, native]
         github_user = SimpleNamespace(name="github:octo")
         native_user = SimpleNamespace(name="learner")
 
-        authenticator.add_user(github_user)
-        authenticator.add_user(native_user)
+        anyio.run(authenticator.add_user, github_user)
+        anyio.run(authenticator.add_user, native_user)
         authenticator.delete_user(github_user)
 
         assert github.child_add_names == ["octo"]
         assert github.child_delete_names == ["octo"]
+        # Delegation is by prefix ownership, so the local child is used too.
+        assert [u.name for u in native_add_names] == ["learner"]
         assert authenticator.outer_add_names == ["github:octo", "learner"]
         assert authenticator.outer_delete_names == ["github:octo"]
 
@@ -188,3 +192,34 @@ def test_github_routes_are_scoped_once_directly_and_when_multi_wrapped(monkeypat
         direct.oauth_callback_url = "https://configured.example/hub/oauth_callback"
         with pytest.raises(ValueError, match="must end in /hub/github/oauth_callback"):
             direct.get_callback_url()
+
+
+def test_github_add_user_syncs_groups_at_login(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Resources must be visible on the first Home page load.
+
+    Regression: groups were only assigned in Spawner.auth_state_hook, so a
+    GitHub user saw an empty Home page until they opened the spawner once.
+    """
+    with loaded_authenticators(monkeypatch) as modules:
+        authenticator = modules.github.CustomGitHubOAuthenticator()
+        user = SimpleNamespace(name="github:octo", db=object())
+
+        anyio.run(authenticator.add_user, user)
+
+        assert modules.membership_calls == ["github:octo"]
+
+
+def test_github_add_user_survives_group_sync_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A sync failure must not block login; resources resolve at spawn instead."""
+    with loaded_authenticators(monkeypatch) as modules:
+        authenticator = modules.github.CustomGitHubOAuthenticator()
+
+        async def explode(*_args: object, **_kwargs: object) -> None:
+            raise RuntimeError("github unreachable")
+
+        monkeypatch.setattr(sys.modules["core.groups"], "ensure_user_group_membership", explode)
+        user = SimpleNamespace(name="github:octo", db=object())
+
+        anyio.run(authenticator.add_user, user)
+
+        assert authenticator.child_add_names == ["octo"]

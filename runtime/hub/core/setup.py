@@ -115,10 +115,7 @@ def setup_hub(c: Any) -> None:
         c: JupyterHub configuration object (from get_config())
     """
     from core import z2jh
-    from core.authenticators import (
-        GITHUB_USERNAME_PREFIX,
-        configure_authenticator,
-    )
+    from core.authenticators import configure_authenticator
     from core.config import HubConfig
     from core.database import create_all_tables, init_database
     from core.handlers import configure_handlers, get_handlers

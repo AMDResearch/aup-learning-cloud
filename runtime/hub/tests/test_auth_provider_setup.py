@@ -143,6 +143,13 @@ def _loaded_setup(
             return True
 
         groups.sync_github_teams_for_user = sync_github_teams_for_user
+
+        membership_calls: list[tuple[str, bool]] = []
+
+        async def ensure_user_group_membership(user, _db, *, refresh_github_teams=False):
+            membership_calls.append((user.name, refresh_github_teams))
+
+        groups.ensure_user_group_membership = ensure_user_group_membership
         groups.is_readonly_group, groups.is_undeletable_group = lambda _group: False, lambda _group: False
         module_patch.setitem(sys.modules, "core.groups", groups)
 
@@ -188,6 +195,7 @@ def _loaded_setup(
             factory_inputs=factory_inputs,
             group_assignments=group_assignments,
             team_syncs=team_syncs,
+            membership_calls=membership_calls,
             authenticator_types=authenticator_types,
             settings_reads=settings_reads,
             handler_configs=handler_configs,
@@ -216,18 +224,16 @@ def test_setup_passes_typed_capabilities_and_creates_only_enabled_groups(
         assert state.c.JupyterHub.load_groups == expected_groups
 
 
-@pytest.mark.parametrize("providers", ((False, False, False, True), (False, False, True, True)))
-def test_setup_loads_github_settings_for_each_github_capability(
+@pytest.mark.parametrize(
+    "providers",
+    ((False, False, False, True), (False, False, True, True), (False, False, True, False)),
+)
+def test_setup_never_reads_github_settings_itself(
     monkeypatch: pytest.MonkeyPatch, providers: tuple[bool, bool, bool, bool]
 ) -> None:
+    """ensure_user_group_membership owns the GitHub App settings now, so setup
+    no longer needs them and must not read them for any capability."""
     with _loaded_setup(monkeypatch, providers) as state:
-        state.setup.setup_hub(state.c)
-
-        assert set(GITHUB_SETTINGS).issubset(state.settings_reads)
-
-
-def test_native_only_setup_never_reads_github_settings(monkeypatch: pytest.MonkeyPatch) -> None:
-    with _loaded_setup(monkeypatch, (False, False, True, False)) as state:
         state.setup.setup_hub(state.c)
 
         assert not any(key.startswith("hub.config.GitHubOAuthenticator") for key in state.settings_reads)
@@ -253,8 +259,7 @@ def test_github_prefixed_users_sync_teams_for_each_github_capability(
         anyio.run(state.c.Spawner.auth_state_hook, spawner, {"access_token": "token"})
 
         assert spawner.github_access_token == "token"
-        assert len(state.team_syncs) == 1
-        assert state.group_assignments == [("github:octo", "github-users")]
+        assert state.membership_calls == [("github:octo", True)]
 
 
 def test_github_only_auth_result_syncs_teams_with_the_prefixed_local_identity(
@@ -272,8 +277,7 @@ def test_github_only_auth_result_syncs_teams_with_the_prefixed_local_identity(
         anyio.run(state.c.Spawner.auth_state_hook, spawner, {"access_token": "token"})
 
         assert spawner.user.name == "github:octo"
-        assert len(state.team_syncs) == 1
-        assert state.group_assignments == [("github:octo", "github-users")]
+        assert state.membership_calls == [("github:octo", True)]
 
 
 def test_native_user_retains_native_group_without_github_sync(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -285,8 +289,7 @@ def test_native_user_retains_native_group_without_github_sync(monkeypatch: pytes
         anyio.run(state.c.Spawner.auth_state_hook, spawner, None)
 
         assert spawner.github_access_token is None
-        assert state.team_syncs == []
-        assert state.group_assignments == [("learner", "native-users")]
+        assert state.membership_calls == [("learner", True)]
 
 
 def test_github_only_preserves_direct_callback_path(monkeypatch: pytest.MonkeyPatch) -> None:
