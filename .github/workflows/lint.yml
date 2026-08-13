@@ -22,8 +22,8 @@ jobs:
       - name: Run Ruff formatter check
         run: ruff format --check .
 
-  installer-tests:
-    name: Installer Unit Tests
+  python-tests:
+    name: Python Unit Tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -34,10 +34,37 @@ jobs:
           python-version: '3.10'
 
       - name: Install test deps
-        run: pip install pytest pyyaml
+        run: pip install pytest pyyaml "pydantic>=2.0"
 
-      - name: Run installer unit tests
-        run: python -m pytest tests/installer -v
+      - name: Run Python unit tests
+        run: >-
+          python -m pytest tests/installer -v
+          runtime/hub/tests/test_spawn_defaults.py
+
+  hub-regression-tests:
+    name: Hub Regression Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install test deps
+        run: pip install pytest anyio pyyaml traitlets "pydantic>=2.0"
+
+      - name: Run Hub regression tests
+        run: |
+          python -m pytest -v \
+            runtime/hub/tests/test_jupyterhub_config_startup.py \
+            runtime/hub/tests/test_spawner_gpu_access.py \
+            runtime/hub/tests/test_spawner_runtime_metadata.py \
+            runtime/hub/tests/test_authenticator_factory.py \
+            runtime/hub/tests/test_auth_provider_setup.py \
+            runtime/hub/tests/test_github_authenticator.py \
+            runtime/hub/tests/test_native_authenticator.py
 
   frontend-lint:
     name: Frontend (ESLint + TypeScript)
@@ -83,6 +110,11 @@ jobs:
             grep -v node_modules | \
             grep -v .git | \
             xargs -r shellcheck
+
+      - name: Run shell tests
+        run: |
+          dockerfiles/Code/tests/test_runtime_extension_model.sh
+          dockerfiles/Code/tests/test_service_lifecycle.sh
 
   yaml-lint:
     name: YAML (yamllint)

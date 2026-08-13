@@ -66,6 +66,38 @@ export interface SetPasswordRequest {
   force_change?: boolean;
 }
 
+export interface ProvisionUserEntry {
+  username: string;
+  password: string;
+}
+
+export interface ProvisionUsersRequest {
+  users: ProvisionUserEntry[];
+  admin?: boolean;
+  force_change?: boolean;
+  quota?: {
+    amount?: number;
+    unlimited?: boolean;
+  };
+}
+
+export interface ProvisionUserResult {
+  username: string;
+  requested_username: string;
+  status: "success" | "failed" | "existed";
+  created: boolean;
+  password_set: boolean;
+  quota_set: boolean;
+  error?: string;
+}
+
+export interface ProvisionUsersResponse {
+  success: number;
+  failed: number;
+  skipped: number;
+  results: ProvisionUserResult[];
+}
+
 export interface Group {
   name: string;
   users: string[];

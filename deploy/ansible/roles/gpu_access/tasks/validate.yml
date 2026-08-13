@@ -1,0 +1,44 @@
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+
+---
+- name: Validate GPU access rootfs path syntax
+  ansible.builtin.assert:
+    that:
+      - auplc_rootfs_path is string
+      - auplc_rootfs_path == '' or auplc_rootfs_path is match('^/')
+      - auplc_rootfs_path != '/'
+      - "'..' not in auplc_rootfs_path.split('/')"
+      - auplc_rootfs_path == '' or auplc_rootfs_allowed_root | length > 0
+    fail_msg: auplc_rootfs_path must be a non-root absolute path without traversal and with an allowed root.
+
+- name: Canonicalize GPU access rootfs path
+  ansible.builtin.command:
+    argv:
+      - realpath
+      - --canonicalize-missing
+      - "{{ auplc_rootfs_path }}"
+  register: _auplc_canonical_rootfs
+  changed_when: false
+  when: auplc_rootfs_path | length > 0
+
+- name: Canonicalize allowed GPU access rootfs parent
+  ansible.builtin.command:
+    argv:
+      - realpath
+      - --canonicalize-existing
+      - "{{ auplc_rootfs_allowed_root }}"
+  register: _auplc_canonical_allowed_root
+  changed_when: false
+  when: auplc_rootfs_path | length > 0
+
+- name: Constrain canonical GPU access rootfs path
+  ansible.builtin.assert:
+    that:
+      - _auplc_canonical_rootfs.stdout != '/'
+      - _auplc_canonical_rootfs.stdout.startswith(_auplc_canonical_allowed_root.stdout + '/')
+    fail_msg: GPU access rootfs escapes auplc_rootfs_allowed_root.
+  when: auplc_rootfs_path | length > 0
+
+- name: Record canonical GPU access target root
+  ansible.builtin.set_fact:
+    _auplc_target_root: "{{ _auplc_canonical_rootfs.stdout if auplc_rootfs_path | length > 0 else '' }}"

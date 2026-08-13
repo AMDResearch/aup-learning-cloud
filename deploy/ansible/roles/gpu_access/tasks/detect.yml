@@ -1,0 +1,16 @@
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+
+---
+- name: Detect AMD display BDFs through sysfs
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -c
+      - >-
+        from pathlib import Path; devices = Path('/sys/bus/pci/devices');
+        print('\n'.join(sorted(device.name for device in devices.iterdir()
+        if (device / 'vendor').read_text().strip() == '0x1002' and
+        (device / 'class').read_text().strip().startswith('0x03'))))
+  register: _auplc_gpu_access_sysfs
+  changed_when: false
+  failed_when: false

@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import logging
 import time
+from types import SimpleNamespace
 
 from oauthenticator.github import GitHubOAuthenticator
 from oauthenticator.oauth2 import OAuthCallbackHandler
@@ -60,6 +61,7 @@ class CustomGitHubOAuthenticator(GitHubOAuthenticator):
 
     name = "github"
     prefix = GITHUB_USERNAME_PREFIX
+    url_scope = "/github"
     callback_handler = _GitHubAppInstallCallbackHandler
 
     app_id = Unicode(
@@ -92,15 +94,53 @@ class CustomGitHubOAuthenticator(GitHubOAuthenticator):
         help="TTL in seconds for GitHub team membership sync caches.",
     )
 
+    def _with_github_username_prefix(self, auth_model):
+        auth_model = auth_model.copy()
+        if not auth_model["name"].startswith(self.prefix):
+            auth_model["name"] = f"{self.prefix}{auth_model['name']}"
+        return auth_model
+
+    async def run_post_auth_hook(self, handler, auth_model):
+        auth_model = await super().run_post_auth_hook(handler, auth_model)
+        return self._with_github_username_prefix(auth_model)
+
     async def add_user(self, user):
-        """Assign group memberships at login so Home shows resources immediately."""
-        super().add_user(user)
+        """Assign group memberships at login so Home shows resources immediately.
+
+        The parent tracks allowed_users by raw GitHub login, so it is handed
+        the unprefixed name; group sync uses the prefixed local identity.
+        """
+        super().add_user(SimpleNamespace(name=user.name.removeprefix(self.prefix)))
         try:
             from core.groups import ensure_user_group_membership
 
             await ensure_user_group_membership(user, user.db)
         except Exception:
             self.log.warning("Failed to ensure group membership for %s at login", user.name, exc_info=True)
+
+    def delete_user(self, user):
+        return super().delete_user(SimpleNamespace(name=user.name.removeprefix(self.prefix)))
+
+    def login_url(self, base_url):
+        if type(self) is CustomGitHubOAuthenticator:
+            base_url = f"{base_url.rstrip('/')}{self.url_scope}"
+        return super().login_url(base_url)
+
+    def get_handlers(self, app):
+        handlers = super().get_handlers(app)
+        if type(self) is CustomGitHubOAuthenticator:
+            return [(f"{self.url_scope}{path}", handler) for path, handler in handlers]
+        return handlers
+
+    def get_callback_url(self, handler=None):
+        if self.oauth_callback_url:
+            if not self.oauth_callback_url.endswith(f"{self.url_scope}/oauth_callback"):
+                raise ValueError("GitHub oauth_callback_url must end in /hub/github/oauth_callback")
+            return self.oauth_callback_url
+        callback_url = super().get_callback_url(handler)
+        if callback_url.endswith(f"{self.url_scope}/oauth_callback"):
+            return callback_url
+        return f"{callback_url.removesuffix('/oauth_callback')}{self.url_scope}/oauth_callback"
 
     async def authenticate(self, handler, data=None):
         result = await super().authenticate(handler, data)
@@ -184,7 +224,7 @@ class CustomGitHubOAuthenticator(GitHubOAuthenticator):
             if expires_in is not None:
                 auth_model["auth_state"]["expires_at"] = time.time() + int(expires_in)
 
-            return auth_model
+            return self._with_github_username_prefix(auth_model)
 
         # Not close to expiry. Avoid the parent refresh path here because it
         # may make external GitHub validation calls for every auth_refresh_age

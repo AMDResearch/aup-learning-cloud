@@ -69,3 +69,12 @@ def test_default_values_route_gpu_resources_to_supported_image_tags() -> None:
                 assert overrides[accelerator_key]["image"] == (
                     f"ghcr.io/amdresearch/{image_name}:latest-{gpu_target}"
                 ), values_file
+
+
+def test_default_values_use_fs_gid_without_overriding_pod_security_context() -> None:
+    for values_file in VALUES_FILES:
+        values = _load_values(values_file)
+        singleuser = values["singleuser"]
+
+        assert singleuser["fsGid"] == 100, values_file
+        assert "securityContext" not in singleuser.get("extraPodConfig", {}), values_file

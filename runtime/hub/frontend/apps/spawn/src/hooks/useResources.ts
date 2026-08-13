@@ -25,7 +25,6 @@ import { getResources } from '@auplc/shared';
 declare global {
   interface Window {
     AVAILABLE_RESOURCES?: string[];
-    SINGLE_NODE_MODE?: boolean;
   }
 }
 

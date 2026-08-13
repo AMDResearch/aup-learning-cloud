@@ -33,17 +33,19 @@ Usage:
     # In business logic:
     from core.config import HubConfig
     config = HubConfig.get()
-    if config.auth_mode == "multi":
+    if config.auth.github:
         ...
 """
 
 from __future__ import annotations
 
+import warnings
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError, field_validator
 
 # =============================================================================
 # YAML Configuration Models
@@ -77,7 +79,7 @@ class AcceleratorConfig(BaseModel):
 class QuotaSettings(BaseModel):
     """Quota system configuration."""
 
-    enabled: bool | None = None  # None = auto-detect based on auth_mode
+    enabled: StrictBool | None = None
     cpuRate: int = 1
     minimumToStart: int = 10
     defaultQuota: int = 0
@@ -154,7 +156,6 @@ class ResourcesConfig(BaseModel):
     requirements: dict[str, ResourceRequirements] = Field(default_factory=dict)
     metadata: dict[str, ResourceMetadata] = Field(default_factory=dict)
     groupOrder: list[str] = Field(default_factory=list)
-
     model_config = {"extra": "allow"}
 
 
@@ -257,6 +258,100 @@ class ParsedConfig(BaseModel):
         return cls.model_validate(raw_config)
 
 
+LegacyAuthMode = Literal["auto-login", "dummy", "github", "local", "multi"]
+
+
+@dataclass(frozen=True, slots=True)
+class AuthCapabilities:
+    """Enabled authentication providers normalized from canonical or legacy configuration."""
+
+    auto_login: bool
+    dummy: bool
+    native: bool
+    github: bool
+
+    def validate(self) -> AuthCapabilities:
+        match self:
+            case (
+                AuthCapabilities(auto_login=True, dummy=False, native=False, github=False)
+                | AuthCapabilities(auto_login=False, dummy=True, native=False, github=False)
+                | AuthCapabilities(auto_login=False, dummy=False, native=True, github=False)
+                | AuthCapabilities(auto_login=False, dummy=False, native=False, github=True)
+                | AuthCapabilities(auto_login=False, dummy=False, native=True, github=True)
+            ):
+                return self
+            case _:
+                raise AuthConfigurationError("auth must enable one exclusive provider or native + github")
+
+
+@dataclass(frozen=True, slots=True)
+class AuthConfigurationError(ValueError):
+    """Raised when the Hub authentication provider configuration is invalid."""
+
+    detail: str
+
+    def __str__(self) -> str:
+        return f"Invalid authentication configuration: {self.detail}"
+
+
+class CanonicalAuthConfig(BaseModel):
+    """Strict raw-YAML model for the public canonical authentication flags."""
+
+    autoLogin: bool = False
+    dummy: bool = False
+    native: bool = False
+    github: bool = False
+
+    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
+
+    def capabilities(self) -> AuthCapabilities:
+        """Return the immutable provider capability contract."""
+
+        return AuthCapabilities(
+            auto_login=self.autoLogin,
+            dummy=self.dummy,
+            native=self.native,
+            github=self.github,
+        )
+
+
+def _legacy_auth_capabilities(mode: str) -> AuthCapabilities:
+    """Parse a one-release legacy authMode value into canonical capabilities."""
+
+    match mode:
+        case "auto-login":
+            return AuthCapabilities(True, False, False, False)
+        case "dummy":
+            return AuthCapabilities(False, True, False, False)
+        case "github":
+            return AuthCapabilities(False, False, False, True)
+        case "local":
+            return AuthCapabilities(False, False, True, False)
+        case "multi":
+            return AuthCapabilities(False, False, True, True)
+        case _:
+            raise AuthConfigurationError("authMode must be one of auto-login, dummy, github, local, or multi")
+
+
+def _parse_auth_capabilities(raw_config: dict[str, Any]) -> tuple[AuthCapabilities, LegacyAuthMode | None]:
+    """Parse explicit configuration form presence before defaulted models erase it."""
+
+    canonical_present = "auth" in raw_config
+    legacy_present = "authMode" in raw_config
+    if canonical_present and legacy_present:
+        raise AuthConfigurationError("cannot specify both authMode and auth")
+    if canonical_present:
+        try:
+            capabilities = CanonicalAuthConfig.model_validate(raw_config["auth"]).capabilities()
+        except ValidationError as error:
+            raise AuthConfigurationError(f"auth must be a strict provider mapping: {error}") from error
+        return capabilities.validate(), None
+    if legacy_present and raw_config["authMode"] is not None:
+        legacy_mode = raw_config["authMode"]
+        return _legacy_auth_capabilities(legacy_mode), legacy_mode
+    return AuthCapabilities(True, False, False, False), None
+
+
 # =============================================================================
 # Hub Configuration Singleton
 # =============================================================================
@@ -278,10 +373,11 @@ class HubConfig:
 
     def __init__(self):
         # Runtime settings
-        self.auth_mode: str = "auto-login"
-        self.single_node_mode: bool = False
+        self._auth: AuthCapabilities = AuthCapabilities(True, False, False, False)
+        self.runtime_limit_enabled: bool = True
         self.github_org_name: str = ""
         self.cluster_name: str = ""
+        self.admin_username: str = "admin"
         self.quota_enabled: bool = False
 
         # Parsed configuration
@@ -301,10 +397,7 @@ class HubConfig:
         Returns:
             The initialized HubConfig instance
         """
-        if cls._instance is None:
-            cls._instance = cls()
-
-        instance = cls._instance
+        instance = cls()
         config_path = Path(config_path)
 
         # Load configuration from YAML file
@@ -312,21 +405,37 @@ class HubConfig:
             raise FileNotFoundError(f"Configuration file not found: {config_path}")
 
         with open(config_path, encoding="utf-8") as f:
-            raw_config = yaml.safe_load(f) or {}
+            raw_config = yaml.safe_load(f)
+        if raw_config is None:
+            raw_config = {}
+        if not isinstance(raw_config, dict):
+            raise AuthConfigurationError("Hub configuration must be a YAML mapping")
 
         print(f"[CONFIG] Loaded configuration from {config_path}")
 
         # Extract runtime settings
-        instance.auth_mode = raw_config.get("authMode", "auto-login")
+        instance._auth, legacy_mode = _parse_auth_capabilities(raw_config)
+        if legacy_mode is not None:
+            warnings.warn(
+                "authMode is deprecated; configure authentication with auth provider flags instead",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         instance.github_org_name = raw_config.get("githubOrgName", "")
         instance.cluster_name = raw_config.get("clusterName", "")
+        admin_user = raw_config.get("adminUser", {})
+        if isinstance(admin_user, dict):
+            instance.admin_username = admin_user.get("username", "admin")
 
-        # Single-node mode: from config or auto-enable for auto-login
-        single_node_mode = raw_config.get("singleNodeMode")
-        if single_node_mode is not None:
-            instance.single_node_mode = single_node_mode
+        if "runtimeLimitEnabled" in raw_config:
+            runtime_limit_enabled = raw_config["runtimeLimitEnabled"]
+            if type(runtime_limit_enabled) is not bool:
+                raise AuthConfigurationError("runtimeLimitEnabled must be a boolean")
+            instance.runtime_limit_enabled = runtime_limit_enabled
+        elif legacy_mode is not None:
+            instance.runtime_limit_enabled = legacy_mode not in ("auto-login", "local")
         else:
-            instance.single_node_mode = instance.auth_mode == "auto-login"
+            instance.runtime_limit_enabled = True
 
         # Parse structured configuration
         instance._config = ParsedConfig.from_dicts(
@@ -341,20 +450,29 @@ class HubConfig:
             notifications=raw_config.get("notifications"),
         )
 
-        # Quota enabled: from config or auto-detect based on auth_mode
+        # Canonical providers use neutral policy defaults; legacy input retains historical defaults.
         if instance._config.quota.enabled is not None:
             instance.quota_enabled = instance._config.quota.enabled
         else:
-            # Disable quota for auto-login and dummy modes by default
-            instance.quota_enabled = instance.auth_mode not in ("auto-login", "dummy")
+            instance.quota_enabled = (
+                legacy_mode not in ("auto-login", "dummy", "local") if legacy_mode is not None else True
+            )
             instance._config.quota.enabled = instance.quota_enabled
 
+        if instance.quota_enabled and not instance.runtime_limit_enabled:
+            raise AuthConfigurationError("quota.enabled requires runtimeLimitEnabled: true")
+
+        cls._instance = instance
         cls._initialized = True
 
         # Log configuration
         print("[CONFIG] HubConfig initialized:")
-        print(f"[CONFIG]   auth_mode={instance.auth_mode}")
-        print(f"[CONFIG]   single_node_mode={instance.single_node_mode}")
+        print(
+            "[CONFIG]   auth="
+            f"auto_login:{instance.auth.auto_login},dummy:{instance.auth.dummy},"
+            f"native:{instance.auth.native},github:{instance.auth.github}"
+        )
+        print(f"[CONFIG]   runtime_limit_enabled={instance.runtime_limit_enabled}")
         print(f"[CONFIG]   quota_enabled={instance.quota_enabled}")
         print(f"[CONFIG]   resources={len(instance._config.resources.images)} images")
         print(f"[CONFIG]   accelerators={list(instance._config.accelerators.keys())}")
@@ -390,6 +508,12 @@ class HubConfig:
         if self.cluster_name:
             return f"{base} {self.cluster_name}"
         return base
+
+    @property
+    def auth(self) -> AuthCapabilities:
+        """Get typed authentication provider capabilities for new consumers."""
+
+        return self._auth
 
     @property
     def resources(self) -> ResourcesConfig:

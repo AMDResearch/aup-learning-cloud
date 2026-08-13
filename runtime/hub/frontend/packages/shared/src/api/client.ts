@@ -70,5 +70,9 @@ export async function adminApiRequest<T>(
     throw new Error(body.error || body.message || `API Error: ${response.status}`);
   }
 
+  if (response.status === 202 || response.status === 204) {
+    return undefined as T;
+  }
+
   return response.json();
 }

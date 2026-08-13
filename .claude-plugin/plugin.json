@@ -1,0 +1,21 @@
+{
+  "name": "auplc",
+  "description": "Skills for deploying and maintaining AUP Learning Cloud: install, deploy, configure courses, build images, upgrade, troubleshoot, configure auth, manage users and quota, monitor, expose with TLS/storage, configure repo cloning, and author courses for the multi-node JupyterHub-on-k3s platform for AMD GPUs.",
+  "version": "0.1.1",
+  "author": {
+    "name": "AMD Research"
+  },
+  "homepage": "https://github.com/AMDResearch/aup-learning-cloud",
+  "repository": "https://github.com/AMDResearch/aup-learning-cloud",
+  "keywords": [
+    "aup-learning-cloud",
+    "auplc",
+    "jupyterhub",
+    "k3s",
+    "rocm",
+    "pxe",
+    "ansible",
+    "helm",
+    "deployment"
+  ]
+}

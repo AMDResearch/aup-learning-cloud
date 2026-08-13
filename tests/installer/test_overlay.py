@@ -27,6 +27,7 @@ from auplc_installer.catalog import (
 )
 from auplc_installer.gpu import GpuConfig, SkuEntry, append_product
 from auplc_installer.overlay import (
+    GPU_RESOURCE_KEYS,
     emit_overlay,
     generate_values_overlay,
     try_load_courses_from_overlay,
@@ -104,6 +105,22 @@ def test_default_selection_round_trips_valid_yaml() -> None:
     assert "custom" in parsed
     # default selection must NOT emit teams.mapping
     assert "teams" not in parsed["custom"]
+
+
+def test_overlay_keeps_gpu_resources_without_gpu_access_contract() -> None:
+    text, parsed = _render(
+        _strix_halo_cfg(),
+        courses=CourseSelection.default(),
+    )
+
+    custom = parsed["custom"]
+    assert "gpuAccess" not in custom
+    assert "renderGid" not in text
+    assert "supplementalGroups" not in text
+    assert set(custom["resources"]["images"]) == set(GPU_RESOURCE_KEYS)
+    assert set(custom["resources"]["metadata"]) == set(GPU_RESOURCE_KEYS)
+    assert "teams" not in custom
+    assert "profiles" not in custom
 
 
 def test_resource_images_use_primary_tag() -> None:

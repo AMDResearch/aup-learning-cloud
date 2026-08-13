@@ -84,18 +84,63 @@ cd aup-learning-cloud
 ./auplc-installer install
 ```
 
+### Single-Node Access
+
+The installer offers two UX profiles. `personal` keeps the shared student
+session used by earlier single-node installs. `local` selects native accounts
+and first-run administrator bootstrap. These names are installer choices, not
+Helm authentication values.
+
+Both interactive and scripted installs keep `personal` as the compatibility default. Select local access explicitly when credentials are required:
+
+```bash
+./auplc-installer install --access-mode=local --admin-username=admin
+```
+
+The installer creates `jupyterhub-admin-credentials` for the `local` profile.
+Its `admin-password` is first-run input only: the Hub uses it only when the
+administrator has no password row. After that, the database hash is
+authoritative. Changing the Secret doesn't rotate or reconcile the existing
+database password. The separate `api-token` key supplies an API token for
+scripts and isn't part of password bootstrap. Other native users are created
+and assigned passwords through the Admin UI.
+
+Installer-generated `values.local.yaml` is operational output. Manual edits to
+that file aren't preserved and may be silently overwritten by a later upgrade
+or reinstall.
+
+For direct Helm configuration, select exactly one of these provider
+combinations with `custom.auth`: auto-login, dummy, native, GitHub, or native
+plus GitHub. Runtime limits and quota are separate settings. A multi-node native plus
+GitHub overlay looks like this:
+
+<!-- auplc-deployment-example: canonical -->
+```yaml
+custom:
+  auth:
+    native: true
+    github: true
+  runtimeLimitEnabled: true
+  quota:
+    enabled: true
+```
+
+Every provider combination uses the existing `custom.teams.mapping` resolver
+and its existing fallback groups to determine resource visibility.
+
 A successful install looks like this:
 
 ```text
 This operation needs root privileges. Requesting sudo password...
-  ✓ [1/8] Detecting GPU  (0.2s)
-  ✓ [2/8] Generating values overlay (initial)  (0.0s)
-  ✓ [3/8] Installing helm + k9s  (0.0s)
-  ✓ [4/8] Installing K3s (single-node)  (3.8s)
-  ✓ [5/8] Pulling custom + external images  (25.0s)
-  ✓ [6/8] Deploying ROCm GPU device plugin + node labeller  (0.2s)
-  ✓ [7/8] Refreshing values overlay from node labels  (0.2s)
-  ✓ [8/8] Deploying JupyterHub runtime (helm install + wait)  (9.2s)
+  ✓ [1/9] Detecting GPU  (0.2s)
+  ✓ [2/9] Provisioning GPU device access  (0.1s)
+  ✓ [3/9] Generating values overlay (initial)  (0.0s)
+  ✓ [4/9] Installing helm + k9s  (0.0s)
+  ✓ [5/9] Installing K3s (single-node)  (3.8s)
+  ✓ [6/9] Pulling custom + external images  (25.0s)
+  ✓ [7/9] Deploying ROCm GPU device plugin + node labeller  (0.2s)
+  ✓ [8/9] Refreshing values overlay from node labels  (0.2s)
+  ✓ [9/9] Deploying JupyterHub runtime (helm install + wait)  (9.2s)
 
    _    _   _ ____    _                          _                  ____ _                 _
   / \  | | | |  _ \  | |    ___  __ _ _ __ _ __ (_)_ __   __ _     / ___| | ___  _   _  __| |
@@ -106,10 +151,18 @@ This operation needs root privileges. Requesting sudo password...
     You have successfully installed AUP Learning Cloud!
 
     Open in your browser: http://localhost:30890
-    (auto-logged-in as 'student' — no login needed)
+    Sign in with the selected local administrator credentials.
+    (Use `--access-mode=personal` for the compatibility shared student session.)
 
     kubectl is configured at $HOME/.kube/config; try `kubectl get nodes`
 ```
+
+The GPU access stage installs AMD's `amdgpu-insecure-instinct-udev-rules`
+package, pinned to `30.30.4.0-2341068.24.04`. It sets mode `0666` only on
+`/dev/kfd` and DRM `renderD*` nodes; `card*` keeps the normal system policy. The
+device plugin remains a separate allocation layer, and the tested ROCm compute
+path needs no supplemental GPU group. The offline `pack` bundle carries the
+pinned deb for installation without network access.
 
 See the full guide at [Quick Start](https://amdresearch.github.io/aup-learning-cloud/installation/quick-start.html) and [Single-Node Deployment](https://amdresearch.github.io/aup-learning-cloud/installation/single-node.html).
 
@@ -157,7 +210,8 @@ Kubernetes provides a robust infrastructure for deploying and managing JupyterHu
 ### Authentication
 
 Seamless integration with GitHub Single Sign-On (SSO) and Native Authenticator for secure and efficient user authentication.
-- **Auto-admin on install**: Initial admin created automatically with random password
+- **Composable providers**: choose auto-login, dummy, native, GitHub, or native plus GitHub with `custom.auth`
+- **Optional admin bootstrap**: native authentication can seed a missing administrator password row from a generated or external Secret
 - **Dual login**: GitHub App + Native accounts on single login page
 - **Batch user management**: CSV/Excel-based bulk operations via scripts
 
@@ -201,6 +255,7 @@ Full documentation is available at: **https://amdresearch.github.io/aup-learning
 - [Authentication Guide](https://amdresearch.github.io/aup-learning-cloud/jupyterhub/authentication-guide.html) - GitHub App and native authentication
 - [User Management Guide](https://amdresearch.github.io/aup-learning-cloud/jupyterhub/user-management.html) - Batch user operations with scripts
 - [User Quota System](https://amdresearch.github.io/aup-learning-cloud/jupyterhub/quota-system.html) - Resource usage tracking and quota management
+- [AUP Learning Cloud Skills](README-SKILL.md) - Agent Skills for deploying and maintaining AUP Learning Cloud
 
 ## Contributing
 

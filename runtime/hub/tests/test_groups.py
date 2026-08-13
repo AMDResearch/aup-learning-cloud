@@ -18,82 +18,17 @@
 # SOFTWARE.
 
 import asyncio
-import importlib.util
 import sys
 import types
-from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-CORE = ROOT / "core"
+from groups_test_support import DummyGroup, DummyUser, load_groups_module
 
-if "aiohttp" not in sys.modules:
-    aiohttp_module = types.ModuleType("aiohttp")
-    aiohttp_module.ClientSession = object
-    sys.modules["aiohttp"] = aiohttp_module
-
-if "jupyterhub.orm" not in sys.modules:
-    orm_module = types.ModuleType("jupyterhub.orm")
-    orm_module.Group = type("Group", (), {})
-    sys.modules["jupyterhub.orm"] = orm_module
-
-if "jupyterhub.user" not in sys.modules:
-    user_module = types.ModuleType("jupyterhub.user")
-    user_module.User = type("User", (), {})
-    sys.modules["jupyterhub.user"] = user_module
-
-if "sqlalchemy.orm" not in sys.modules:
-    sa_orm_module = types.ModuleType("sqlalchemy.orm")
-    sa_orm_module.Session = type("Session", (), {})
-    sys.modules["sqlalchemy.orm"] = sa_orm_module
-
-if "core" not in sys.modules:
-    core_module = types.ModuleType("core")
-    core_module.__path__ = [str(CORE)]
-    sys.modules["core"] = core_module
-
-if "core.authenticators" not in sys.modules:
-    authenticators_module = types.ModuleType("core.authenticators")
-    authenticators_module.__path__ = [str(CORE / "authenticators")]
-    sys.modules["core.authenticators"] = authenticators_module
-
-if "core.authenticators.github_app" not in sys.modules:
-    github_app_module = types.ModuleType("core.authenticators.github_app")
-    github_app_module.GITHUB_USERNAME_PREFIX = "github:"
-    sys.modules["core.authenticators.github_app"] = github_app_module
-
-
-def load_module(name: str, path: Path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
-
-
-groups = load_module("core.groups", CORE / "groups.py")
+groups = load_groups_module()
 resolve_resources_for_user = groups.resolve_resources_for_user
 fetch_github_team_members = groups.fetch_github_team_members
 get_github_app_installation_token = groups.get_github_app_installation_token
 fetch_github_team_members_table = groups.fetch_github_team_members_table
 sync_user_github_teams = groups.sync_user_github_teams
-
-
-class DummyGroup:
-    def __init__(self, name, source="github-team"):
-        self.name = name
-        self.properties = {"source": source}
-
-
-class DummyOrmUser:
-    def __init__(self, groups):
-        self.groups = groups
-
-
-class DummyUser:
-    def __init__(self, groups, name="github:test"):
-        self.name = name
-        self.orm_user = DummyOrmUser(groups)
 
 
 class DummyQuery:
@@ -309,22 +244,18 @@ def test_resolve_resources_for_user_uses_group_mapping():
     resources = resolve_resources_for_user(
         user,
         {"team-a": ["cpu", "course-a"], "team-b": ["course-a", "course-b"]},
-        "multi",
-        ["cpu", "gpu", "code-cpu", "course-a", "course-b"],
     )
 
     assert set(resources) == {"cpu", "course-a", "course-b"}
     assert resources.count("course-a") == 1
 
 
-def test_resolve_resources_for_user_falls_back_for_native_users():
+def test_resolve_resources_for_group_mapped_native_user_uses_native_users_mapping():
     user = DummyUser([], name="native-user")
 
     resources = resolve_resources_for_user(
         user,
         {"official": ["cpu"], "native-users": ["code-cpu"]},
-        "multi",
-        ["cpu", "gpu", "code-cpu"],
     )
 
     assert resources == ["code-cpu"]
@@ -333,17 +264,17 @@ def test_resolve_resources_for_user_falls_back_for_native_users():
 def test_resolve_resources_for_user_denies_unmapped_github_users():
     user = DummyUser([])
 
-    resources = resolve_resources_for_user(user, {"official": ["cpu"]}, "multi", ["cpu", "gpu"])
+    resources = resolve_resources_for_user(user, {"official": ["cpu"]})
 
     assert resources == ["none"]
 
 
-def test_resolve_resources_for_user_uses_all_resources_for_auto_login():
+def test_resolve_resources_for_auto_login_user_uses_native_fallback():
     user = DummyUser([], name="demo-user")
 
-    resources = resolve_resources_for_user(user, {"official": ["cpu"]}, "auto-login", ["cpu", "gpu", "code-cpu"])
+    resources = resolve_resources_for_user(user, {"official": ["cpu"]})
 
-    assert resources == ["cpu", "gpu", "code-cpu"]
+    assert resources == ["cpu"]
 
 
 def _install_group_config(monkeypatch, *, app_id="app-1"):
@@ -357,6 +288,11 @@ def _install_group_config(monkeypatch, *, app_id="app-1"):
         "hub.config.GitHubOAuthenticator.team_sync_ttl_seconds": 3600,
     }
     z2jh_module.get_config = lambda key, default=None: config_values.get(key, default)
+    # groups_test_support tears down its stubs after loading the module, so the
+    # parent package must exist again for the helper's lazy `from core import`.
+    core_module = sys.modules.get("core") or types.ModuleType("core")
+    core_module.z2jh = z2jh_module
+    monkeypatch.setitem(sys.modules, "core", core_module)
     monkeypatch.setitem(sys.modules, "core.z2jh", z2jh_module)
 
     config_module = types.ModuleType("core.config")
@@ -373,6 +309,7 @@ def _install_group_config(monkeypatch, *, app_id="app-1"):
             return cls()
 
     config_module.HubConfig = _HubConfig
+    core_module.config = config_module
     monkeypatch.setitem(sys.modules, "core.config", config_module)
 
 
