@@ -1519,6 +1519,11 @@ class PlatformInfoHandler(APIHandler):
     even if they bypass the Tornado-level default header.
     """
 
+    def check_xsrf_cookie(self):
+        # Read-only GET of static metadata. APIHandler enforces XSRF once a
+        # session cookie exists, which 403s the logged-in React apps.
+        pass
+
     async def get(self):
         name = _handler_config.get("platform_name", "AUP Learning Cloud")
         self.set_header("Content-Type", "application/json")
