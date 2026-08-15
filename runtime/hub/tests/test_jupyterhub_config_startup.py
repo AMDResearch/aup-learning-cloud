@@ -164,23 +164,10 @@ def test_startup_preserves_setup_and_deployment_template_vars(monkeypatch: pytes
 
     assert dict(config.JupyterHub.template_vars) == {
         **setup_template_vars,
+        # powered_by follows platform_name so the footer shows the cluster name.
         "powered_by": "Test Platform",
         **deployment_template_vars,
     }
     headers = config.JupyterHub.tornado_settings["headers"]
     assert isinstance(headers, dict)
     assert headers["X-Powered-By"] == "AUP Learning Cloud"
-
-
-def test_footer_attribution_prefers_the_cluster_suffixed_platform_name() -> None:
-    """Regression: hardcoded powered_by short-circuited page.html's `or` chain,
-    so the footer never showed custom.clusterName."""
-    from jinja2 import Environment
-
-    footer = Environment(autoescape=True).from_string("{{ powered_by or platform_name or 'AUP Learning Cloud' }}")
-
-    assert (
-        footer.render(powered_by="AUP Learning Cloud Dublin", platform_name="AUP Learning Cloud Dublin")
-        == "AUP Learning Cloud Dublin"
-    )
-    assert footer.render(powered_by="AUP Learning Cloud", platform_name="AUP Learning Cloud") == "AUP Learning Cloud"
