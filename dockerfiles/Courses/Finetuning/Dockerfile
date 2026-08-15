@@ -86,6 +86,79 @@ RUN mkdir -p /opt/libero-config \
       "from libero.libero import get_libero_path; from libero.libero.utils.download_utils import download_assets_from_huggingface as download; download(get_libero_path('assets'))" \
     && rm -f /tmp/robosuite.log
 
+# ============================================================================================
+# FastWAM (Wan2.2-TI2V-5B world-action model) inference layer -- powers notebook 3.
+# Installed into an ISOLATED /opt/fastwam-venv so the pinned MolmoAct2 train-venv above is never
+# disturbed. The FastWAM LIBERO path reuses the upstream `sim_libero` harness (vendored from
+# ClockWorkKid/Ryzers@benchmark), which needs the numpy-1.26.4 LIBERO sim stack -- deliberately
+# separate from the train-venv's numpy 2.x. FastWAM itself is cloned from its open-source upstream
+# at build; only the CUDA torch pins are stripped so it runs on auplc-base's ROCm torch. Weights
+# are NOT fetched here (baked from the local asset store in the with-assets stage / mounted at
+# runtime). Placed before the notebook COPY so this heavy layer stays cached across notebook edits.
+# The fastwam venv is created from the BASE interpreter (/usr/bin/python3, the auplc-base ROCm
+# torch), NOT from train-venv, to keep a single, clean site-packages chain.
+# ============================================================================================
+ARG FASTWAM_COMMIT=45d8e1458921d83f8ad6cf9ce993d371208dabd0
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      fonts-dejavu-core \
+      libglu1-mesa \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN git clone https://github.com/yuantianyuan01/FastWAM /repos/fastwam \
+    && git -C /repos/fastwam checkout "${FASTWAM_COMMIT}" \
+    && git clone --depth 1 https://github.com/Lifelong-Robot-Learning/LIBERO /opt/LIBERO
+
+# Vendored AMD ryzers glue (sim_libero harness + FastWAM LIBERO policy adapter + kv-cache patch
+# + strip helper + upstream-pin provenance). Source only; no binaries.
+COPY fastwam/ /opt/fastwam-src/
+
+# Exact planning-path caches (bit-identical output, ~1.45x faster on gfx1151): memoize the
+# UMT5-XXL text encode across a replan episode and cache the action cross-attention K/V. Shipped
+# as a reviewable diff vs the pinned upstream; default-on at runtime (FASTWAM_TEXT_KV_CACHE=0
+# restores upstream behavior for parity checks).
+RUN git -C /repos/fastwam apply --verbose /opt/fastwam-src/patches/fastwam_kv_cache.patch
+
+# Isolated venv: reuse auplc-base's ROCm torch (constraint-pinned so it is never replaced) while
+# installing the LIBERO sim stack (numpy 1.26.4) + FastWAM. Mirrors the simulation/libero +
+# wam/fastwam ryzer recipe so the direct port stays faithful. numpy 1.26.4 is installed first,
+# then the constraint is frozen from it so no transitive dep downgrades numpy or swaps the torch.
+RUN /usr/bin/python3 -m venv --system-site-packages /opt/fastwam-venv \
+    && /opt/fastwam-venv/bin/pip install --no-cache-dir "numpy==1.26.4" \
+    && /opt/fastwam-venv/bin/python /opt/fastwam-src/strip_cuda_torch.py /repos/fastwam/pyproject.toml \
+    && /opt/fastwam-venv/bin/pip freeze | grep -iE "^(torch|torchvision|torchcodec|numpy)==" > /opt/fastwam-constraints.txt \
+    && PIP_CONSTRAINT=/opt/fastwam-constraints.txt /opt/fastwam-venv/bin/pip install --no-cache-dir \
+        "robosuite==1.4.0" "bddl==1.0.1" "mujoco==3.3.2" easydict thop \
+        "future==1.0.0" "cloudpickle==3.1.2" "gym==0.25.2" termcolor \
+        "imageio>=2.34" "imageio-ffmpeg>=0.5" "pillow>=10" \
+    && PIP_CONSTRAINT=/opt/fastwam-constraints.txt /opt/fastwam-venv/bin/pip install --no-cache-dir --no-deps -e /opt/LIBERO \
+    && PIP_CONSTRAINT=/opt/fastwam-constraints.txt /opt/fastwam-venv/bin/pip install --no-cache-dir -e /repos/fastwam \
+    && PIP_CONSTRAINT=/opt/fastwam-constraints.txt /opt/fastwam-venv/bin/pip install --no-cache-dir \
+        "hf-transfer>=0.1.8" "sentencepiece>=0.2" "pyarrow>=17" "av>=12" "matplotlib>=3.8" \
+    && /opt/fastwam-venv/bin/pip install --no-cache-dir --ignore-installed --no-deps opencv-python-headless
+
+# Place the sim harness + adapter where the demos expect them; register the import paths + the
+# torch.load compat shim in the fastwam venv only (self-contained .pth adds /opt/sim itself; the
+# fastwam_paths.pth adds the upstream repo + adapters so experiments.libero + the policy resolve).
+RUN mkdir -p /opt/sim /opt/fastwam-adapters \
+    && cp -r /opt/fastwam-src/sim_libero /opt/sim/sim_libero \
+    && cp /opt/fastwam-src/adapters/fastwam_libero_policy.py /opt/fastwam-adapters/ \
+    && SP="$(/opt/fastwam-venv/bin/python -c 'import sysconfig;print(sysconfig.get_paths()["purelib"])')" \
+    && cp /opt/fastwam-src/sim_libero_compat.pth "$SP/" \
+    && printf '/opt/LIBERO\n/repos/fastwam\n/repos/fastwam/experiments/libero\n/opt/fastwam-adapters\n' > "$SP/fastwam_paths.pth"
+
+# Seed the upstream LIBERO config for the fastwam venv OUTSIDE HOME, on its OWN config path so it
+# never clashes with the MolmoAct2 train-venv's LIBERO (which lives in a different site-packages).
+# bddl + robosuite meshes ship in the repo (no dataset download for eval/interactive). Verify the
+# whole fastwam stack imports on auplc-base's ROCm torch (no GPU needed at build).
+RUN mkdir -p /opt/libero-config-fastwam \
+    && printf 'N\n' | LIBERO_CONFIG_PATH=/opt/libero-config-fastwam \
+       /opt/fastwam-venv/bin/python -c \
+       "import mujoco, robosuite; from libero.libero import benchmark; from libero.libero.envs import OffScreenRenderEnv; import sim_libero; from sim_libero.policy import load_policy; print('sim_libero + LIBERO import OK, mujoco', mujoco.__version__)" \
+    && LIBERO_CONFIG_PATH=/opt/libero-config-fastwam /opt/fastwam-venv/bin/python -c \
+       "import torch; assert torch.version.hip, 'torch is not a ROCm build: '+torch.__version__; import fastwam; from fastwam.runtime import create_fastwam; print('FastWAM import OK on torch', torch.__version__, 'hip', torch.version.hip)" \
+    && rm -f /tmp/robosuite.log
+
 RUN mkdir -p \
       /home/jovyan/.cache/huggingface \
       /home/jovyan/checkpoints \
@@ -103,7 +176,8 @@ COPY ./course_data /ryzers/notebooks
 # /ryzers/test_*.sh paths the README documents (same convention as the other courses).
 RUN chmod +x /ryzers/notebooks/tests/*.sh /ryzers/notebooks/scripts/*.sh \
     && ln -sf /ryzers/notebooks/tests/test_torch.sh     /ryzers/test_torch.sh \
-    && ln -sf /ryzers/notebooks/tests/test_molmoact2.sh /ryzers/test_molmoact2.sh
+    && ln -sf /ryzers/notebooks/tests/test_molmoact2.sh /ryzers/test_molmoact2.sh \
+    && ln -sf /ryzers/notebooks/tests/test_fastwam.sh   /ryzers/test_fastwam.sh
 RUN chown -R jovyan:100 \
       /home/jovyan/.cache \
       /home/jovyan/checkpoints \
@@ -123,6 +197,19 @@ ENV HOME=/home/jovyan \
     REFERENCE_POLICY=/home/jovyan/checkpoints/reference/pretrained_model \
     MUJOCO_GL=egl \
     PYOPENGL_PLATFORM=egl
+
+# FastWAM (notebook 3) runtime knobs. The weight/data paths resolve to the baked assets in the
+# with-assets image; in a code-only image they can be overridden or mounted at runtime. The fastwam
+# venv uses its OWN LIBERO config path (never the train-venv's), and the exact planning-path caches
+# are on by default. DIFFSYNTH_MODEL_BASE_PATH is where the upstream loader looks for the Wan2.2
+# base (T5 + VAE + tokenizer) instead of downloading it.
+ENV FASTWAM_REPO=/repos/fastwam \
+    FASTWAM_VENV=/opt/fastwam-venv \
+    LIBERO_CONFIG_PATH_FASTWAM=/opt/libero-config-fastwam \
+    DIFFSYNTH_MODEL_BASE_PATH=/opt/fastwam-assets/diffsynth \
+    FASTWAM_RELEASE_DIR=/opt/fastwam-assets/fastwam_release \
+    FASTWAM_DATA_DIR=/opt/fastwam-assets/data \
+    FASTWAM_TEXT_KV_CACHE=1
 
 USER jovyan
 WORKDIR /ryzers/notebooks
@@ -160,11 +247,31 @@ RUN set -euo pipefail; \
     test -f /opt/auplc-ref/pretrained_model/model.safetensors; \
     rm -rf /staging
 
+# FastWAM weight pre-stage: unpack the split-tar FastWAM bundle (bf16 release checkpoint +
+# dataset stats, the bf16 Wan2.2 base = T5 / VAE / tokenizer, and the small LIBERO episode set
+# used by the video-imagination cell) into /opt/fastwam-assets. Kept OUTSIDE /home/jovyan so it
+# survives the runtime PVC mount, exactly like the MolmoAct2 caches above. The weights are already
+# bf16 (production precision); the bundle is passed via the same BuildKit `assets` context and is
+# never committed to git.
+FROM base AS fastwam-staging
+USER root
+COPY --from=assets fastwam/ /staging/fastwam/
+RUN set -euo pipefail; \
+    mkdir -p /opt/fastwam-assets; \
+    cat /staging/fastwam/fastwam.tar.part-* | tar -C /opt/fastwam-assets -xf -; \
+    test -f /opt/fastwam-assets/fastwam_release/libero_uncond_2cam224.pt; \
+    test -f /opt/fastwam-assets/fastwam_release/libero_uncond_2cam224_dataset_stats.json; \
+    test -d /opt/fastwam-assets/diffsynth; \
+    rm -rf /staging
+
 FROM base AS with-assets
 USER root
-COPY --from=assets-staging /opt/auplc-hf  /opt/auplc-hf
-COPY --from=assets-staging /opt/auplc-ref /opt/auplc-ref
+COPY --from=assets-staging  /opt/auplc-hf       /opt/auplc-hf
+COPY --from=assets-staging  /opt/auplc-ref      /opt/auplc-ref
 RUN chown -R jovyan:100 /opt/auplc-hf /opt/auplc-ref
+# FastWAM weights are large (~25 GB) and read-only at runtime, so bake them root-owned (world
+# readable) WITHOUT a chown -R -- a recursive chown would double the layer size in the overlay.
+COPY --from=fastwam-staging /opt/fastwam-assets /opt/fastwam-assets
 ENV HF_HOME=/opt/auplc-hf \
     HF_LEROBOT_HOME=/opt/auplc-hf/lerobot \
     REFERENCE_POLICY=/opt/auplc-ref/pretrained_model
