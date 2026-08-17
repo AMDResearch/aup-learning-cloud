@@ -4,9 +4,9 @@ Complete the notebooks in order:
 
 1. `02_local_inference_with_lemonade.ipynb`
 2. `03_robot_agents.ipynb`
+3. `04_code_as_policies_with_capx.ipynb`
 
-The second notebook starts a headless O3DE manipulation simulation and connects
-a RAI robot agent to the Lemonade model from the first notebook.
+The second notebook starts a headless O3DE manipulation simulation and connects a RAI robot agent to the Lemonade model from the first notebook.
 
 Environment checks:
 
@@ -15,6 +15,7 @@ Environment checks:
 /ryzers/test_o3de.sh
 /ryzers/test_rai.sh
 /ryzers/test_lemonade-sdk.sh
+/ryzers/test_capx.sh
 ```
 
 Lemonade models are cached under `~/.cache/lemonade`.

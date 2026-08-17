@@ -157,6 +157,188 @@ RUN add-apt-repository ppa:lemonade-team/stable \
     && apt-get install -y --no-install-recommends lemonade-server \
     && rm -rf /var/lib/apt/lists/*
 
+# ---------------------------------------------------------------------------
+# CaP-X (Code-as-Policies eXtended) - the code-generating manipulation agent
+# behind 04_code_as_policies_with_capx.ipynb. Robosuite/MuJoCo rendered
+# headless through EGL on the iGPU, perception and IK served on localhost.
+#
+# CaP-X pins dependencies that would fight the RAI stack (numpy, transformers,
+# matplotlib, mujoco), so it gets its own venv plus its own Jupyter kernel
+# ("CaP-X (ROCm)", selected by the notebook) instead of sharing /opt/rai-venv.
+# --system-site-packages keeps the base ROCm torch rather than pulling CUDA
+# wheels, exactly as the RAI venv does.
+# ---------------------------------------------------------------------------
+
+# Pinned to a tested CaP-X commit.
+ARG CAPX_REF=53e9966d7a8e2fa7494676772bccc35280f5c0ed
+
+ENV CAPX_ROOT=/ryzers/cap-x \
+    CAPX_VENV=/opt/capx-venv \
+    CAPX_CACHE=/opt/capx-cache
+
+# EGL/GL stack for headless MuJoCo, pyrender and open3d. MuJoCo renders through
+# EGL/OpenGL, not through HIP, so this is what puts frames on the iGPU with no
+# display attached.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      cmake \
+      libegl1 \
+      libegl-mesa0 \
+      libgl1 \
+      libgles2 \
+      libglew-dev \
+      libglfw3 \
+      libglfw3-dev \
+      libosmesa6 \
+      libosmesa6-dev \
+      pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+# Constraints: the base ROCm torch (already captured for RAI) plus CaP-X's uv
+# override-dependencies and the Python 3.12 Robosuite resolution from its
+# lockfile. Robosuite 1.5.1 still calls the pre-3.10 mj_fullM API, so letting
+# pip take the current MuJoCo release breaks startup.
+# FIX: CaP-X also pins PyOpenGL-accelerate==3.1.6, which has no cp312 wheel and
+# does not compile on Python 3.12 - left out here.
+RUN cp /opt/torch-constraints.txt /opt/capx-constraints.txt \
+    && printf '%s\n' \
+      'numpy==1.26.4' \
+      'PyOpenGL==3.1.6' \
+      'matplotlib>=3.10,<3.11' \
+      'opencv-python-headless<4.13' \
+      'jax==0.4.29' \
+      'jaxlib==0.4.29' \
+      'mujoco==3.5.0' \
+      'mink==1.1.0' \
+      'networkx==3.6.1' \
+      'pyglet==2.1.13' \
+      >> /opt/capx-constraints.txt
+
+# Clone WITHOUT --recurse-submodules, then init only the submodules the
+# Robosuite eval path uses. This skips curobo (huge, with nested CUDA
+# submodules), b1k (BEHAVIOR/Isaac Sim), verl (RL training) and LIBERO-PRO -
+# none of them needed here, and a large time and space saving.
+RUN /usr/bin/python3 -m venv --system-site-packages ${CAPX_VENV} \
+    && git clone https://github.com/capgym/cap-x ${CAPX_ROOT} \
+    && git -C ${CAPX_ROOT} checkout ${CAPX_REF} \
+    && git -C ${CAPX_ROOT} submodule update --init \
+      capx/third_party/sam3 \
+      capx/third_party/contact_graspnet_pytorch \
+      capx/third_party/robosuite
+
+WORKDIR /ryzers/cap-x
+
+# Base runtime deps: the PyPI-resolvable subset of [project.dependencies],
+# minus torch/torchvision (kept from the base image) and the CUDA-only entries.
+# FIX: setuptools is pinned from both sides. Below 81 because sam3 imports
+# pkg_resources, dropped in 81. At or above 77 because robosuite pulls in
+# pynput -> evdev, whose pyproject.toml declares the PEP 639 SPDX form
+# (license = "BSD-3-Clause") that older setuptools rejects outright. The lower
+# bound is also what forces a copy into the venv: with a bare "<81" pip counts
+# the base image's system setuptools 68 as satisfying the requirement, leaves
+# the venv without its own, and the later --no-build-isolation builds pick up
+# that 68 and fail.
+RUN PIP_CONSTRAINT=/opt/capx-constraints.txt ${CAPX_VENV}/bin/pip install --no-cache-dir \
+      "gymnasium>=0.29" "tyro>=0.8.5" "pydantic>=2.7" "rich>=13.7" \
+      "scipy>=1.12" "matplotlib>=3.10,<3.11" "imageio[ffmpeg]>=0.6.0" \
+      requests tqdm h5py einops decord pycocotools pyyaml omegaconf \
+      open3d "robot_descriptions>=1.16.0" "yourdfpy>=0.0.56" "viser>=0.2.0" \
+      "trimesh>=4.4.0" msgpack_numpy "ray==2.48.0" "mediapy>=1.2.5" \
+      uvicorn fastapi "transformers<5.0" openai \
+      "opencv-python-headless<4.13" "pillow>=10" cloudpickle \
+      "setuptools>=77,<81" \
+      "mujoco==3.5.0" "mink==1.1.0" "networkx==3.6.1" "pyglet==2.1.13" \
+      "pyliblzfse==0.4.1" freetype-py six \
+    && : "CaP-X overrides pyrender's stale PyOpenGL==3.1.0 metadata to 3.1.6." \
+         "pip cannot express uv's override, so install the locked pyrender" \
+         "once all of its runtime dependencies are already present." \
+    && ${CAPX_VENV}/bin/pip install --no-cache-dir --no-deps "pyrender==0.1.45"
+
+# PyRoKi: JAX-based IK / trajopt, and the default motion layer here - it
+# replaces cuRobo for the Robosuite bench. Deliberately CPU-only, which keeps
+# the GPU for perception.
+RUN PIP_CONSTRAINT=/opt/capx-constraints.txt ${CAPX_VENV}/bin/pip install --no-cache-dir \
+      "jax==0.4.29" "jaxlib==0.4.29" \
+      jaxlie jax_dataclasses jaxtyping loguru termcolor \
+    && PIP_CONSTRAINT=/opt/capx-constraints.txt ${CAPX_VENV}/bin/pip install \
+      --no-cache-dir --no-deps \
+      "git+https://github.com/brentyi/jaxls.git@6fe7cf9d56223736b2c0272d080ec7346203c648" \
+      "git+https://github.com/chungmin99/pyroki.git@95afccc22658c461ab1042a048ae4e9c24bc2a47"
+
+# Perception and simulator. All editable submodule installs use
+# --no-build-isolation because their setup.py imports numpy at build time,
+# mirroring CaP-X's uv `extra-build-dependencies`.
+# SAM3 is pure PyTorch and runs on ROCm torch. Its weights are gated on
+# HuggingFace, so they are pre-fetched with a token further down rather than
+# downloaded at runtime.
+RUN PIP_CONSTRAINT=/opt/capx-constraints.txt ${CAPX_VENV}/bin/pip install --no-cache-dir \
+      -e capx/third_party/sam3 \
+    && : "contact_graspnet_pytorch ships only a setup.py, so pip would take the" \
+         "legacy 'setup.py develop' path. Setuptools >=77 implements that by" \
+         "re-invoking pip in a subprocess WITHOUT --no-build-isolation, which" \
+         "then cannot see numpy. --use-pep517 keeps the build in this env." \
+    && PIP_CONSTRAINT=/opt/capx-constraints.txt ${CAPX_VENV}/bin/pip install --no-cache-dir \
+      --use-pep517 --no-build-isolation -e capx/third_party/contact_graspnet_pytorch \
+    && PIP_CONSTRAINT=/opt/capx-constraints.txt ${CAPX_VENV}/bin/pip install --no-cache-dir \
+      --no-build-isolation -e capx/third_party/robosuite \
+    && : "capx itself goes in without deps - they are all handled above - so" \
+         "this only puts the package on the path, editable so that students" \
+         "can change a docstring and see the agent's prompt change." \
+    && ${CAPX_VENV}/bin/pip install --no-cache-dir --no-deps --no-build-isolation -e .
+
+# Loading the perception models onto the GPU can take several minutes on a cold
+# start. Upstream begins trials after 120 seconds even when those services are
+# still unavailable, which fails the first trials of every run.
+RUN sed -i \
+      's/api_servers: list | None, wait_timeout: float = 120.0/api_servers: list | None, wait_timeout: float = 900.0/' \
+      capx/envs/runner.py \
+    && grep -q "wait_timeout: float = 900.0" capx/envs/runner.py
+
+# ---------------------------------------------------------------------------
+# PASTE YOUR HUGGINGFACE TOKEN HERE TO BUILD, AND CLEAR IT BEFORE COMMITTING.
+# A build arg ends up in the image metadata, so this is for local builds only.
+# The committed value must stay empty; export HF_TOKEN and let build.sh pass
+# --secret id=hf_token instead, which keeps the token out of every layer.
+# ---------------------------------------------------------------------------
+ARG HF_TOKEN=""
+
+# Pre-fetch the SAM3 weights so a workshop does not spend its first ten minutes
+# downloading them, and so nothing at runtime needs a token. They cannot live
+# under /home/jovyan: the Hub mounts a per-user volume there, which would hide
+# anything baked in. facebook/sam3 is gated, so the build needs an account with
+# approved access.
+RUN --mount=type=secret,id=hf_token,required=false \
+    HF_TOKEN="$(cat /run/secrets/hf_token 2>/dev/null || echo "${HF_TOKEN}")" \
+    HF_HOME=${CAPX_CACHE} ${CAPX_VENV}/bin/python -c \
+      "import os; \
+from huggingface_hub import snapshot_download; \
+assert os.environ.get('HF_TOKEN'), 'facebook/sam3 is gated - set HF_TOKEN, see the note above'; \
+snapshot_download('facebook/sam3', ignore_patterns=['*.msgpack', '*.h5', '*.onnx', '*tf_model*', '*flax*'])"
+
+# The CaP-X kernel. Its `env` is why the notebook needs no setup cell: the
+# perception servers and launch.py are children of the kernel, so they inherit
+# the weight cache and the headless GL backend from here. HF_HOME is scoped to
+# this kernel so that Lemonade's own downloads keep landing in the user volume.
+RUN mkdir -p /usr/local/share/jupyter/kernels/capx \
+    && printf '%s\n' \
+      '{' \
+      '  "argv": ["/opt/capx-venv/bin/python", "-m", "ipykernel_launcher", "-f", "{connection_file}"],' \
+      '  "display_name": "CaP-X (ROCm)",' \
+      '  "language": "python",' \
+      '  "env": {' \
+      '    "HF_HOME": "/opt/capx-cache",' \
+      '    "MUJOCO_GL": "egl",' \
+      '    "PYOPENGL_PLATFORM": "egl",' \
+      '    "CAPX_ROOT": "/ryzers/cap-x"' \
+      '  }' \
+      '}' \
+      > /usr/local/share/jupyter/kernels/capx/kernel.json \
+    && MUJOCO_GL=egl ${CAPX_VENV}/bin/python -c \
+      "import torch, capx, robosuite, mujoco, pyroki; \
+assert torch.version.hip, 'CaP-X dependencies replaced ROCm torch'; \
+print('CaP-X ROCm environment OK:', torch.__version__, '| robosuite', robosuite.__version__)"
+
+WORKDIR /ryzers
+
 RUN getent group audio >/dev/null || groupadd audio \
     && getent group kvm >/dev/null || groupadd kvm \
     && usermod -aG audio,kvm jovyan \
@@ -175,12 +357,14 @@ COPY ./course_data/lemonade_env.sh \
      ./course_data/manipulation_demo_headless.sh \
      ./course_data/manipulation_demo_streamlit.py \
      ./course_data/notebook_demo.py \
+     ./course_data/capx_demo.py \
      /ryzers/
 
 RUN ln -s /ryzers/notebooks/tests/test_ros.sh /ryzers/test_ros.sh \
     && ln -s /ryzers/notebooks/tests/test_o3de.sh /ryzers/test_o3de.sh \
     && ln -s /ryzers/notebooks/tests/test_rai.sh /ryzers/test_rai.sh \
     && ln -s /ryzers/notebooks/tests/test_lemonade-sdk.sh /ryzers/test_lemonade-sdk.sh \
+    && ln -s /ryzers/notebooks/tests/test_capx.sh /ryzers/test_capx.sh \
     && chmod +x \
       /ryzers/lemonade_env.sh \
       /ryzers/manipulation_demo_headless.sh \
@@ -188,6 +372,7 @@ RUN ln -s /ryzers/notebooks/tests/test_ros.sh /ryzers/test_ros.sh \
       /home/jovyan/.cache \
       /home/jovyan/.streamlit \
       /home/jovyan/.asoundrc \
+      /opt/capx-cache \
       /ryzers \
       /tmp/runtime-jovyan \
     && printf '%s\n' \
