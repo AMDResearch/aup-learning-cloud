@@ -162,6 +162,8 @@ def _fallback_policy_cli():
 
 def rollout_thread():
     import torch
+    from fast_to_device import install
+    install()
     import draccus
     from lerobot.configs import parser as lrparser
     from lerobot.configs.eval import EvalPipelineConfig
