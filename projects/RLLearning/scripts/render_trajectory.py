@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render trajectory.npz to mp4 using headless MuJoCo + pixi mesalib EGL."""
+"""Render trajectory.npz to mp4 using headless MuJoCo + system Mesa/OSMesa."""
 
 from __future__ import annotations
 

@@ -1,15 +1,13 @@
-"""Headless MuJoCo GL setup backed by pixi-installed Mesa.
+"""Headless MuJoCo GL setup using system Mesa/OSMesa libraries.
 
-Rendering must run in a process started with `LD_LIBRARY_PATH` already
-pointing at the pixi libraries. The dynamic loader captures its search path at
-process start, so exporting the variable from inside a running interpreter is
-too late for the `dlopen` calls MuJoCo makes.
+Expects `libosmesa6`, Mesa EGL, and DRI drivers from the course Docker image.
+Rendering must run in a subprocess started with GL variables already set, because
+the dynamic loader captures its search path at process start.
 
 Backends are probed in order because which one works depends on the Mesa build:
 
-- `osmesa` needs `libOSMesa.so.8`, which mesalib provides only before 25.1.
-- the EGL backends need `EGL_EXT_platform_device`, which Mesa's software
-  renderer does not always expose.
+- `osmesa` needs `libOSMesa.so.8`.
+- the EGL backends need software rendering (`LIBGL_ALWAYS_SOFTWARE=1`).
 """
 
 from __future__ import annotations
@@ -85,17 +83,16 @@ _PROBE_CODE = (
     "print('probe ok')\n"
 )
 
-
-def pixi_env_root(repo_root: Path) -> Path:
-    return repo_root / ".pixi/envs/default"
-
-
-def pixi_lib_dir(repo_root: Path) -> Path:
-    return pixi_env_root(repo_root) / "lib"
+_SYSTEM_DRI = Path("/usr/lib/x86_64-linux-gnu/dri")
+_EGL_VENDOR_FILES = (
+    Path("/usr/share/glvnd/egl_vendor.d/50_mesa.json"),
+    Path("/usr/share/glvnd/egl_vendor.d/10_mesa.json"),
+)
 
 
 def build_gl_env(repo_root: Path, backend: str = DEFAULT_BACKEND) -> dict[str, str]:
     """Environment for rendering with the named backend."""
+    del repo_root  # kept for call-site compatibility
     overrides = dict(BACKEND_CANDIDATES).get(backend)
     if overrides is None:
         raise ValueError(f"Unknown backend {backend!r}")
@@ -104,25 +101,14 @@ def build_gl_env(repo_root: Path, backend: str = DEFAULT_BACKEND) -> dict[str, s
     for key in _BACKEND_KEYS:
         env.pop(key, None)
 
-    pixi_env = pixi_env_root(repo_root)
-    pixi_lib = pixi_lib_dir(repo_root)
-    if not pixi_lib.is_dir():
-        env["MUJOCO_GL"] = "disable"
-        return env
-
-    env["LD_LIBRARY_PATH"] = str(pixi_lib) + os.pathsep + env.get("LD_LIBRARY_PATH", "")
     env["MESA_LOADER_DRIVER_OVERRIDE"] = "llvmpipe"
     env["GALLIUM_DRIVER"] = "llvmpipe"
     env.update(overrides)
 
-    dri = pixi_lib / "dri"
-    if dri.is_dir():
-        env["LIBGL_DRIVERS_PATH"] = str(dri)
+    if _SYSTEM_DRI.is_dir():
+        env["LIBGL_DRIVERS_PATH"] = str(_SYSTEM_DRI)
 
-    for vendor in (
-        pixi_env / "share/glvnd/egl_vendor.d/50_mesa.json",
-        pixi_lib / "egl_vendor.d/50_mesa.json",
-    ):
+    for vendor in _EGL_VENDOR_FILES:
         if vendor.is_file():
             env["__EGL_VENDOR_LIBRARY_FILENAMES"] = str(vendor)
             break
@@ -152,9 +138,6 @@ def probe_render_subprocess(
     Returns whether rendering worked, a description of the outcome, and the
     environment that succeeded.
     """
-    if not pixi_lib_dir(repo_root).is_dir():
-        return False, "pixi libraries missing — run notebook section 1.5 first", None
-
     failures = []
     for backend, _ in BACKEND_CANDIDATES:
         env = build_gl_env(repo_root, backend)
@@ -182,7 +165,7 @@ def resolve_gl_env(repo_root: Path) -> dict[str, str]:
 
 
 def reexec_with_gl_env(repo_root: Path) -> None:
-    """Restart this process so the dynamic loader sees the pixi GL libraries."""
+    """Restart this process so the dynamic loader sees the GL libraries."""
     if os.environ.get(CONFIGURED_FLAG) == "1":
         return
     os.execve(sys.executable, [sys.executable, *sys.argv], resolve_gl_env(repo_root))

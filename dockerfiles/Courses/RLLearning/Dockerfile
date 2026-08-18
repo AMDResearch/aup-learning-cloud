@@ -11,14 +11,14 @@ SHELL ["/bin/bash", "-c"]
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates \
-      curl \
       git \
+      libegl-dev \
+      libgl1-mesa-dri \
+      libglew-dev \
+      libgles-dev \
+      libosmesa6-dev \
       unzip \
     && rm -rf /var/lib/apt/lists/*
-
-# Pixi provides the Mesa stack used by headless_gl.py for MuJoCo rendering.
-RUN curl -fsSL https://pixi.sh/install.sh | PIXI_HOME=/opt/pixi PIXI_NO_PATH_UPDATE=1 bash \
-    && ln -s /opt/pixi/bin/pixi /usr/local/bin/pixi
 
 RUN mkdir -p /ryzers/notebooks
 
@@ -31,11 +31,7 @@ RUN unzip -q PandaPickCube-20260817-150103.zip \
 
 USER jovyan
 WORKDIR /ryzers/notebooks
-ENV PATH="/opt/pixi/bin:${PATH}"
 
-RUN pixi install
-
-# Pre-install the inference stack so hands-on.ipynb can skip section 1 in the image.
 RUN pip install --no-cache-dir \
       "mujoco==3.10.0" \
       "mujoco-mjx==3.10.0" \

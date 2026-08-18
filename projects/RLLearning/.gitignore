@@ -4,7 +4,6 @@ PandaPickCube-*/
 __pycache__/
 *.pyc
 
-# Pixi environment and notebook outputs
-.pixi/
+# Notebook outputs
 trajectory.npz
 *.mp4
