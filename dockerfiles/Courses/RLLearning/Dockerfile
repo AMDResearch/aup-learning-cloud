@@ -29,10 +29,8 @@ WORKDIR /ryzers/notebooks
 RUN unzip -q PandaPickCube-20260817-150103.zip \
     && chown -R jovyan:100 /ryzers
 
-USER jovyan
-WORKDIR /ryzers/notebooks
-
-RUN pip install --no-cache-dir \
+# Install course packages system-wide as root (see LLM Dockerfile for rationale).
+RUN pip3 install --no-cache-dir \
       "mujoco==3.10.0" \
       "mujoco-mjx==3.10.0" \
       "jax==0.10.0" \
@@ -48,7 +46,10 @@ RUN pip install --no-cache-dir \
       "absl-py" \
       "lxml" \
       "tqdm" \
-    && pip install --no-cache-dir --no-deps \
+    && pip3 install --no-cache-dir --no-deps \
       "git+https://github.com/google-deepmind/mujoco_playground.git@${PLAYGROUND_COMMIT}"
 
-RUN python -c "import brax, jax, mujoco; from mujoco_playground import registry; print('PandaPickCube inference env OK')"
+RUN python3 -c "import brax, jax, mujoco; from mujoco_playground import registry; print('PandaPickCube inference env OK')"
+
+USER jovyan
+WORKDIR /ryzers/notebooks
