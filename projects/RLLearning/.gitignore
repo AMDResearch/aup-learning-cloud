@@ -1,0 +1,10 @@
+# Extracted training checkpoints (keep PandaPickCube-*.zip tracked)
+PandaPickCube-*/
+
+__pycache__/
+*.pyc
+
+# Pixi environment and notebook outputs
+.pixi/
+trajectory.npz
+*.mp4
