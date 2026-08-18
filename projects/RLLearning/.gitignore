@@ -1,0 +1,9 @@
+# Extracted training checkpoints (keep PandaPickCube-*.zip tracked)
+PandaPickCube-*/
+
+__pycache__/
+*.pyc
+
+# Notebook outputs
+trajectory.npz
+*.mp4
