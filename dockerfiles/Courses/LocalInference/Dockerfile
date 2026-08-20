@@ -157,6 +157,64 @@ RUN add-apt-repository ppa:lemonade-team/stable \
     && apt-get install -y --no-install-recommends lemonade-server \
     && rm -rf /var/lib/apt/lists/*
 
+# Pre-fetch the GGUFs the notebook uses so a workshop does not spend its first
+# minutes downloading them, the same idea as the SAM3 weights below.
+#
+# `lemonade pull` in this build talks to a running Lemonade server rather than
+# downloading on its own, so the step starts lemond, waits for it, pulls, and
+# stops it again. No GPU is involved: pulling only downloads weights.
+#
+# The cache has to live outside /home/jovyan, since the Hub mounts a per-user
+# volume there that would hide anything baked in. HF_HOME holds the weights and
+# LEMONADE_CACHE_DIR holds the server's own cache; both are pointed at
+# ${LEMONADE_CACHE} again in the runtime ENV further down.
+#
+# Gemma is a built-in registry name and resolves to one file, so the name alone
+# is enough. gpt-oss cannot be pulled that way: the built-in entry for
+# gpt-oss-20b-mxfp4-GGUF pins no variant, and ggml-org/gpt-oss-20b-GGUF also
+# ships EAGLE3 draft models for speculative decoding, so the server downloads
+# the whole repo and then loads eagle3-gpt-oss-20b-BF16.gguf, first by name,
+# which llama-server dies on with a segfault. Naming the file registers the
+# right one and leaves the 2.6 GB of drafts undownloaded. A registered user.*
+# model shadows the built-in of the same name, so the notebook keeps asking for
+# plain "gpt-oss-20b-mxfp4-GGUF", and user_models.json is written into
+# LEMONADE_CACHE, where the runtime ENV further down points as well.
+ARG LEMONADE_MODEL="Gemma-4-E2B-it-GGUF"
+ARG LEMONADE_BIG_MODEL="user.gpt-oss-20b-mxfp4-GGUF"
+ARG LEMONADE_BIG_CHECKPOINT="ggml-org/gpt-oss-20b-GGUF:gpt-oss-20b-MXFP4.gguf"
+ENV LEMONADE_CACHE=/opt/lemonade-cache
+RUN --mount=type=secret,id=hf_token,required=false \
+    set -eu; \
+    export HF_TOKEN="$(cat /run/secrets/hf_token 2>/dev/null || true)"; \
+    export HF_HOME="${LEMONADE_CACHE}"; \
+    export LEMONADE_CACHE_DIR="${LEMONADE_CACHE}"; \
+    : "lemond refuses to start without a writable XDG_RUNTIME_DIR, and the" \
+      "runtime ENV that sets one is only applied at the end of this file." ; \
+    export XDG_RUNTIME_DIR=/tmp/lemond-build-runtime; \
+    mkdir -p "${XDG_RUNTIME_DIR}"; chmod 700 "${XDG_RUNTIME_DIR}"; \
+    lemond > /tmp/lemond-build.log 2>&1 & \
+    LEMOND_PID=$!; \
+    for _ in $(seq 180); do \
+      if lemonade status >/dev/null 2>&1; then break; fi; \
+      : "stop waiting the moment lemond exits, instead of burning the timeout" ; \
+      if ! kill -0 "${LEMOND_PID}" 2>/dev/null; then break; fi; \
+      sleep 1; \
+    done; \
+    if ! lemonade status >/dev/null 2>&1; then \
+      echo "lemond did not come up during build:"; cat /tmp/lemond-build.log; exit 1; \
+    fi; \
+    echo "=== pulling ${LEMONADE_MODEL} ==="; \
+    lemonade pull "${LEMONADE_MODEL}"; \
+    echo "=== pulling ${LEMONADE_BIG_MODEL} ==="; \
+    lemonade pull "${LEMONADE_BIG_MODEL}" \
+      --checkpoint main "${LEMONADE_BIG_CHECKPOINT}" \
+      --recipe llamacpp; \
+    kill "${LEMOND_PID}" 2>/dev/null || true; \
+    rm -rf "${XDG_RUNTIME_DIR}"; \
+    test -d "${LEMONADE_CACHE}/hub"; \
+    : "Fail here rather than at a workshop if the pull picks a draft model" ; \
+    test -n "$(find "${LEMONADE_CACHE}/hub" -name 'gpt-oss-20b-MXFP4.gguf' -print -quit)"
+
 # ---------------------------------------------------------------------------
 # CaP-X (Code-as-Policies eXtended) - the code-generating manipulation agent
 # behind 04_code_as_policies_with_capx.ipynb. Robosuite/MuJoCo rendered
@@ -317,7 +375,8 @@ snapshot_download('facebook/sam3', ignore_patterns=['*.msgpack', '*.h5', '*.onnx
 # The CaP-X kernel. Its `env` is why the notebook needs no setup cell: the
 # perception servers and launch.py are children of the kernel, so they inherit
 # the weight cache and the headless GL backend from here. HF_HOME is scoped to
-# this kernel so that Lemonade's own downloads keep landing in the user volume.
+# this kernel for SAM3; notebook 04 starts lemond with HF_HOME=/opt/lemonade-cache
+# so the LLM still resolves against the baked GGUF.
 RUN mkdir -p /usr/local/share/jupyter/kernels/capx \
     && printf '%s\n' \
       '{' \
@@ -373,6 +432,7 @@ RUN ln -s /ryzers/notebooks/tests/test_ros.sh /ryzers/test_ros.sh \
       /home/jovyan/.streamlit \
       /home/jovyan/.asoundrc \
       /opt/capx-cache \
+      /opt/lemonade-cache \
       /ryzers \
       /tmp/runtime-jovyan \
     && printf '%s\n' \
@@ -384,8 +444,13 @@ RUN ln -s /ryzers/notebooks/tests/test_ros.sh /ryzers/test_ros.sh \
       > /usr/local/bin/start-local-inference.sh \
     && chmod +x /usr/local/bin/start-local-inference.sh
 
+# HF_HOME is the baked model cache, so every notebook's lemond finds the
+# pre-fetched GGUFs instead of re-downloading them into the empty user volume.
+# LEMONADE_CACHE_DIR is what lemond reports as its cache dir and where it writes
+# hub/, so it has to match the value the build pulled with.
 ENV HOME=/home/jovyan \
-    HF_HOME=/home/jovyan/.cache/huggingface \
+    HF_HOME=/opt/lemonade-cache \
+    LEMONADE_CACHE_DIR=/opt/lemonade-cache \
     XDG_RUNTIME_DIR=/tmp/runtime-jovyan
 
 USER jovyan
