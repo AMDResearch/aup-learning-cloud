@@ -337,6 +337,25 @@ RUN mkdir -p /usr/local/share/jupyter/kernels/capx \
 assert torch.version.hip, 'CaP-X dependencies replaced ROCm torch'; \
 print('CaP-X ROCm environment OK:', torch.__version__, '| robosuite', robosuite.__version__)"
 
+# HELIX drives repository-level evolution; OpenCode is its local coding-agent
+# backend. Keep this after the expensive CaP-X/weights layers so workshop
+# harness changes do not rebuild the simulator and perception stack.
+ARG HELIX_REF=29cfa6e5eae902f6bc6d2113e51499e92c6109ee
+ARG OPENCODE_VERSION=1.18.18
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends nodejs npm \
+    && rm -rf /var/lib/apt/lists/* \
+    && git clone https://github.com/KE7/helix.git /ryzers/helix \
+    && git -C /ryzers/helix checkout "${HELIX_REF}" \
+    && ${CAPX_VENV}/bin/pip install --no-cache-dir -e /ryzers/helix \
+    && npm install --global "opencode-ai@${OPENCODE_VERSION}" \
+    && npm cache clean --force \
+    && ${CAPX_VENV}/bin/helix --help >/dev/null \
+    && opencode --version \
+    && MUJOCO_GL=egl ${CAPX_VENV}/bin/python -c \
+      "import capx, helix, torch; assert torch.version.hip; print('HELIX/OpenCode workshop stack OK')"
+
 WORKDIR /ryzers
 
 RUN getent group audio >/dev/null || groupadd audio \
@@ -358,6 +377,7 @@ COPY ./course_data/lemonade_env.sh \
      ./course_data/manipulation_demo_streamlit.py \
      ./course_data/notebook_demo.py \
      ./course_data/capx_demo.py \
+     ./course_data/rho_demo.py \
      /ryzers/
 
 RUN ln -s /ryzers/notebooks/tests/test_ros.sh /ryzers/test_ros.sh \
@@ -365,9 +385,11 @@ RUN ln -s /ryzers/notebooks/tests/test_ros.sh /ryzers/test_ros.sh \
     && ln -s /ryzers/notebooks/tests/test_rai.sh /ryzers/test_rai.sh \
     && ln -s /ryzers/notebooks/tests/test_lemonade-sdk.sh /ryzers/test_lemonade-sdk.sh \
     && ln -s /ryzers/notebooks/tests/test_capx.sh /ryzers/test_capx.sh \
+    && ln -s /ryzers/notebooks/tests/test_rho.sh /ryzers/test_rho.sh \
     && chmod +x \
       /ryzers/lemonade_env.sh \
       /ryzers/manipulation_demo_headless.sh \
+      /ryzers/test_rho.sh \
     && chown -R jovyan:100 \
       /home/jovyan/.cache \
       /home/jovyan/.streamlit \
