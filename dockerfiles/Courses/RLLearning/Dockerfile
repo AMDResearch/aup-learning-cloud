@@ -51,5 +51,11 @@ RUN pip3 install --no-cache-dir \
 
 RUN python3 -c "import brax, jax, mujoco; from mujoco_playground import registry; print('PandaPickCube inference env OK')"
 
+# Pre-download MuJoCo Menagerie as root; runtime user cannot write under site-packages.
+RUN python3 -c "\
+from mujoco_playground import registry; \
+env = registry.load('PandaPickCube', config_overrides={'impl': 'jax'}); \
+print('PandaPickCube env loaded, obs=', env.observation_size, 'act=', env.action_size)"
+
 USER jovyan
 WORKDIR /ryzers/notebooks

@@ -12,13 +12,32 @@ Backends are probed in order because which one works depends on the Mesa build:
 
 from __future__ import annotations
 
+import contextlib
+import io
 import os
 import subprocess
 import sys
+import warnings
 from pathlib import Path
 
 # Set in child environments so a re-executed process does not loop.
 CONFIGURED_FLAG = "HEADLESS_GL_CONFIGURED"
+
+
+@contextlib.contextmanager
+def quiet_demo_output():
+    """Hide optional-backend chatter and benign JAX cast warnings during demos."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        sink = io.StringIO()
+        with contextlib.redirect_stdout(sink):
+            yield
+
+
+def enable_demo_quiet_mode() -> None:
+    """Apply process-wide filters for a clean notebook demo."""
+    warnings.filterwarnings("ignore", category=RuntimeWarning)
+    warnings.filterwarnings("ignore", message="overflow encountered in cast")
 
 # Backend name -> variables that select it. Every GL variable listed in any
 # candidate is cleared first, so candidates never inherit each other's state.
