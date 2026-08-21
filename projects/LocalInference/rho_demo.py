@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import atexit
 import difflib
+from html import escape
 import json
 import os
 import queue
@@ -233,6 +234,96 @@ class BoundedRun:
     timed_out: bool
     stdout: str
     elapsed_seconds: float
+
+
+class _NotebookHelixProgress:
+    """Collapse Rich terminal frames into one updating notebook status."""
+
+    _ansi = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+
+    def __init__(self) -> None:
+        from IPython.display import HTML, display
+
+        self._HTML = HTML
+        self._handle = display(HTML("HELIX: starting…"), display_id=True)
+        self._generation = "0/1"
+        self._phase = "Initializing"
+        self._evaluations = 0
+        self._max_evaluations = 8
+        self._last_html = ""
+        self._render()
+
+    def _render(self, message: str | None = None, *, color: str = "#2563eb") -> None:
+        detail = escape(message or self._phase)
+        markup = (
+            f"<b>HELIX generation {escape(self._generation)}</b> — {detail}<br>"
+            f'<progress value="{self._evaluations}" max="{self._max_evaluations}" '
+            'style="width:320px"></progress> '
+            f"{self._evaluations}/{self._max_evaluations} evaluations"
+        )
+        if color != "#2563eb":
+            markup = f'<span style="color:{color}">{markup}</span>'
+        if markup != self._last_html:
+            if self._handle is not None:
+                self._handle.update(self._HTML(markup))
+            self._last_html = markup
+
+    def __call__(self, raw_line: str) -> None:
+        line = self._ansi.sub("", raw_line).replace("\r", "\n").splitlines()[-1:]
+        if not line:
+            return
+        text = line[0].strip()
+
+        generation = re.search(r"Generation\s+(\d+)\s*/\s*(\d+)", text)
+        if generation:
+            self._generation = f"{generation.group(1)}/{generation.group(2)}"
+
+        phase = re.search(r"Status:\s*([^│]+)", text)
+        if phase:
+            self._phase = phase.group(1).strip()
+
+        budget = re.search(r"(\d+)/(\d+)\s+evals", text)
+        if budget:
+            self._evaluations = int(budget.group(1))
+            self._max_evaluations = int(budget.group(2))
+
+        message = None
+        for prefix in (
+            "Creating seed worktree",
+            "Evaluating seed",
+            "Seed evaluated",
+            "Minibatch gate",
+            "Evolution complete",
+        ):
+            if prefix in text:
+                message = text[text.index(prefix):].strip()
+                break
+        self._render(message)
+
+    def finish(self, result: BoundedRun) -> None:
+        if result.returncode == 0:
+            self._render(
+                f"complete in {result.elapsed_seconds:.1f}s", color="#15803d"
+            )
+        elif result.timed_out:
+            self._render(
+                f"stopped at the {result.elapsed_seconds:.0f}s deadline",
+                color="#b45309",
+            )
+        else:
+            self._render(f"failed (exit {result.returncode})", color="#b91c1c")
+
+
+def _notebook_progress() -> _NotebookHelixProgress | None:
+    try:
+        from IPython import get_ipython
+
+        shell = get_ipython()
+        if shell is not None and shell.__class__.__name__ == "ZMQInteractiveShell":
+            return _NotebookHelixProgress()
+    except Exception:
+        pass
+    return None
 
 
 def _safe_reset(path: Path) -> None:
@@ -661,13 +752,16 @@ def run_helix(
         str(generations),
         "--no-merge",
     ]
+    notebook_display = _notebook_progress() if progress is print else None
     result = run_bounded(
         command,
         cwd=root,
         timeout_seconds=timeout_seconds,
         env=os.environ.copy(),
-        progress=progress,
+        progress=notebook_display or progress,
     )
+    if notebook_display is not None:
+        notebook_display.finish(result)
     if result.timed_out:
         progress(f"HELIX stopped at the {timeout_seconds:.0f}s workshop deadline.")
     return result
