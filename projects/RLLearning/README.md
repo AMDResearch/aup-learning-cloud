@@ -11,9 +11,10 @@ PandaPickCube inference demo for ROSCon. Open [`hands-on.ipynb`](hands-on.ipynb)
 | `hands-on.ipynb` | Main inference notebook |
 | `headless_gl.py` | Headless MuJoCo rendering via system Mesa/OSMesa |
 | `scripts/render_trajectory.py` | Re-render a saved rollout without rerunning inference |
-| `PandaPickCube-20260817-150103.zip` | Brax PPO checkpoint archive (extracted in the Docker image) |
+| `PandaPickCube-20260817-150103.zip` | Brax PPO checkpoint archive (extracted in the Docker image; notebook default) |
+| `PandaPickCube-20260807-131132.zip` | Alternate Brax PPO checkpoint archive (also extracted in the Docker image) |
 
-The checkpoint extracts to `PandaPickCube-20260817-150103/checkpoints/` (latest step: `000045875200`).
+`PandaPickCube-20260817-150103` extracts to `checkpoints/` with latest step `000045875200`. `PandaPickCube-20260807-131132` extracts to `checkpoints/` with latest step `000024576000`.
 
 ## Docker image
 
