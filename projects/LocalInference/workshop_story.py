@@ -17,7 +17,7 @@ from typing import Any
 HERE = Path(__file__).resolve().parent
 CAPX_STORY = HERE / "capx_story.py"
 DEFAULT_OUTPUT = Path("/tmp/capx_rho_story")
-DEFAULT_RHO_MODEL = "Qwen3-Coder-30B-A3B-Instruct-GGUF"
+DEFAULT_RHO_MODEL = "Gemma-4-E2B-it-GGUF"
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -72,10 +72,7 @@ def _run_capx(
     if done.stderr:
         print(done.stderr, file=sys.stderr, end="")
     if done.returncode != 0:
-        raise RuntimeError(
-            f"CaP-X story failed for {scenario} attempt {attempt} "
-            f"(exit {done.returncode})"
-        )
+        raise RuntimeError(f"CaP-X story failed for {scenario} attempt {attempt} (exit {done.returncode})")
     return _read_json(manifest_path), manifest_path
 
 
@@ -102,10 +99,7 @@ def _select_live_examples(
         )
         lemonade_ready = True
         manifest["_manifest_path"] = str(path)
-        if (
-            showcase is None
-            or manifest["evaluation"]["reward"] > showcase["evaluation"]["reward"]
-        ):
+        if showcase is None or manifest["evaluation"]["reward"] > showcase["evaluation"]["reward"]:
             showcase = manifest
         if manifest["evaluation"]["task_completed"]:
             success = manifest
@@ -131,10 +125,7 @@ def _select_live_examples(
             timeout=args.capx_timeout,
         )
         manifest["_manifest_path"] = str(path)
-        if (
-            not manifest["evaluation"]["task_completed"]
-            and _has_recorded_indexing_bug(manifest)
-        ):
+        if not manifest["evaluation"]["task_completed"] and _has_recorded_indexing_bug(manifest):
             failure = manifest
             break
     if failure is None:
@@ -181,15 +172,10 @@ def _metric(result: dict[str, Any]) -> dict[str, Any]:
 
 def _has_recorded_indexing_bug(manifest: dict[str, Any]) -> bool:
     code = manifest["generation"]["generated_code"]
-    return all(
-        access in code
-        for access in ("green_pose[0][2]", "green_pose[0][0]", "green_pose[0][1]")
-    )
+    return all(access in code for access in ("green_pose[0][2]", "green_pose[0][0]", "green_pose[0][1]"))
 
 
-def _run_rho(
-    args: argparse.Namespace, failure: dict[str, Any]
-) -> tuple[dict[str, Any], bool]:
+def _run_rho(args: argparse.Namespace, failure: dict[str, Any]) -> tuple[dict[str, Any], bool]:
     rho_root = (args.output_dir / "rho").resolve()
     os.environ["RHO_WORKSHOP_ROOT"] = str(rho_root)
     os.environ["RHO_MODEL"] = args.rho_model
@@ -232,9 +218,7 @@ def _run_rho(
     best_train = rho_demo.score_candidate(best, "train", capture=args.capture_video)
     best_val = rho_demo.score_candidate(best, "val", capture=args.capture_video)
     proven = bool(
-        summary["accepted"]
-        and best_train["reward"] > seed_train["reward"]
-        and best_val["reward"] > seed_val["reward"]
+        summary["accepted"] and best_train["reward"] > seed_train["reward"] and best_val["reward"] > seed_val["reward"]
     )
     report = {
         "candidate_root": str(root),

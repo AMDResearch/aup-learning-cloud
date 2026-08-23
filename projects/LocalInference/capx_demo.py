@@ -1,21 +1,10 @@
 # Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
 # SPDX-License-Identifier: MIT
-#
-# Setup and reporting helpers for 04_code_as_policies_with_capx.ipynb.
-#
-# The notebook drives CaP-X through the framework's own API: LaunchArgs,
-# _load_config, _start_api_servers, instantiate, ModelQueryArgs, query_model and
-# env.step. Reading those calls is the point of the notebook, so what lives here
-# is only what would bury them - the process setup a Jupyter kernel does not
-# inherit, the Lemonade bring-up that notebooks 02 and 03 already covered, and
-# the frame-by-frame video and artifact plumbing around a run.
+"""Setup, profiling, and video helpers for the CaP-X notebook."""
 
 import os
 
-# MuJoCo picks its GL backend at import time and only once, so this has to be
-# set before anything below reaches mujoco. EGL renders on the AMD GPU with no
-# display attached. The CaP-X kernel sets it too; this is what also makes the
-# module importable from a plain terminal python.
+# MuJoCo selects its headless renderer at import time.
 os.environ.setdefault("MUJOCO_GL", "egl")
 os.environ.setdefault("PYOPENGL_PLATFORM", "egl")
 
@@ -23,6 +12,9 @@ import base64  # noqa: E402
 import re  # noqa: E402
 import subprocess  # noqa: E402
 import sys  # noqa: E402
+import time  # noqa: E402
+from collections.abc import Iterator  # noqa: E402
+from contextlib import contextmanager, redirect_stderr, redirect_stdout  # noqa: E402
 from pathlib import Path  # noqa: E402
 
 import numpy as np  # noqa: E402
@@ -30,9 +22,7 @@ import requests  # noqa: E402
 
 CAPX_ROOT = Path(os.environ.get("CAPX_ROOT", "/ryzers/cap-x"))
 
-# capx resolves config paths, robot assets and controller configs relative to
-# the repo root, which is why every launch.py invocation in the README is
-# preceded by a cd. A kernel starts in the notebook's directory instead.
+# CaP-X resolves configs and assets relative to its repository.
 if CAPX_ROOT.is_dir():
     os.chdir(CAPX_ROOT)
 
@@ -47,60 +37,32 @@ except ModuleNotFoundError as exc:
 LEMONADE_PORT = 13305
 DEFAULT_MODEL = "Gemma-4-E2B-it-GGUF"
 
-# The script notebook 03 sources in a terminal, reused here for its --serve-only half
 LEMONADE_ENV = Path(os.environ.get("LEMONADE_ENV", "/ryzers/lemonade_env.sh"))
 
-# Lemonade and CaP-X need different Hugging Face caches. The CaP-X interpreter
-# points HF_HOME at the baked perception weights; the Lemonade subprocess
-# explicitly switches to the image-baked GGUF cache.
-LEMONADE_CACHE = os.environ.get(
-    "LEMONADE_CACHE", "/opt/lemonade-cache/lemonade"
-)
-LEMONADE_HF_HOME = os.environ.get(
-    "LEMONADE_HF_HOME", "/opt/lemonade-cache/huggingface"
-)
+LEMONADE_CACHE = os.environ.get("LEMONADE_CACHE", "/opt/lemonade-cache/lemonade")
+LEMONADE_HF_HOME = os.environ.get("LEMONADE_HF_HOME", "/opt/lemonade-cache/huggingface")
+LLAMA_METRICS_URL = os.environ.get("LLAMA_METRICS_URL", "http://127.0.0.1:8001/metrics")
+SERVICE_LOG = Path(os.environ.get("CAPX_SERVICE_LOG", "/tmp/capx-services.log"))
 
-# Scratch space for the episode videos and the benchmark artifacts
 WORK = Path("/tmp/capx_notebook")
 
 TRIAL_DIR = re.compile(r"trial_(\d+)_sandboxrc_(\d+)_reward_([\d.]+)_taskcompleted_(\d)")
 
 
-# ---------------------------------------------------------------------------
-# The model server
-# ---------------------------------------------------------------------------
-
-
 def lemonade_alive(timeout: float = 2.0) -> bool:
     try:
-        return requests.get(
-            f"http://localhost:{LEMONADE_PORT}/api/v1/health", timeout=timeout
-        ).ok
+        return requests.get(f"http://localhost:{LEMONADE_PORT}/api/v1/health", timeout=timeout).ok
     except requests.RequestException:
         return False
 
 
-def ensure_lemonade(model: str = DEFAULT_MODEL, progress=print) -> None:
-    """Serve the model, by handing off to the script that already knows how.
+def ensure_lemonade(model: str = DEFAULT_MODEL, progress=print) -> float:
+    """Start Lemonade if needed and load one model."""
+    started = time.monotonic()
+    action = "Loading" if lemonade_alive() else "Starting Lemonade and loading"
+    progress(f"{action} {model} from the image cache...")
 
-    lemonade_env.sh is the same script notebook 03 sources in a terminal, and
-    its --serve-only path is exactly the part CaP-X needs: start lemond if it is
-    down, wait for it, load the model. The rest of that script rewrites RAI's
-    config.toml and sources the ROS overlay, which is why this runs it in a
-    subshell with the flag rather than trying to source it into the kernel.
-
-    Safe to call again, since every step in there is a no-op once done.
-    """
-    if lemonade_alive():
-        progress(f"Lemonade is already up on port {LEMONADE_PORT}, loading {model}...")
-    else:
-        progress(f"Starting Lemonade and loading {model}...")
-    progress("  loading from the image cache (custom models download on first use)")
-
-    # Streamed rather than captured: the download prints nothing until it
-    # finishes, and a silent cell for several minutes reads as a hang. stdin is
-    # closed so a prompt fails loudly instead of blocking forever, and setsid
-    # leaves lemond orphaned onto PID 1 so a kernel restart does not kill it.
+    # setsid keeps the daemon alive across kernel restarts.
     proc = subprocess.Popen(
         ["setsid", "bash", str(LEMONADE_ENV), "--serve-only", model],
         stdin=subprocess.DEVNULL,
@@ -118,32 +80,70 @@ def ensure_lemonade(model: str = DEFAULT_MODEL, progress=print) -> None:
     load_error = None
     for line in proc.stdout:
         rendered = line.rstrip()
-        progress(f"  {rendered}")
         if "Error loading model:" in rendered:
             load_error = rendered
+        elif "Downloading" in rendered or "Fetching" in rendered:
+            progress(f"  {rendered}")
     proc.wait()
 
     if load_error is not None:
         raise RuntimeError(load_error)
     if proc.returncode != 0 or not lemonade_alive():
-        raise RuntimeError(
-            f"{LEMONADE_ENV} --serve-only {model} failed (exit {proc.returncode}) "
-            "- see /tmp/lemond.log"
-        )
-    progress(f"{model} is loaded and serving on port {LEMONADE_PORT}")
+        raise RuntimeError(f"{LEMONADE_ENV} --serve-only {model} failed (exit {proc.returncode}) - see /tmp/lemond.log")
+    elapsed = time.monotonic() - started
+    progress(f"Lemonade ready in {elapsed:.1f}s")
+    return elapsed
 
 
-# ---------------------------------------------------------------------------
-# Watching an episode
-# ---------------------------------------------------------------------------
+@contextmanager
+def quiet_output(log_path: Path = SERVICE_LOG) -> Iterator[Path]:
+    """Send noisy native and child-process output to a log file."""
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("a", buffering=1) as stream:
+        saved_stdout, saved_stderr = os.dup(1), os.dup(2)
+        try:
+            sys.stdout.flush()
+            sys.stderr.flush()
+            os.dup2(stream.fileno(), 1)
+            os.dup2(stream.fileno(), 2)
+            with redirect_stdout(stream), redirect_stderr(stream):
+                yield log_path
+        finally:
+            os.dup2(saved_stdout, 1)
+            os.dup2(saved_stderr, 2)
+            os.close(saved_stdout)
+            os.close(saved_stderr)
+
+
+def llama_metrics(timeout: float = 2.0) -> dict[str, float]:
+    """Read cumulative prompt and generation counters from llama.cpp."""
+    names = {
+        "prompt_tokens_total",
+        "prompt_seconds_total",
+        "tokens_predicted_total",
+        "tokens_predicted_seconds_total",
+    }
+    try:
+        text = requests.get(LLAMA_METRICS_URL, timeout=timeout).text
+    except requests.RequestException:
+        return {}
+    metrics: dict[str, float] = {}
+    for line in text.splitlines():
+        if not line.startswith("llamacpp:"):
+            continue
+        key, _, raw_value = line.partition(" ")
+        name = key.removeprefix("llamacpp:")
+        if name in names:
+            metrics[name] = float(raw_value)
+    return metrics
+
+
+def metric_delta(before: dict[str, float], after: dict[str, float]) -> dict[str, float]:
+    return {name: round(value - before.get(name, value), 3) for name, value in after.items()}
 
 
 def show_video(env, name: str = "notebook_run", width: int = 640) -> str | None:
-    """Encode the frames captured during the last step and play them inline.
-
-    env.get_video_frames returns raw frames, so this is the encode-and-embed
-    dance rather than anything about CaP-X.
-    """
+    """Encode and display the frames captured during the last step."""
     from capx.utils.video_utils import _write_video
     from IPython.display import Video, display
 
@@ -170,30 +170,23 @@ def _ffmpeg() -> str:
 
 
 def _scaled(video: Path, dest: Path, width: int) -> Path:
-    """Scale a clip down for embedding, falling back to the original.
-
-    -2 keeps the aspect ratio and rounds the height to an even number, which
-    h264 requires. -an drops the (silent) audio track. A missing ffmpeg raises
-    rather than returning non-zero, so both failures are caught here.
-    """
+    """Scale a clip for embedding, falling back to the original."""
     try:
         done = subprocess.run(
-            [_ffmpeg(), "-y", "-loglevel", "error", "-i", str(video),
-             "-vf", f"scale={width}:-2", "-an", str(dest)],
-            capture_output=True, text=True,
+            [_ffmpeg(), "-y", "-loglevel", "error", "-i", str(video), "-vf", f"scale={width}:-2", "-an", str(dest)],
+            capture_output=True,
+            text=True,
         )
     except OSError:
         return video
     return dest if done.returncode == 0 and dest.exists() else video
 
 
-def show_trial_grid(trials: list[dict], width: int = 240, progress=print) -> None:
-    """Every trial's episode, side by side, captioned with its reward.
-
-    Each clip is scaled down first and then embedded in the page, because a
-    notebook cannot play a file from /tmp: the browser never sees that path.
-    Scaling is what keeps five embedded videos smaller than one full-size one.
-    """
+def _show_video_grid(
+    entries: list[tuple[int, float, bool, Path | None]],
+    width: int,
+    progress,
+) -> None:
     from IPython.display import HTML, display
 
     thumbs = WORK / "thumbs"
@@ -201,21 +194,19 @@ def show_trial_grid(trials: list[dict], width: int = 240, progress=print) -> Non
 
     figures = []
     embedded = 0
-    for t in trials:
-        video = next(iter(sorted(t["dir"].glob("video_combined*.mp4"))), None)
-        caption = f"trial {t['trial']} · reward {t['reward']:.3f}"
-        caption += " · solved" if t["solved"] else ""
-
+    for trial, reward, solved, video in entries:
+        caption = f"seed {trial} · reward {reward:.3f}"
+        caption += " · solved" if solved else ""
         if video is None:
             figures.append(
                 f'<figure style="margin:0;text-align:center;font:12px/1.4 sans-serif">'
                 f'<div style="width:{width}px;height:{width * 3 // 4}px;display:flex;'
-                f'align-items:center;justify-content:center;border:1px dashed currentColor;'
+                f"align-items:center;justify-content:center;border:1px dashed currentColor;"
                 f'opacity:.5">no video</div><figcaption>{caption}</figcaption></figure>'
             )
             continue
 
-        source = _scaled(video, thumbs / f"trial_{t['trial']}.mp4", width)
+        source = _scaled(video, thumbs / f"trial_{trial}.mp4", width)
         if source is video:
             progress(f"  could not scale {video.name}, embedding it as it is")
 
@@ -224,12 +215,10 @@ def show_trial_grid(trials: list[dict], width: int = 240, progress=print) -> Non
         figures.append(
             f'<figure style="margin:0;text-align:center;font:12px/1.4 sans-serif">'
             f'<video src="data:video/mp4;base64,{data}" width="{width}" '
-            f'controls loop muted playsinline></video>'
+            f"controls loop muted playsinline></video>"
             f"<figcaption>{caption}</figcaption></figure>"
         )
 
-    # Half the clips on top and the rest centred underneath, so five trials
-    # read as a pyramid rather than as a row that wraps wherever it happens to.
     def row(items: list[str]) -> str:
         return (
             '<div style="display:flex;flex-wrap:wrap;gap:12px;justify-content:center;'
@@ -238,12 +227,35 @@ def show_trial_grid(trials: list[dict], width: int = 240, progress=print) -> Non
 
     top = (len(figures) + 1) // 2
     display(HTML(row(figures[:top]) + (row(figures[top:]) if len(figures) > top else "")))
-    progress(f"{len(figures)} episodes, {embedded / 1e6:.1f} MB embedded in this notebook")
+    progress(f"{len(figures)} rollout videos · {embedded / 1e6:.1f} MB embedded")
 
 
-# ---------------------------------------------------------------------------
-# The benchmark
-# ---------------------------------------------------------------------------
+def show_trial_grid(trials: list[dict], width: int = 240, progress=print) -> None:
+    """Display CaP-X trial videos with rewards."""
+    entries = []
+    for trial in trials:
+        video = next(iter(sorted(trial["dir"].glob("video_combined*.mp4"))), None)
+        entries.append((trial["trial"], trial["reward"], trial["solved"], video))
+    _show_video_grid(entries, width, progress)
+
+
+def show_rollout_grid(rollouts: list[dict], width: int = 240, progress=print) -> None:
+    """Display RHO rollout videos across seeds."""
+    entries = []
+    for rollout in rollouts:
+        raw_video = rollout.get("video")
+        video = Path(raw_video) if raw_video else None
+        if video is not None and not video.is_file():
+            video = None
+        entries.append(
+            (
+                int(rollout["trial"]),
+                float(rollout.get("reward") or 0.0),
+                bool(rollout.get("task_completed")),
+                video,
+            )
+        )
+    _show_video_grid(entries, width, progress)
 
 
 def benchmark(
@@ -254,56 +266,63 @@ def benchmark(
     max_tokens: int = 16384,
     trials: int = 5,
     oracle: bool = False,
+    verbose: bool = False,
     progress=print,
 ) -> list[dict]:
-    """Run launch.py over N layouts and report the success rate.
-
-    launch.py is the framework's own entry point, so it starts its own servers.
-    The notebook's are already listening, so it finds those ports busy and skips
-    them.
-
-    Keep one worker: Lemonade serves one request at a time and the perception
-    servers serialise GPU access, so more only queue. With oracle=True the
-    hand-written reference program runs instead of the model, which is the
-    control to reach for when a result looks wrong.
-    """
+    """Run the CaP-X CLI serially over several layouts."""
     out_dir = WORK / "eval"
     cmd = [
-        sys.executable, "capx/envs/launch.py",
-        "--config-path", config_path,
-        "--model", model,
-        "--server-url", server_url,
-        "--temperature", str(temperature),
-        "--max-tokens", str(max_tokens),
-        "--total-trials", str(trials),
-        "--num-workers", "1",
-        "--output-dir", str(out_dir),
+        sys.executable,
+        "capx/envs/launch.py",
+        "--config-path",
+        config_path,
+        "--model",
+        model,
+        "--server-url",
+        server_url,
+        "--temperature",
+        str(temperature),
+        "--max-tokens",
+        str(max_tokens),
+        "--total-trials",
+        str(trials),
+        "--num-workers",
+        "1",
+        "--output-dir",
+        str(out_dir),
     ]
     if oracle:
         cmd.append("--use-oracle-code")
-    progress(" ".join(cmd) + "\n")
+    progress(f"Running {trials} CaP-X trial{'s' if trials != 1 else ''}...")
 
+    started = time.monotonic()
     proc = subprocess.Popen(
-        cmd, cwd=str(CAPX_ROOT), stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT, text=True, bufsize=1,
+        cmd,
+        cwd=str(CAPX_ROOT),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
     )
+    output: list[str] = []
     for line in proc.stdout:
-        progress(line.rstrip())
+        output.append(line)
+        if verbose:
+            progress(line.rstrip())
     proc.wait()
+    elapsed = time.monotonic() - started
+    if proc.returncode != 0:
+        tail = "".join(output[-40:]).strip()
+        raise RuntimeError(f"CaP-X failed (exit {proc.returncode}):\n{tail}")
+    progress(f"CaP-X finished in {elapsed:.1f}s")
 
-    return read_results(out_dir, model, progress=progress)
+    return read_results(out_dir, model, verbose=verbose, progress=progress)
 
 
-def read_results(out_dir: Path, model: str, progress=print) -> list[dict]:
-    """Collect the per-trial artifacts launch.py just wrote.
-
-    Every trial gets a directory whose name carries its result, and the run
-    splices the model name into the path so a second model does not overwrite
-    the first. That is why the results are not where --output-dir said.
-    """
+def read_results(out_dir: Path, model: str, *, verbose: bool = False, progress=print) -> list[dict]:
+    """Collect CaP-X trial artifacts."""
     root = out_dir.parent / model.replace("/", "_") / out_dir.name
     if not root.is_dir():
-        # Upstream may sanitise the model name differently; take the newest.
         found = sorted(out_dir.parent.glob(f"*/{out_dir.name}"), key=lambda p: p.stat().st_mtime)
         if not found:
             progress(f"no results under {out_dir.parent}")
@@ -311,27 +330,26 @@ def read_results(out_dir: Path, model: str, progress=print) -> list[dict]:
         root = found[-1]
 
     summary = root / "summaries.txt"
-    if summary.exists():
+    if verbose and summary.exists():
         progress("\n" + summary.read_text())
 
     trials = []
     for d in sorted(root.glob("trial_*")):
         m = TRIAL_DIR.match(d.name)
         if m:
-            trials.append({
-                "trial": int(m[1]),
-                "error": m[2] != "0",
-                "reward": float(m[3]),
-                "solved": m[4] == "1",
-                "dir": d,
-            })
+            trials.append(
+                {
+                    "trial": int(m[1]),
+                    "error": m[2] != "0",
+                    "reward": float(m[3]),
+                    "solved": m[4] == "1",
+                    "dir": d,
+                }
+            )
 
     progress(f"{'trial':>5} {'sandbox':>8} {'reward':>7} {'solved':>7}")
     for t in trials:
-        progress(
-            f"{t['trial']:>5} {'error' if t['error'] else 'ok':>8} "
-            f"{t['reward']:>7.3f} {str(t['solved']):>7}"
-        )
+        progress(f"{t['trial']:>5} {'error' if t['error'] else 'ok':>8} {t['reward']:>7.3f} {str(t['solved']):>7}")
     if trials:
         solved = sum(t["solved"] for t in trials)
         mean = np.mean([t["reward"] for t in trials])

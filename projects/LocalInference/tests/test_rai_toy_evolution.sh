@@ -3,7 +3,15 @@
 # SPDX-License-Identifier: MIT
 set -euo pipefail
 
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
+SCRIPT_DIR="$(cd "$(dirname "${SCRIPT_PATH}")" && pwd)"
+if [[ -f "${SCRIPT_DIR}/rai_toy_demo.py" ]]; then
+  HERE="${SCRIPT_DIR}"
+elif [[ -f "${SCRIPT_DIR}/notebooks/rai_toy_demo.py" ]]; then
+  HERE="${SCRIPT_DIR}/notebooks"
+else
+  HERE="$(cd "${SCRIPT_DIR}/.." && pwd)"
+fi
 PYTHON_BIN="${RAI_TOY_TEST_PYTHON:-python3}"
 export PYTHONPATH="${HERE}${PYTHONPATH:+:${PYTHONPATH}}"
 export RAI_TOY_SUPPORT_DIR="${HERE}"

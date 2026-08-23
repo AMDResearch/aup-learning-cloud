@@ -15,16 +15,9 @@ from typing import Any
 
 import rho_demo
 
-
 TASK_CONFIGS = {
-    "cube_lift": (
-        "env_configs/cube_lifting/"
-        "franka_robosuite_cube_lifting.yaml"
-    ),
-    "cube_restack": (
-        "env_configs/cube_restack/"
-        "franka_robosuite_cube_restack.yaml"
-    ),
+    "cube_lift": ("env_configs/cube_lifting/franka_robosuite_cube_lifting.yaml"),
+    "cube_restack": ("env_configs/cube_restack/franka_robosuite_cube_restack.yaml"),
     "cube_stack": "env_configs/cube_stack/franka_robosuite_cube_stack.yaml",
     "spill_wipe": "env_configs/spill_wipe/franka_robosuite_spill_wipe.yaml",
 }
@@ -38,16 +31,12 @@ def _policy_spec(value: str) -> tuple[str, str, Path]:
     try:
         label, scenario, raw_path = value.split(":", 2)
     except ValueError as exc:
-        raise argparse.ArgumentTypeError(
-            "policy must have the form LABEL:SCENARIO:PATH"
-        ) from exc
+        raise argparse.ArgumentTypeError("policy must have the form LABEL:SCENARIO:PATH") from exc
     if not label:
         raise argparse.ArgumentTypeError("policy label cannot be empty")
     if scenario not in TASK_CONFIGS:
         choices = ", ".join(sorted(TASK_CONFIGS))
-        raise argparse.ArgumentTypeError(
-            f"unknown scenario {scenario!r}; choose from {choices}"
-        )
+        raise argparse.ArgumentTypeError(f"unknown scenario {scenario!r}; choose from {choices}")
     path = Path(raw_path).expanduser().resolve()
     if not path.is_file():
         raise argparse.ArgumentTypeError(f"policy file does not exist: {path}")
@@ -79,6 +68,7 @@ def _metric(result: dict[str, Any]) -> dict[str, Any]:
             "traceback",
             "feedback",
             "video",
+            "elapsed_seconds",
         )
     }
 
@@ -97,12 +87,8 @@ def _aggregate(results: list[dict[str, Any]]) -> dict[str, Any]:
         "trials": count,
         "completed": completed,
         "success_rate": completed / count,
-        "mean_reward": sum(float(result.get("reward") or 0.0) for result in results)
-        / count,
-        "mean_raw_reward": sum(
-            float(result.get("raw_reward") or 0.0) for result in results
-        )
-        / count,
+        "mean_reward": sum(float(result.get("reward") or 0.0) for result in results) / count,
+        "mean_raw_reward": sum(float(result.get("raw_reward") or 0.0) for result in results) / count,
         "execution_failures": execution_failures,
     }
 
@@ -125,12 +111,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--trials", type=_trials, default=[1, 2, 3, 4, 5])
     parser.add_argument("--timeout", type=float, default=180.0)
     parser.add_argument("--capture-video", action="store_true")
-    parser.add_argument(
-        "--work-dir", type=Path, default=Path("/tmp/capx_generalization")
-    )
-    parser.add_argument(
-        "--output", type=Path, default=Path("/tmp/capx_generalization/report.json")
-    )
+    parser.add_argument("--work-dir", type=Path, default=Path("/tmp/capx_generalization"))
+    parser.add_argument("--output", type=Path, default=Path("/tmp/capx_generalization/report.json"))
     return parser.parse_args()
 
 

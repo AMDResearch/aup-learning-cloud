@@ -33,7 +33,7 @@ CAPX_ROOT = Path(os.environ.get("CAPX_ROOT", "/ryzers/cap-x"))
 CAPX_PYTHON = Path(os.environ.get("CAPX_PYTHON", "/opt/capx-venv/bin/python"))
 HELIX = Path(os.environ.get("HELIX_BIN", "/opt/capx-venv/bin/helix"))
 CAPX_MODEL = "Gemma-4-E4B-it-GGUF"
-DEFAULT_RHO_MODEL = "Qwen3-Coder-30B-A3B-Instruct-GGUF"
+DEFAULT_RHO_MODEL = "Gemma-4-E2B-it-GGUF"
 MODEL = os.environ.get("RHO_MODEL", DEFAULT_RHO_MODEL)
 CONFIG_PATH = os.environ.get(
     "RHO_CONFIG_PATH",
@@ -47,6 +47,7 @@ DEFAULT_TIMEOUT = 480
 EVALUATION_TIMEOUT = 120
 
 _OWNED_SERVERS: list[subprocess.Popen[Any]] = []
+LAST_SERVICE_TIMING: dict[str, float] = {}
 
 
 DEFAULT_PROGRAM = """\
@@ -231,10 +232,11 @@ def helix_config(
     objective: str = DEFAULT_OBJECTIVE,
     background: str = DEFAULT_BACKGROUND,
 ) -> str:
-    if generations not in (1, 2):
-        raise ValueError("workshop generations must be 1 or 2")
+    if not 1 <= generations <= 4:
+        raise ValueError("workshop generations must be between 1 and 4")
     if '"""' in objective or '"""' in background:
         raise ValueError("HELIX prompts cannot contain TOML triple quotes")
+    max_evaluations = max(8, 2 + 3 * generations)
     return f'''\
 objective = """{objective}"""
 seed = "."
@@ -278,7 +280,7 @@ val_size = 1
 [evolution]
 max_generations = {generations}
 perfect_score_threshold = 1.0
-max_evaluations = 8
+max_evaluations = {max_evaluations}
 merge_enabled = false
 num_parallel_proposals = 1
 mutations_per_parent = 1
@@ -370,15 +372,13 @@ class _NotebookHelixProgress:
             "Evolution complete",
         ):
             if prefix in text:
-                message = text[text.index(prefix):].strip()
+                message = text[text.index(prefix) :].strip()
                 break
         self._render(message)
 
     def finish(self, result: BoundedRun) -> None:
         if result.returncode == 0:
-            self._render(
-                f"complete in {result.elapsed_seconds:.1f}s", color="#15803d"
-            )
+            self._render(f"complete in {result.elapsed_seconds:.1f}s", color="#15803d")
         elif result.timed_out:
             self._render(
                 f"stopped at the {result.elapsed_seconds:.0f}s deadline",
@@ -454,41 +454,27 @@ def _artifact_program(
             embedded_metadata.update(metadata)
             metadata = embedded_metadata
 
-        direct = [
-            path
-            for path in (artifact_path / "code.py", artifact_path / "program.py")
-            if path.is_file()
-        ]
+        direct = [path for path in (artifact_path / "code.py", artifact_path / "program.py") if path.is_file()]
         candidates = direct or sorted(artifact_path.glob("trial_*/code.py"))
         if not candidates:
             candidates = sorted(artifact_path.rglob("code.py"))
         if len(candidates) > 1:
             selected_trial = int(
                 next(
-                    (
-                        metadata[key]
-                        for key in ("trial", "artifact_trial", "training_trial")
-                        if key in metadata
-                    ),
+                    (metadata[key] for key in ("trial", "artifact_trial", "training_trial") if key in metadata),
                     1,
                 )
             )
             matching = [
                 path
                 for path in candidates
-                if any(
-                    re.search(
-                        rf"(?:^|_)trial_0*{selected_trial}(?:_|$)", part
-                    )
-                    for part in path.parts
-                )
+                if any(re.search(rf"(?:^|_)trial_0*{selected_trial}(?:_|$)", part) for part in path.parts)
             ]
             if len(matching) == 1:
                 candidates = matching
         if len(candidates) != 1:
             raise ValueError(
-                "artifact directory must identify exactly one CaP-X code.py "
-                f"or program.py; found {len(candidates)}"
+                f"artifact directory must identify exactly one CaP-X code.py or program.py; found {len(candidates)}"
             )
         code_path = candidates[0]
     if not code_path.is_file():
@@ -528,9 +514,7 @@ def _artifact_trial(metadata: Mapping[str, Any], code_path: Path | None) -> int:
                 break
     trial = int(declared if declared is not None else inferred or 1)
     if inferred is not None and declared is not None and trial != inferred:
-        raise ValueError(
-            f"provenance trial {trial} does not match artifact trial {inferred}"
-        )
+        raise ValueError(f"provenance trial {trial} does not match artifact trial {inferred}")
     if trial < 0:
         raise ValueError("trial identifiers must be non-negative")
     return trial
@@ -538,8 +522,7 @@ def _artifact_trial(metadata: Mapping[str, Any], code_path: Path | None) -> int:
 
 def _git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        ["git", "-c", "user.name=RHO Workshop", "-c", "user.email=rho@localhost",
-         *args],
+        ["git", "-c", "user.name=RHO Workshop", "-c", "user.email=rho@localhost", *args],
         cwd=root,
         check=True,
         capture_output=True,
@@ -557,11 +540,12 @@ def prepare_workshop(
     api_reference: str = API_REFERENCE,
     objective: str = DEFAULT_OBJECTIVE,
     background: str = DEFAULT_BACKGROUND,
+    support_files: Mapping[str, str] | None = None,
     reset: bool = True,
 ) -> Path:
     """Create a disposable repository around verbatim CaP-X generated code."""
-    if generations not in (1, 2):
-        raise ValueError("workshop generations must be 1 or 2")
+    if not 1 <= generations <= 4:
+        raise ValueError("workshop generations must be between 1 and 4")
     if heldout_trial < 0:
         raise ValueError("held-out trial must be non-negative")
     root = Path(root).expanduser().resolve()
@@ -573,9 +557,7 @@ def prepare_workshop(
     if "training_trial" in source_metadata:
         declared_training = int(source_metadata["training_trial"])
         if declared_training != training_trial:
-            raise ValueError(
-                "training trial must match the CaP-X artifact's recorded trial"
-            )
+            raise ValueError("training trial must match the CaP-X artifact's recorded trial")
     persisted_provenance = dict(source_metadata)
     persisted_provenance.update(
         {
@@ -586,10 +568,15 @@ def prepare_workshop(
     )
 
     _write_candidate(root, program)
+    for relative, source in (support_files or {}).items():
+        path = Path(relative)
+        if path.is_absolute() or not path.parts or path.parts[0] != "solver":
+            raise ValueError(f"support file must stay below solver/: {relative}")
+        destination = root / path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(source)
     (root / "API_REFERENCE.md").write_text(api_reference)
-    (root / "opencode.json").write_text(
-        json.dumps(OPENCODE_CONFIG, indent=2) + "\n"
-    )
+    (root / "opencode.json").write_text(json.dumps(OPENCODE_CONFIG, indent=2) + "\n")
     (root / "helix.toml").write_text(
         helix_config(
             generations,
@@ -598,12 +585,9 @@ def prepare_workshop(
         )
     )
     (root / "probe.py").write_text(PROBE_SOURCE)
-    (root / "provenance.json").write_text(
-        json.dumps(persisted_provenance, indent=2, sort_keys=True) + "\n"
-    )
+    (root / "provenance.json").write_text(json.dumps(persisted_provenance, indent=2, sort_keys=True) + "\n")
     (root / ".gitignore").write_text(
-        ".helix/\n.helix_artifacts/\n.helix_opencode_state/\n"
-        "__pycache__/\n*.pyc\nhelix_batch.json\n"
+        ".helix/\n.helix_artifacts/\n.helix_opencode_state/\n__pycache__/\n*.pyc\nhelix_batch.json\n"
     )
 
     _git(root, "init", "-b", "main")
@@ -626,30 +610,31 @@ def service_status() -> dict[int, bool]:
 
 def ensure_services(progress: Callable[[str], None] = print) -> list[Any]:
     """Start/reuse Lemonade, OWLv2, SAM2, Contact-GraspNet, and PyRoKi."""
-    from capx_demo import ensure_lemonade
+    from capx_demo import SERVICE_LOG, ensure_lemonade, quiet_output
 
-    ensure_lemonade(MODEL, progress=progress)
+    lemonade_seconds = ensure_lemonade(MODEL, progress=progress)
+    started = time.monotonic()
     old_cwd = Path.cwd()
     try:
-        os.chdir(CAPX_ROOT)
-        from capx.envs.launch import LaunchArgs
-        from capx.envs.runner import _start_api_servers
-        from capx.utils.launch_utils import _load_config
+        with quiet_output():
+            os.chdir(CAPX_ROOT)
+            from capx.envs.launch import LaunchArgs
+            from capx.envs.runner import _start_api_servers
+            from capx.utils.launch_utils import _load_config
 
-        args = LaunchArgs(
-            config_path=CONFIG_PATH,
-            model=MODEL,
-            server_url="http://127.0.0.1:13305/api/v1/chat/completions",
-            temperature=0.2,
-            max_tokens=4096,
-        )
-        _, _, api_servers = _load_config(args)
-        servers = list(_start_api_servers(api_servers, 900.0))
-        status = service_status()
-        if not all(status.values()):
-            missing = [port for port, ready in status.items() if not ready]
-            progress(f"Restarting missing CaP-X services: {missing}")
-            servers.extend(_start_api_servers(api_servers, 900.0))
+            args = LaunchArgs(
+                config_path=CONFIG_PATH,
+                model=MODEL,
+                server_url="http://127.0.0.1:13305/api/v1/chat/completions",
+                temperature=0.2,
+                max_tokens=4096,
+            )
+            _, _, api_servers = _load_config(args)
+            servers = list(_start_api_servers(api_servers, 900.0))
+            status = service_status()
+            if not all(status.values()):
+                missing = [port for port, ready in status.items() if not ready]
+                servers.extend(_start_api_servers(api_servers, 900.0))
     finally:
         os.chdir(old_cwd)
 
@@ -661,7 +646,13 @@ def ensure_services(progress: Callable[[str], None] = print) -> list[Any]:
     for proc in servers:
         if hasattr(proc, "poll") and proc.poll() is None:
             _OWNED_SERVERS.append(proc)
-    progress(f"CaP-X services: {status}")
+    robotics_seconds = time.monotonic() - started
+    LAST_SERVICE_TIMING.update(
+        lemonade_seconds=lemonade_seconds,
+        robotics_seconds=robotics_seconds,
+        total_seconds=lemonade_seconds + robotics_seconds,
+    )
+    progress(f"Services ready · LLM {lemonade_seconds:.1f}s · robotics {robotics_seconds:.1f}s · details {SERVICE_LOG}")
     return servers
 
 
@@ -780,11 +771,7 @@ def _mock_evaluation(candidate_root: Path, split: str, example_id: str) -> dict[
     except SyntaxError:
         syntax_error = traceback.format_exc()[-2400:]
     recorded_bug = any(access in compact for access in invalid_accesses)
-    success = (
-        not syntax_error
-        and not recorded_bug
-        and all(access in compact for access in corrected_accesses)
-    )
+    success = not syntax_error and not recorded_bug and all(access in compact for access in corrected_accesses)
     if syntax_error:
         feedback = "Mock execution rejected invalid Python; inspect traceback."
     elif recorded_bug:
@@ -796,10 +783,7 @@ def _mock_evaluation(candidate_root: Path, split: str, example_id: str) -> dict[
     elif success:
         feedback = "Mock execution accepted the corrected green_pose indexing."
     else:
-        feedback = (
-            "Mock execution did not find the three direct green_pose accesses "
-            "required by the recorded repair."
-        )
+        feedback = "Mock execution did not find the three direct green_pose accesses required by the recorded repair."
     return {
         "reward": float(success),
         "raw_reward": float(success),
@@ -810,12 +794,7 @@ def _mock_evaluation(candidate_root: Path, split: str, example_id: str) -> dict[
         "stderr": "",
         "traceback": (
             syntax_error
-            or (
-                "IndexError: invalid index to scalar variable "
-                "(green_pose[0][...])"
-                if recorded_bug
-                else ""
-            )
+            or ("IndexError: invalid index to scalar variable (green_pose[0][...])" if recorded_bug else "")
         ),
         "feedback": feedback,
         "video": None,
@@ -905,19 +884,13 @@ def _live_evaluation(
                 "stdout": stdout,
                 "stderr": stderr,
                 "traceback": sandbox_traceback,
-                "feedback": _feedback_text(
-                    False, {}, stdout, stderr, sandbox_traceback
-                ),
+                "feedback": _feedback_text(False, {}, stdout, stderr, sandbox_traceback),
                 "video": None,
             }
 
         raw_reward = float(reward)
-        sandbox_stdout = str(
-            _info_value(info, ("sandbox_stdout", "stdout")) or ""
-        )
-        sandbox_stderr = str(
-            _info_value(info, ("sandbox_stderr", "stderr")) or ""
-        )
+        sandbox_stdout = str(_info_value(info, ("sandbox_stdout", "stdout")) or "")
+        sandbox_stderr = str(_info_value(info, ("sandbox_stderr", "stderr")) or "")
         sandbox_traceback = str(
             _info_value(
                 info,
@@ -925,9 +898,7 @@ def _live_evaluation(
             )
             or ""
         )
-        sandbox_rc_value = _info_value(
-            info, ("sandbox_rc", "sandbox_returncode", "returncode")
-        )
+        sandbox_rc_value = _info_value(info, ("sandbox_rc", "sandbox_returncode", "returncode"))
         stdout = captured_stdout.getvalue()
         stderr = captured_stderr.getvalue()
         if sandbox_stdout and sandbox_stdout not in stdout:
@@ -935,22 +906,16 @@ def _live_evaluation(
         if sandbox_stderr and sandbox_stderr not in stderr:
             stderr = (stderr + sandbox_stderr).strip()
         execution_failed = bool(
-            (sandbox_rc_value is not None and int(sandbox_rc_value) != 0)
-            or sandbox_traceback
-            or sandbox_stderr.strip()
+            (sandbox_rc_value is not None and int(sandbox_rc_value) != 0) or sandbox_traceback or sandbox_stderr.strip()
         )
         # Partial robot motion can earn environment reward before generated
         # code crashes. RHO optimizes deployable policies, so an execution
         # failure receives zero evaluator score while retaining raw_reward for
         # diagnostics.
         score = 0.0 if execution_failed else raw_reward
-        completed_value = _info_value(
-            info, ("task_completed", "task_success", "success")
-        )
+        completed_value = _info_value(info, ("task_completed", "task_success", "success"))
         completed = not execution_failed and (
-            bool(completed_value)
-            if completed_value is not None
-            else bool(score >= 1.0)
+            bool(completed_value) if completed_value is not None else bool(score >= 1.0)
         )
         video: str | None = None
         if capture:
@@ -971,14 +936,8 @@ def _live_evaluation(
             "stdout": stdout,
             "stderr": stderr,
             "traceback": sandbox_traceback,
-            "feedback": _feedback_text(
-                completed, info, stdout, stderr, sandbox_traceback
-            )
-            + (
-                f"\n\nRaw simulator reward before execution penalty: {raw_reward:.4f}."
-                if execution_failed
-                else ""
-            ),
+            "feedback": _feedback_text(completed, info, stdout, stderr, sandbox_traceback)
+            + (f"\n\nRaw simulator reward before execution penalty: {raw_reward:.4f}." if execution_failed else ""),
             "video": video,
         }
     finally:
@@ -987,9 +946,7 @@ def _live_evaluation(
         os.chdir(old_cwd)
 
 
-def _worker_result(
-    candidate_root: Path, split: str, example_id: str, capture: bool
-) -> dict[str, Any]:
+def _worker_result(candidate_root: Path, split: str, example_id: str, capture: bool) -> dict[str, Any]:
     try:
         if os.environ.get("RHO_MOCK_EVAL") == "1":
             return _mock_evaluation(candidate_root, split, example_id)
@@ -1021,11 +978,7 @@ def score_candidate(
     candidate_root = Path(candidate_root).resolve()
     if trial is not None and trial < 0:
         raise ValueError("trial must be non-negative")
-    selected_trial = (
-        int(trial)
-        if trial is not None
-        else _trial_id(candidate_root, split, example_id)
-    )
+    selected_trial = int(trial) if trial is not None else _trial_id(candidate_root, split, example_id)
     worker_env = os.environ.copy()
     if trial is not None:
         worker_env["RHO_TRIAL_ID"] = str(trial)
@@ -1055,6 +1008,7 @@ def score_candidate(
             "feedback": f"Evaluation timed out after {timeout_seconds:.0f}s.",
             "video": None,
             "timed_out": True,
+            "elapsed_seconds": worker.elapsed_seconds,
         }
     for line in reversed(worker.stdout.splitlines()):
         try:
@@ -1064,6 +1018,7 @@ def score_candidate(
         if isinstance(result, dict) and "reward" in result:
             result["execution_tail"] = "\n".join(worker.stdout.splitlines()[-12:-1])[-1200:]
             result["timed_out"] = False
+            result["elapsed_seconds"] = worker.elapsed_seconds
             return result
     return {
         "reward": 0.0,
@@ -1076,6 +1031,7 @@ def score_candidate(
         "feedback": "Evaluator worker returned no JSON result.",
         "video": None,
         "timed_out": False,
+        "elapsed_seconds": worker.elapsed_seconds,
     }
 
 
@@ -1104,6 +1060,7 @@ def evaluate_cli() -> int:
             "video": result.get("video"),
             "execution_tail": result.get("execution_tail", ""),
             "timed_out": result.get("timed_out", False),
+            "elapsed_seconds": result.get("elapsed_seconds"),
             "scores": {"completion": result["reward"]},
         }
         payload.append([float(result["reward"]), side_info])
@@ -1119,8 +1076,8 @@ def run_helix(
     progress: Callable[[str], None] = print,
 ) -> BoundedRun:
     """Stream a bounded HELIX evolution in the disposable candidate repo."""
-    if generations not in (1, 2):
-        raise ValueError("workshop generations must be 1 or 2")
+    if not 1 <= generations <= 4:
+        raise ValueError("workshop generations must be between 1 and 4")
     root = Path(root)
     command = [
         str(HELIX if HELIX.exists() else Path("helix")),
@@ -1164,26 +1121,14 @@ def source_diff(before: Path | str, after: Path | str) -> str:
     for relative in sorted(relatives, key=lambda path: path.as_posix()):
         old_path = before / relative
         new_path = after / relative
-        old = (
-            old_path.read_text().splitlines(keepends=True)
-            if old_path.exists()
-            else []
-        )
-        new = (
-            new_path.read_text().splitlines(keepends=True)
-            if new_path.exists()
-            else []
-        )
+        old = old_path.read_text().splitlines(keepends=True) if old_path.exists() else []
+        new = new_path.read_text().splitlines(keepends=True) if new_path.exists() else []
         chunks.extend(
             difflib.unified_diff(
                 old,
                 new,
-                fromfile=(
-                    f"seed/{relative.as_posix()}" if old_path.exists() else "/dev/null"
-                ),
-                tofile=(
-                    f"best/{relative.as_posix()}" if new_path.exists() else "/dev/null"
-                ),
+                fromfile=(f"seed/{relative.as_posix()}" if old_path.exists() else "/dev/null"),
+                tofile=(f"best/{relative.as_posix()}" if new_path.exists() else "/dev/null"),
             )
         )
     return "".join(chunks)
@@ -1203,13 +1148,7 @@ def semantic_mutation(diff: str) -> list[str]:
         elif name in removed:
             changes.append(f"{name}: {removed[name]} -> {value}")
     if not changes and diff:
-        files = sorted(
-            {
-                line.removeprefix("+++ best/")
-                for line in diff.splitlines()
-                if line.startswith("+++ best/")
-            }
-        )
+        files = sorted({line.removeprefix("+++ best/") for line in diff.splitlines() if line.startswith("+++ best/")})
         changes = [f"Changed {name}" for name in files]
     return changes
 
@@ -1243,19 +1182,10 @@ def summarize_run(root: Path | str = CANDIDATE_ROOT) -> dict[str, Any]:
     best_diff = source_diff(root, best)
     state_path = root / ".helix" / "state.json"
     state = json.loads(state_path.read_text()) if state_path.exists() else {}
-    child_ids = [
-        candidate_id
-        for candidate_id in state.get("frontier", [])
-        if candidate_id != "g0-s0"
-    ]
-    candidates = [
-        root / ".helix" / "worktrees" / candidate_id
-        for candidate_id in child_ids
-    ]
+    child_ids = [candidate_id for candidate_id in state.get("frontier", []) if candidate_id != "g0-s0"]
+    candidates = [root / ".helix" / "worktrees" / candidate_id for candidate_id in child_ids]
     candidate_diffs = {
-        candidate.name: source_diff(root, candidate)
-        for candidate in candidates
-        if (candidate / "solver").is_dir()
+        candidate.name: source_diff(root, candidate) for candidate in candidates if (candidate / "solver").is_dir()
     }
     child = candidates[-1] if candidates else None
     child_diff = candidate_diffs.get(child.name, "") if child is not None else ""
@@ -1272,8 +1202,7 @@ def summarize_run(root: Path | str = CANDIDATE_ROOT) -> dict[str, Any]:
             "candidate": str(root),
             "trace": {"mutation": []},
             "label": (
-                "NO LIVE CHILD ACCEPTED — the authentic failed seed is retained; "
-                "no prerecorded success is substituted."
+                "NO LIVE CHILD ACCEPTED — the authentic failed seed is retained; no prerecorded success is substituted."
             ),
         },
     }
@@ -1337,9 +1266,7 @@ def _main(argv: list[str]) -> int:
     if argv[0] == "live-smoke":
         return live_smoke_cli()
     if argv[0] == "_evaluate_worker":
-        result = _worker_result(
-            Path(argv[1]), argv[2], argv[3], bool(int(argv[4]))
-        )
+        result = _worker_result(Path(argv[1]), argv[2], argv[3], bool(int(argv[4])))
         print(json.dumps(result, separators=(",", ":")))
         return 0
     if argv[0] == "_sleep":

@@ -182,9 +182,6 @@ models = {
         "gemma-4-E4B-it-Q4_K_M.gguf",
         "mmproj-F16.gguf",
     ],
-    "unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF": [
-        "Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf",
-    ],
 }
 for repository, files in models.items():
     snapshot_download(repository, allow_patterns=files)

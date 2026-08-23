@@ -33,8 +33,20 @@ def _metric(result: dict[str, Any]) -> dict[str, Any]:
             "traceback",
             "feedback",
             "video",
+            "elapsed_seconds",
         )
     }
+
+
+def _support_file(value: str) -> tuple[str, Path]:
+    try:
+        destination, source = value.split("=", 1)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("support file must have the form solver/NAME.py=PATH") from exc
+    path = Path(source).expanduser().resolve()
+    if not destination.startswith("solver/") or not path.is_file():
+        raise argparse.ArgumentTypeError(f"invalid support file: {value}")
+    return destination, path
 
 
 def _parse_args() -> argparse.Namespace:
@@ -42,11 +54,18 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--scenario", choices=tuple(TASK_CONFIGS), required=True)
     parser.add_argument("--heldout-trial", type=int, default=2)
-    parser.add_argument("--generations", type=int, choices=(1, 2), default=1)
+    parser.add_argument("--generations", type=int, choices=range(1, 5), default=1)
     parser.add_argument("--rho-timeout", type=float, default=480.0)
     parser.add_argument("--capture-video", action="store_true")
     parser.add_argument("--objective", required=True)
     parser.add_argument("--background", required=True)
+    parser.add_argument(
+        "--support-file",
+        type=_support_file,
+        action="append",
+        default=[],
+        metavar="solver/NAME.py=PATH",
+    )
     parser.add_argument("--output-dir", type=Path, required=True)
     return parser.parse_args()
 
@@ -58,16 +77,14 @@ def main() -> int:
     manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
     manifest_scenario = manifest.get("scenario")
     if manifest_scenario != args.scenario:
-        raise ValueError(
-            f"manifest scenario {manifest_scenario!r} does not match "
-            f"{args.scenario!r}"
-        )
+        raise ValueError(f"manifest scenario {manifest_scenario!r} does not match {args.scenario!r}")
     artifact = Path(manifest["artifacts"]["generated_code"])
     api_reference = (
         "# Authentic CaP-X generation prompt and API contract\n\n"
         + manifest["generation"]["prompt"].strip()
         + "\n\nOnly edit files below `solver/`.\n"
     )
+    support_files = {destination: source.read_text(encoding="utf-8") for destination, source in args.support_file}
     os.environ["RHO_CONFIG_PATH"] = TASK_CONFIGS[args.scenario]
     rho_demo.ensure_services()
 
@@ -80,13 +97,10 @@ def main() -> int:
         api_reference=api_reference,
         objective=args.objective,
         background=args.background,
+        support_files=support_files,
     )
-    seed_train = rho_demo.score_candidate(
-        candidate, "train", capture=args.capture_video
-    )
-    seed_val = rho_demo.score_candidate(
-        candidate, "val", capture=args.capture_video
-    )
+    seed_train = rho_demo.score_candidate(candidate, "train", capture=args.capture_video)
+    seed_val = rho_demo.score_candidate(candidate, "val", capture=args.capture_video)
     run = rho_demo.run_helix(
         candidate,
         generations=args.generations,
@@ -111,6 +125,7 @@ def main() -> int:
         "config_path": TASK_CONFIGS[args.scenario],
         "rho_model": rho_demo.MODEL,
         "objective": args.objective,
+        "support_files": sorted(support_files),
         "seed": {
             "train": _metric(seed_train),
             "heldout": _metric(seed_val),

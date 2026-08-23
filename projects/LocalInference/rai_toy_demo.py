@@ -23,19 +23,16 @@ import subprocess
 import sys
 import time
 import types
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any
 
 SUPPORT_DIR = Path(__file__).resolve().parent
 HELIX = Path(os.environ.get("HELIX_BIN", "/opt/capx-venv/bin/helix"))
 RAI_PYTHON = Path(os.environ.get("RAI_PYTHON", "/opt/rai-venv/bin/python"))
-DEFAULT_MODEL = os.environ.get(
-    "RAI_TOY_MODEL", "Qwen3-Coder-30B-A3B-Instruct-GGUF"
-)
-DEFAULT_ENDPOINT = os.environ.get(
-    "RAI_TOY_MODEL_ENDPOINT", "http://127.0.0.1:13305/api/v1"
-)
+DEFAULT_MODEL = os.environ.get("RAI_TOY_MODEL", "Gemma-4-E2B-it-GGUF")
+DEFAULT_ENDPOINT = os.environ.get("RAI_TOY_MODEL_ENDPOINT", "http://127.0.0.1:13305/api/v1")
 DEFAULT_ROOT = Path("/tmp/rai_toy_evolution/candidate")
 DEFAULT_TIMEOUT = 600.0
 MOCK_LABEL = "MOCK_STATIC_CONTRACT_NOT_LIVE_RAI"
@@ -219,9 +216,7 @@ class ToyWorld:
             "target_y": requested,
         }
         self.events.append(event)
-        if self._normalize_name(object_name) != self._normalize_name(
-            self.object_name
-        ):
+        if self._normalize_name(object_name) != self._normalize_name(self.object_name):
             event["accepted"] = False
             return f"Unknown object {object_name!r}; no movement occurred."
         if not -0.60 <= requested <= 0.60:
@@ -404,10 +399,7 @@ def prepare_workshop(
                     "train": ["train-red-cube"],
                     "val": ["val-blue-cylinder"],
                 },
-                "scenarios": {
-                    task_id: SCENARIOS[task_id]
-                    for task_id in ("train-red-cube", "val-blue-cylinder")
-                },
+                "scenarios": {task_id: SCENARIOS[task_id] for task_id in ("train-red-cube", "val-blue-cylinder")},
                 "test_exposed_to_evolution": False,
             },
             indent=2,
@@ -416,9 +408,7 @@ def prepare_workshop(
         + "\n"
     )
     (root / "probe.py").write_text(PROBE_SOURCE)
-    (root / "opencode.json").write_text(
-        json.dumps(_opencode_config(model, endpoint), indent=2) + "\n"
-    )
+    (root / "opencode.json").write_text(json.dumps(_opencode_config(model, endpoint), indent=2) + "\n")
     (root / "helix.toml").write_text(
         helix_config(
             model=model,
@@ -427,8 +417,7 @@ def prepare_workshop(
         )
     )
     (root / ".gitignore").write_text(
-        ".helix/\n.helix_artifacts/\n.helix_opencode_state/\n"
-        "__pycache__/\n*.pyc\nhelix_batch.json\n"
+        ".helix/\n.helix_artifacts/\n.helix_opencode_state/\n__pycache__/\n*.pyc\nhelix_batch.json\n"
     )
     _git(root, "init", "-b", "main")
     _git(root, "add", ".")
@@ -436,9 +425,7 @@ def prepare_workshop(
     return root
 
 
-def ensure_model(
-    model: str = DEFAULT_MODEL, progress: Callable[[str], None] = print
-) -> None:
+def ensure_model(model: str = DEFAULT_MODEL, progress: Callable[[str], None] = print) -> None:
     """Start Lemonade and load the one model used by RAI and OpenCode."""
     if _mock_enabled():
         progress(f"{MOCK_LABEL}: model startup skipped")
@@ -454,26 +441,17 @@ def _literal_prompt(source: str) -> str:
         if not isinstance(node, (ast.Assign, ast.AnnAssign)):
             continue
         targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-        if any(
-            isinstance(target, ast.Name) and target.id == "SYSTEM_PROMPT"
-            for target in targets
-        ):
+        if any(isinstance(target, ast.Name) and target.id == "SYSTEM_PROMPT" for target in targets):
             value = ast.literal_eval(node.value)
             if isinstance(value, str) and value.strip():
                 return value
     raise ValueError("solver/prompt.py must define a literal non-empty SYSTEM_PROMPT")
 
 
-def _mock_evaluate(
-    task_id: str, prompt_source: str, tools_source: str
-) -> dict[str, Any]:
+def _mock_evaluate(task_id: str, prompt_source: str, tools_source: str) -> dict[str, Any]:
     prompt = _literal_prompt(prompt_source).lower()
     tree = ast.parse(tools_source, filename="solver/tools.py")
-    functions = {
-        node.name
-        for node in tree.body
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-    }
+    functions = {node.name for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
     signed_target = "abs(float(target_y))" not in tools_source
     correct_prompt = "negative y is left" in prompt
     markers = {
@@ -481,9 +459,7 @@ def _mock_evaluate(
         "correct_coordinate_prompt": correct_prompt,
         "signed_target_preserved": signed_target,
         "build_tools": "build_tools" in functions,
-        "required_names": (
-            "observe_world" in tools_source and "move_object" in tools_source
-        ),
+        "required_names": ("observe_world" in tools_source and "move_object" in tools_source),
     }
     weights = {
         "literal_prompt": 0.10,
@@ -492,9 +468,7 @@ def _mock_evaluate(
         "build_tools": 0.10,
         "required_names": 0.10,
     }
-    score = round(
-        sum(weights[name] for name, passed in markers.items() if passed), 6
-    )
+    score = round(sum(weights[name] for name, passed in markers.items() if passed), 6)
     return {
         "score": score,
         "passed": bool(correct_prompt and signed_target),
@@ -511,9 +485,7 @@ def _mock_evaluate(
     }
 
 
-def _live_evaluate(
-    task_id: str, prompt_source: str, tools_source: str
-) -> dict[str, Any]:
+def _live_evaluate(task_id: str, prompt_source: str, tools_source: str) -> dict[str, Any]:
     scenario = SCENARIOS[task_id]
     world = ToyWorld(scenario)
     error: str | None = None
@@ -565,19 +537,10 @@ def _live_evaluate(
 
     observed = any(event["tool"] == "observe_world" for event in world.events)
     moved = any(event["tool"] == "move_object" for event in world.events)
-    negative_move = any(
-        event["tool"] == "move_object" and float(event["target_y"]) < 0
-        for event in world.events
-    )
+    negative_move = any(event["tool"] == "move_object" and float(event["target_y"]) < 0 for event in world.events)
     task_passed = world.passed and error is None
     passed = task_passed and prompt_correct
-    score = 1.0 if passed else (
-        0.10
-        + 0.15 * observed
-        + 0.15 * moved
-        + 0.30 * negative_move
-        + 0.20 * prompt_correct
-    )
+    score = 1.0 if passed else (0.10 + 0.15 * observed + 0.15 * moved + 0.30 * negative_move + 0.20 * prompt_correct)
     score = round(min(float(score), 1.0), 6)
     return {
         "score": score,
@@ -790,11 +753,7 @@ def export_best(root: Path | str = DEFAULT_ROOT) -> Path:
         capture_output=True,
         text=True,
     )
-    return (
-        destination
-        if completed.returncode == 0 and destination.is_dir()
-        else root
-    )
+    return destination if completed.returncode == 0 and destination.is_dir() else root
 
 
 def summarize_run(root: Path | str = DEFAULT_ROOT) -> dict[str, Any]:

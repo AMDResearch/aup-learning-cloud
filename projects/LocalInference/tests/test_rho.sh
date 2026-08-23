@@ -38,12 +38,15 @@ from pathlib import Path
 import rho_demo
 from helix.config import load_config
 
-root = rho_demo.prepare_workshop()
+root = rho_demo.prepare_workshop(
+    support_files={"solver/strategy.py": "CLEARANCE = 0.1\n"}
+)
 required = {
     "solver/__init__.py",
     "solver/geometry.py",
     "solver/program.py",
     "solver/policy.py",
+    "solver/strategy.py",
     "API_REFERENCE.md",
     "probe.py",
     "opencode.json",
@@ -56,6 +59,7 @@ assert required <= {
 assert (root / ".git").is_dir()
 assert (root / "solver" / "program.py").read_text() == rho_demo.DEFAULT_PROGRAM
 assert "program.py" in (root / "solver" / "policy.py").read_text()
+assert (root / "solver" / "strategy.py").read_text() == "CLEARANCE = 0.1\n"
 
 provenance = json.loads((root / "provenance.json").read_text())
 assert provenance["source"] == "recorded_capx_generation"
@@ -82,6 +86,9 @@ assert set(config.evaluator.protected_files) >= {
     "provenance.json",
 }
 assert "max_generations = 2" in rho_demo.helix_config(2)
+four_generation_config = rho_demo.helix_config(4)
+assert "max_generations = 4" in four_generation_config
+assert "max_evaluations = 14" in four_generation_config
 custom_config = rho_demo.helix_config(
     objective="Repair another task.",
     background="Edit solver/program.py first.",
@@ -90,11 +97,11 @@ assert 'objective = """Repair another task."""' in custom_config
 assert 'background = """Edit solver/program.py first."""' in custom_config
 assert '"RHO_CONFIG_PATH"' in custom_config
 try:
-    rho_demo.helix_config(3)
+    rho_demo.helix_config(5)
 except ValueError:
     pass
 else:
-    raise AssertionError("more than two generations must be rejected")
+    raise AssertionError("more than four generations must be rejected")
 
 opencode = json.loads((root / "opencode.json").read_text())
 permissions = opencode["permission"]
@@ -111,6 +118,7 @@ assert list(permissions["bash"])[0] == "*"
 before = rho_demo.score_candidate(root, "train", timeout_seconds=5)
 assert before["reward"] == 0.0 and before["task_completed"] is False
 assert before["trial"] == 1
+assert before["elapsed_seconds"] >= 0.0
 assert "green_pose[0]" in before["traceback"]
 
 (root / "helix_batch.json").write_text('["0"]\n')
