@@ -50,6 +50,16 @@ DEFAULT_MODEL = "Gemma-4-E2B-it-GGUF"
 # The script notebook 03 sources in a terminal, reused here for its --serve-only half
 LEMONADE_ENV = Path(os.environ.get("LEMONADE_ENV", "/ryzers/lemonade_env.sh"))
 
+# Lemonade and CaP-X need different Hugging Face caches. The CaP-X interpreter
+# points HF_HOME at the baked perception weights; the Lemonade subprocess
+# explicitly switches to the image-baked GGUF cache.
+LEMONADE_CACHE = os.environ.get(
+    "LEMONADE_CACHE", "/opt/lemonade-cache/lemonade"
+)
+LEMONADE_HF_HOME = os.environ.get(
+    "LEMONADE_HF_HOME", "/opt/lemonade-cache/huggingface"
+)
+
 # Scratch space for the episode videos and the benchmark artifacts
 WORK = Path("/tmp/capx_notebook")
 
@@ -85,7 +95,7 @@ def ensure_lemonade(model: str = DEFAULT_MODEL, progress=print) -> None:
         progress(f"Lemonade is already up on port {LEMONADE_PORT}, loading {model}...")
     else:
         progress(f"Starting Lemonade and loading {model}...")
-    progress("  the first load downloads the GGUF and takes a few minutes")
+    progress("  loading from the image cache (custom models download on first use)")
 
     # Streamed rather than captured: the download prints nothing until it
     # finishes, and a silent cell for several minutes reads as a hang. stdin is
@@ -98,11 +108,23 @@ def ensure_lemonade(model: str = DEFAULT_MODEL, progress=print) -> None:
         stderr=subprocess.STDOUT,
         text=True,
         bufsize=1,
+        env={
+            **os.environ,
+            "HF_HOME": LEMONADE_HF_HOME,
+            "LEMONADE_CACHE": LEMONADE_CACHE,
+            "LEMONADE_HF_HOME": LEMONADE_HF_HOME,
+        },
     )
+    load_error = None
     for line in proc.stdout:
-        progress(f"  {line.rstrip()}")
+        rendered = line.rstrip()
+        progress(f"  {rendered}")
+        if "Error loading model:" in rendered:
+            load_error = rendered
     proc.wait()
 
+    if load_error is not None:
+        raise RuntimeError(load_error)
     if proc.returncode != 0 or not lemonade_alive():
         raise RuntimeError(
             f"{LEMONADE_ENV} --serve-only {model} failed (exit {proc.returncode}) "
@@ -122,9 +144,8 @@ def show_video(env, name: str = "notebook_run", width: int = 640) -> str | None:
     env.get_video_frames returns raw frames, so this is the encode-and-embed
     dance rather than anything about CaP-X.
     """
-    from IPython.display import Video, display
-
     from capx.utils.video_utils import _write_video
+    from IPython.display import Video, display
 
     frames = env.get_video_frames(clear=True)
     if not frames:

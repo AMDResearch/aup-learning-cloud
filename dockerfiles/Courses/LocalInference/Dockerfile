@@ -157,6 +157,39 @@ RUN add-apt-repository ppa:lemonade-team/stable \
     && apt-get install -y --no-install-recommends lemonade-server \
     && rm -rf /var/lib/apt/lists/*
 
+# Keep Lemonade's daemon metadata and Hugging Face model cache outside
+# /home/jovyan. JupyterHub mounts each user's PVC over that home directory,
+# which would otherwise hide image-baked weights and make every workshop user
+# download their own copy.
+ENV LEMONADE_CACHE=/opt/lemonade-cache/lemonade \
+    LEMONADE_HF_HOME=/opt/lemonade-cache/huggingface
+
+# Models exercised by the workshop notebooks and script-first demos. Download
+# only the quantizations Lemonade's built-in aliases use; pulling each complete
+# GGUF repository would include many redundant quantizations.
+RUN mkdir -p "${LEMONADE_CACHE}" "${LEMONADE_HF_HOME}" \
+    && HF_HOME="${LEMONADE_HF_HOME}" python3 - <<'PY'
+from huggingface_hub import snapshot_download
+
+models = {
+    "unsloth/gemma-4-E2B-it-GGUF": [
+        "config.json",
+        "gemma-4-E2B-it-Q4_K_M.gguf",
+        "mmproj-F16.gguf",
+    ],
+    "unsloth/gemma-4-E4B-it-GGUF": [
+        "config.json",
+        "gemma-4-E4B-it-Q4_K_M.gguf",
+        "mmproj-F16.gguf",
+    ],
+    "unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF": [
+        "Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf",
+    ],
+}
+for repository, files in models.items():
+    snapshot_download(repository, allow_patterns=files)
+PY
+
 # ---------------------------------------------------------------------------
 # CaP-X (Code-as-Policies eXtended) - the code-generating manipulation agent
 # behind 04_code_as_policies_with_capx.ipynb. Robosuite/MuJoCo rendered
@@ -214,14 +247,13 @@ RUN cp /opt/torch-constraints.txt /opt/capx-constraints.txt \
       >> /opt/capx-constraints.txt
 
 # Clone WITHOUT --recurse-submodules, then init only the submodules the
-# Robosuite eval path uses. This skips curobo (huge, with nested CUDA
-# submodules), b1k (BEHAVIOR/Isaac Sim), verl (RL training) and LIBERO-PRO -
-# none of them needed here, and a large time and space saving.
+# Robosuite eval path uses. SAM2 and OWLv2 come from Transformers, so the gated
+# SAM3 submodule is deliberately excluded along with curobo, b1k, verl and
+# LIBERO-PRO.
 RUN /usr/bin/python3 -m venv --system-site-packages ${CAPX_VENV} \
     && git clone https://github.com/capgym/cap-x ${CAPX_ROOT} \
     && git -C ${CAPX_ROOT} checkout ${CAPX_REF} \
     && git -C ${CAPX_ROOT} submodule update --init \
-      capx/third_party/sam3 \
       capx/third_party/contact_graspnet_pytorch \
       capx/third_party/robosuite
 
@@ -229,14 +261,10 @@ WORKDIR /ryzers/cap-x
 
 # Base runtime deps: the PyPI-resolvable subset of [project.dependencies],
 # minus torch/torchvision (kept from the base image) and the CUDA-only entries.
-# FIX: setuptools is pinned from both sides. Below 81 because sam3 imports
-# pkg_resources, dropped in 81. At or above 77 because robosuite pulls in
-# pynput -> evdev, whose pyproject.toml declares the PEP 639 SPDX form
-# (license = "BSD-3-Clause") that older setuptools rejects outright. The lower
-# bound is also what forces a copy into the venv: with a bare "<81" pip counts
-# the base image's system setuptools 68 as satisfying the requirement, leaves
-# the venv without its own, and the later --no-build-isolation builds pick up
-# that 68 and fail.
+# Setuptools 77+ is needed because Robosuite pulls in pynput -> evdev, whose
+# pyproject.toml uses the PEP 639 SPDX license form. The explicit lower bound
+# also forces a copy into the venv instead of reusing the base image's older
+# system setuptools.
 RUN PIP_CONSTRAINT=/opt/capx-constraints.txt ${CAPX_VENV}/bin/pip install --no-cache-dir \
       "gymnasium>=0.29" "tyro>=0.8.5" "pydantic>=2.7" "rich>=13.7" \
       "scipy>=1.12" "matplotlib>=3.10,<3.11" "imageio[ffmpeg]>=0.6.0" \
@@ -245,7 +273,7 @@ RUN PIP_CONSTRAINT=/opt/capx-constraints.txt ${CAPX_VENV}/bin/pip install --no-c
       "trimesh>=4.4.0" msgpack_numpy "ray==2.48.0" "mediapy>=1.2.5" \
       uvicorn fastapi "transformers<5.0" openai \
       "opencv-python-headless<4.13" "pillow>=10" cloudpickle \
-      "setuptools>=77,<81" \
+      "setuptools>=77" \
       "mujoco==3.5.0" "mink==1.1.0" "networkx==3.6.1" "pyglet==2.1.13" \
       "pyliblzfse==0.4.1" freetype-py six \
     && : "CaP-X overrides pyrender's stale PyOpenGL==3.1.0 metadata to 3.1.6." \
@@ -264,15 +292,10 @@ RUN PIP_CONSTRAINT=/opt/capx-constraints.txt ${CAPX_VENV}/bin/pip install --no-c
       "git+https://github.com/brentyi/jaxls.git@6fe7cf9d56223736b2c0272d080ec7346203c648" \
       "git+https://github.com/chungmin99/pyroki.git@95afccc22658c461ab1042a048ae4e9c24bc2a47"
 
-# Perception and simulator. All editable submodule installs use
-# --no-build-isolation because their setup.py imports numpy at build time,
-# mirroring CaP-X's uv `extra-build-dependencies`.
-# SAM3 is pure PyTorch and runs on ROCm torch. Its weights are gated on
-# HuggingFace, so they are pre-fetched with a token further down rather than
-# downloaded at runtime.
-RUN PIP_CONSTRAINT=/opt/capx-constraints.txt ${CAPX_VENV}/bin/pip install --no-cache-dir \
-      -e capx/third_party/sam3 \
-    && : "contact_graspnet_pytorch ships only a setup.py, so pip would take the" \
+# Perception and simulator. The ungated SAM2 and OWLv2 implementations are
+# already part of CaP-X and use Transformers. Editable submodule installs use
+# --no-build-isolation because their setup.py imports numpy at build time.
+RUN : "contact_graspnet_pytorch ships only a setup.py, so pip would take the" \
          "legacy 'setup.py develop' path. Setuptools >=77 implements that by" \
          "re-invoking pip in a subprocess WITHOUT --no-build-isolation, which" \
          "then cannot see numpy. --use-pep517 keeps the build in this env." \
@@ -285,6 +308,189 @@ RUN PIP_CONSTRAINT=/opt/capx-constraints.txt ${CAPX_VENV}/bin/pip install --no-c
          "can change a docstring and see the agent's prompt change." \
     && ${CAPX_VENV}/bin/pip install --no-cache-dir --no-deps --no-build-isolation -e .
 
+# CaP-X ships both perception paths but registers SAM3 by default. Make the
+# workshop's API and four live scenarios use OWLv2 for text grounding followed
+# by box-prompted SAM2 segmentation.
+RUN ${CAPX_VENV}/bin/python - <<'PY'
+from pathlib import Path
+
+registry = Path("capx/integrations/__init__.py")
+text = registry.read_text()
+old = 'register_api("FrankaControlApi", lambda env: FrankaControlApi(env, use_sam3=True))'
+new = 'register_api("FrankaControlApi", lambda env: FrankaControlApi(env, use_sam3=False))'
+assert text.count(old) == 1
+text = text.replace(old, new)
+old = (
+    "lambda env: FrankaControlSpillWipeApi("
+    "env, tcp_offset=[0.0, 0.0, -0.0158], use_sam3=True),"
+)
+new = (
+    "lambda env: FrankaControlSpillWipeApi("
+    "env, tcp_offset=[0.0, 0.0, -0.0158], use_sam3=False),"
+)
+assert text.count(old) == 1
+registry.write_text(text.replace(old, new))
+
+# ROCm takes several minutes to transfer these checkpoints to the APU when
+# their CPU tensors are float32. Stage them as float16, then restore float32
+# on-device; the GPU-side conversion is effectively instantaneous and retains
+# FP32 execution. The workshop's held-out rollouts validate the staged weights.
+owl_server = Path("capx/serving/launch_owlvit_server.py")
+text = owl_server.read_text()
+old = '    try:\n        if is_v2:\n'
+new = (
+    '    load_dtype = torch.float16 if device.startswith("cuda") else torch.float32\n\n'
+    '    try:\n'
+    '        if is_v2:\n'
+)
+assert text.count(old) == 1
+text = text.replace(old, new)
+for model_class in ("Owlv2ForObjectDetection", "OwlViTForObjectDetection"):
+    old = f"_MODEL = {model_class}.from_pretrained(model_name)"
+    new = f"_MODEL = {model_class}.from_pretrained(model_name, dtype=load_dtype)"
+    assert text.count(old) == 1
+    text = text.replace(old, new)
+old = "        _MODEL = _MODEL.to(device)\n        _MODEL.eval()\n"
+new = (
+    "        _MODEL = _MODEL.to(device)\n"
+    '        if device.startswith("cuda"):\n'
+    "            _MODEL = _MODEL.float()\n"
+    "        _MODEL.eval()\n"
+)
+assert text.count(old) == 1
+owl_server.write_text(text.replace(old, new))
+
+sam_server = Path("capx/serving/launch_sam2_server.py")
+text = sam_server.read_text()
+old = "    # Initialize Pipeline\n"
+new = (
+    '    load_dtype = torch.float16 if device_arg.startswith("cuda") else torch.float32\n\n'
+    "    # Initialize Pipeline\n"
+)
+assert text.count(old) == 1
+text = text.replace(old, new)
+old = '    _GENERATOR = pipeline("mask-generation", model=model_name, device=device_arg)\n'
+new = (
+    '    _GENERATOR = pipeline(\n'
+    '        "mask-generation", model=model_name, device=device_arg, dtype=load_dtype\n'
+    "    )\n"
+)
+assert text.count(old) == 1
+text = text.replace(old, new)
+old = "        _MODEL = Sam2Model.from_pretrained(model_name).to(device_arg)\n"
+new = "        _MODEL = Sam2Model.from_pretrained(model_name, dtype=load_dtype).to(device_arg)\n"
+assert text.count(old) == 1
+text = text.replace(old, new)
+old = "    elif hasattr(_MODEL, \"to\"):\n        _MODEL = _MODEL.to(device_arg)\n\n"
+new = (
+    '    elif hasattr(_MODEL, "to"):\n'
+    "        _MODEL = _MODEL.to(device_arg)\n"
+    '    if device_arg.startswith("cuda"):\n'
+    "        _MODEL = _MODEL.float()\n\n"
+)
+assert text.count(old) == 1
+sam_server.write_text(text.replace(old, new))
+
+old_server = """  - _target_: capx.serving.launch_sam3_server.main
+    device: cuda
+    port: 8114
+    host: 127.0.0.1
+"""
+new_servers = """  - _target_: capx.serving.launch_owlvit_server.main
+    model_name: google/owlv2-large-patch14-ensemble
+    device: cuda
+    port: 8117
+    host: 127.0.0.1
+
+  - _target_: capx.serving.launch_sam2_server.main
+    model_name: facebook/sam2.1-hiera-large
+    device: cuda
+    port: 8113
+    host: 127.0.0.1
+"""
+fast_servers = """  - _target_: capx.serving.launch_owlvit_server.main
+    model_name: google/owlv2-base-patch16-ensemble
+    device: cuda
+    port: 8117
+    host: 127.0.0.1
+
+  - _target_: capx.serving.launch_sam2_server.main
+    model_name: facebook/sam2.1-hiera-small
+    device: cuda
+    port: 8113
+    host: 127.0.0.1
+"""
+configs = [
+    "env_configs/cube_lifting/franka_robosuite_cube_lifting.yaml",
+    "env_configs/cube_restack/franka_robosuite_cube_restack.yaml",
+    "env_configs/cube_stack/franka_robosuite_cube_stack.yaml",
+    "env_configs/spill_wipe/franka_robosuite_spill_wipe.yaml",
+]
+for config_name in configs:
+    config = Path(config_name)
+    text = config.read_text()
+    assert text.count(old_server) == 1, config
+    config.write_text(text.replace(old_server, new_servers))
+    fast_config = config.with_name(f"{config.stem}_fast{config.suffix}")
+    fast_config.write_text(text.replace(old_server, fast_servers))
+PY
+
+# Pre-fetch the default large and optional fast perception profiles.
+# Excluding duplicate .pt/.bin files keeps both profiles reasonably compact.
+RUN mkdir -p "${CAPX_CACHE}" \
+    && HF_HOME="${CAPX_CACHE}" ${CAPX_VENV}/bin/python - <<'PY'
+from huggingface_hub import snapshot_download
+
+snapshot_download(
+    "facebook/sam2.1-hiera-small",
+    allow_patterns=[
+        "config.json",
+        "model.safetensors",
+        "preprocessor_config.json",
+        "processor_config.json",
+        "*.yaml",
+        "video_preprocessor_config.json",
+    ],
+)
+snapshot_download(
+    "google/owlv2-base-patch16-ensemble",
+    allow_patterns=[
+        "added_tokens.json",
+        "config.json",
+        "merges.txt",
+        "model.safetensors",
+        "preprocessor_config.json",
+        "special_tokens_map.json",
+        "tokenizer_config.json",
+        "vocab.json",
+    ],
+)
+snapshot_download(
+    "facebook/sam2.1-hiera-large",
+    allow_patterns=[
+        "config.json",
+        "model.safetensors",
+        "preprocessor_config.json",
+        "processor_config.json",
+        "*.yaml",
+        "video_preprocessor_config.json",
+    ],
+)
+snapshot_download(
+    "google/owlv2-large-patch14-ensemble",
+    allow_patterns=[
+        "added_tokens.json",
+        "config.json",
+        "merges.txt",
+        "model.safetensors",
+        "preprocessor_config.json",
+        "special_tokens_map.json",
+        "tokenizer_config.json",
+        "vocab.json",
+    ],
+)
+PY
+
 # Loading the perception models onto the GPU can take several minutes on a cold
 # start. Upstream begins trials after 120 seconds even when those services are
 # still unavailable, which fails the first trials of every run.
@@ -293,31 +499,9 @@ RUN sed -i \
       capx/envs/runner.py \
     && grep -q "wait_timeout: float = 900.0" capx/envs/runner.py
 
-# ---------------------------------------------------------------------------
-# PASTE YOUR HUGGINGFACE TOKEN HERE TO BUILD, AND CLEAR IT BEFORE COMMITTING.
-# A build arg ends up in the image metadata, so this is for local builds only.
-# The committed value must stay empty; export HF_TOKEN and let build.sh pass
-# --secret id=hf_token instead, which keeps the token out of every layer.
-# ---------------------------------------------------------------------------
-ARG HF_TOKEN=""
-
-# Pre-fetch the SAM3 weights so a workshop does not spend its first ten minutes
-# downloading them, and so nothing at runtime needs a token. They cannot live
-# under /home/jovyan: the Hub mounts a per-user volume there, which would hide
-# anything baked in. facebook/sam3 is gated, so the build needs an account with
-# approved access.
-RUN --mount=type=secret,id=hf_token,required=false \
-    HF_TOKEN="$(cat /run/secrets/hf_token 2>/dev/null || echo "${HF_TOKEN}")" \
-    HF_HOME=${CAPX_CACHE} ${CAPX_VENV}/bin/python -c \
-      "import os; \
-from huggingface_hub import snapshot_download; \
-assert os.environ.get('HF_TOKEN'), 'facebook/sam3 is gated - set HF_TOKEN, see the note above'; \
-snapshot_download('facebook/sam3', ignore_patterns=['*.msgpack', '*.h5', '*.onnx', '*tf_model*', '*flax*'])"
-
 # The CaP-X kernel. Its `env` is why the notebook needs no setup cell: the
 # perception servers and launch.py are children of the kernel, so they inherit
-# the weight cache and the headless GL backend from here. HF_HOME is scoped to
-# this kernel so that Lemonade's own downloads keep landing in the user volume.
+# the baked perception cache and the headless GL backend from here.
 RUN mkdir -p /usr/local/share/jupyter/kernels/capx \
     && printf '%s\n' \
       '{' \
@@ -386,15 +570,18 @@ RUN ln -s /ryzers/notebooks/tests/test_ros.sh /ryzers/test_ros.sh \
     && ln -s /ryzers/notebooks/tests/test_lemonade-sdk.sh /ryzers/test_lemonade-sdk.sh \
     && ln -s /ryzers/notebooks/tests/test_capx.sh /ryzers/test_capx.sh \
     && ln -s /ryzers/notebooks/tests/test_rho.sh /ryzers/test_rho.sh \
+    && ln -s /ryzers/notebooks/tests/test_rai_toy_evolution.sh /ryzers/test_rai_toy_evolution.sh \
     && chmod +x \
       /ryzers/lemonade_env.sh \
       /ryzers/manipulation_demo_headless.sh \
       /ryzers/test_rho.sh \
+      /ryzers/test_rai_toy_evolution.sh \
     && chown -R jovyan:100 \
       /home/jovyan/.cache \
       /home/jovyan/.streamlit \
       /home/jovyan/.asoundrc \
       /opt/capx-cache \
+      /opt/lemonade-cache \
       /ryzers \
       /tmp/runtime-jovyan \
     && printf '%s\n' \
@@ -408,6 +595,8 @@ RUN ln -s /ryzers/notebooks/tests/test_ros.sh /ryzers/test_ros.sh \
 
 ENV HOME=/home/jovyan \
     HF_HOME=/home/jovyan/.cache/huggingface \
+    LEMONADE_CACHE=/opt/lemonade-cache/lemonade \
+    LEMONADE_HF_HOME=/opt/lemonade-cache/huggingface \
     XDG_RUNTIME_DIR=/tmp/runtime-jovyan
 
 USER jovyan

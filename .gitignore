@@ -387,6 +387,7 @@ vite.config.ts.timestamp-*
 
 # Project specific
 dockerfiles/Courses/DL/data/FashionMNIST/raw/
+projects/LocalInference/experiment_results/
 *.vsix
 
 # Local config overrides
