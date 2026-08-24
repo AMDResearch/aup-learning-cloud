@@ -7,6 +7,8 @@ echo "================================"
 
 # Use the same image-baked model as notebooks 02-04.
 MODEL="${LEMONADE_TEST_MODEL:-Gemma-4-E2B-it-GGUF}"
+WORKSHOP_CODER_MODEL="user.Qwen3-Coder-30B-A3B-Instruct-Q4_K_M"
+WORKSHOP_CODER_DISPLAY_NAME="${WORKSHOP_CODER_MODEL#user.}"
 LEMONADE_CACHE="${LEMONADE_CACHE:-/opt/lemonade-cache/lemonade}"
 LEMONADE_HF_HOME="${LEMONADE_HF_HOME:-/opt/lemonade-cache/huggingface}"
 export HF_HOME="${LEMONADE_HF_HOME}"
@@ -48,6 +50,20 @@ done
 echo ""
 echo "Loading image-cached model $MODEL..."
 test -d "${LEMONADE_HF_HOME}/hub/models--unsloth--gemma-4-E2B-it-GGUF"
+python3 - "${LEMONADE_HF_HOME}" <<'PY'
+import sys
+from pathlib import Path
+
+cache = Path(sys.argv[1])
+matches = list(
+    cache.glob(
+        "hub/models--unsloth--Qwen3-Coder-30B-A3B-Instruct-GGUF/"
+        "snapshots/*/Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf"
+    )
+)
+assert matches, "workshop Qwen3-Coder Q4_K_M file is not image-cached"
+PY
+lemonade list | grep -q "^${WORKSHOP_CODER_DISPLAY_NAME}[[:space:]]"
 lemonade load "$MODEL"
 
 sleep 2

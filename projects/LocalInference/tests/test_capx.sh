@@ -2,7 +2,7 @@
 # Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
 # SPDX-License-Identifier: MIT
 #
-# Test for the CaP-X stack used by 04_code_as_policies_with_capx.ipynb.
+# Test for the CaP-X stack used by 3_code_as_policy.ipynb.
 # Three stages:
 #   1. Sign-of-life: ROCm torch sees the GPU, the stack and Robosuite import,
 #      MuJoCo renders headless through EGL, and the ungated OWLv2 + SAM2
@@ -151,7 +151,7 @@ else
 fi
 
 echo "================ [3/3] LLM eval (optional) ================"
-# Default to the Lemonade server from notebook 02 when it is already serving.
+# Default to the Lemonade server from notebook 1 when it is already serving.
 if [ -z "${CAPX_LLM_SERVER_URL:-}" ] && lemonade status >/dev/null 2>&1; then
     CAPX_LLM_SERVER_URL="http://localhost:13305/api/v1/chat/completions"
     CAPX_LLM_MODEL="${CAPX_LLM_MODEL:-Gemma-4-E2B-it-GGUF}"

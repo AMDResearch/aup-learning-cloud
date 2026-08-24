@@ -6,7 +6,7 @@
 # Serving the model is useful on its own, without any of the RAI or ROS setup
 # that follows it, so that half can be run in a subshell instead:
 #     bash lemonade_env.sh --serve-only [MODEL]
-# That is what notebook 04 does. It skips the config.toml rewrite and the ROS
+# That is what notebook 3 does. It skips the config.toml rewrite and the ROS
 # overlay below, which belong to RAI and would put the wrong cwd and the wrong
 # Python packages on the CaP-X kernel.
 

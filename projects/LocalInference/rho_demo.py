@@ -41,7 +41,7 @@ CONFIG_PATH = os.environ.get(
 )
 WORKSHOP_ROOT = Path(os.environ.get("RHO_WORKSHOP_ROOT", "/tmp/rho_workshop"))
 CANDIDATE_ROOT = WORKSHOP_ROOT / "candidate"
-VIDEO_ROOT = WORKSHOP_ROOT / "videos"
+VIDEO_ROOT = Path(os.environ.get("RHO_VIDEO_ROOT", str(WORKSHOP_ROOT / "videos")))
 SERVICE_PORTS = (8113, 8115, 8116, 8117)
 DEFAULT_TIMEOUT = 480
 EVALUATION_TIMEOUT = 120
@@ -190,7 +190,7 @@ OPENCODE_CONFIG = {
         "todowrite": "deny",
         "bash": {
             "*": "deny",
-            "/opt/capx-venv/bin/python probe.py*": "allow",
+            "RHO_EVAL_ORIGIN=agent-self-check /opt/capx-venv/bin/python probe.py*": "allow",
             "/opt/capx-venv/bin/python -m py_compile solver/*.py": "allow",
             "git diff*": "allow",
             "git status*": "allow",
@@ -223,7 +223,8 @@ Do not call skills, todo tools, or repeatedly re-read the same code. Inspect
 `git diff` after the edit. Do not alter evaluation, configuration, permissions,
 or files outside this repository. Run
 `/opt/capx-venv/bin/python -m py_compile solver/*.py` and
-`/opt/capx-venv/bin/python probe.py` before finishing."""
+`RHO_EVAL_ORIGIN=agent-self-check /opt/capx-venv/bin/python probe.py`
+before finishing."""
 
 
 def helix_config(
@@ -252,6 +253,7 @@ passthrough_env = [
   "PYOPENGL_PLATFORM",
   "CAPX_ROOT",
   "RHO_CONFIG_PATH",
+  "RHO_PROGRESS_FILE",
   "XDG_RUNTIME_DIR",
   "RHO_MOCK_EVAL",
 ]
@@ -313,29 +315,80 @@ class BoundedRun:
 
 
 class _NotebookHelixProgress:
-    """Collapse Rich terminal frames into one updating notebook status."""
+    """Collapse Rich frames and evaluator events into one notebook status."""
 
     _ansi = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 
-    def __init__(self) -> None:
+    def __init__(self, evaluation_log: Path) -> None:
         from IPython.display import HTML, display
 
         self._HTML = HTML
         self._handle = display(HTML("HELIX: starting…"), display_id=True)
         self._generation = "0/1"
         self._phase = "Initializing"
+        self._phase_started = time.monotonic()
         self._evaluations = 0
         self._max_evaluations = 8
+        self._evaluation_log = evaluation_log
+        self._evaluation_log_offset = 0
+        self._active_evaluation: dict[str, Any] | None = None
+        self._evaluation_history: list[dict[str, Any]] = []
+        self._helix_evaluations = 0
+        self._agent_self_checks = 0
+        self._last_tick_second = -1
         self._last_html = ""
         self._render()
 
-    def _render(self, message: str | None = None, *, color: str = "#2563eb") -> None:
+    def _render(
+        self,
+        message: str | None = None,
+        *,
+        color: str = "#2563eb",
+        complete: bool = False,
+    ) -> None:
         detail = escape(message or self._phase)
+        evaluation_details = ""
+        if self._evaluation_history:
+            rows = []
+            for result in self._evaluation_history[-3:]:
+                solved = bool(result.get("task_completed"))
+                status = "solved" if solved else "not solved"
+                status_color = "#15803d" if solved else "#b45309"
+                task = (
+                    f"{escape(str(result['task']))} · "
+                    if result.get("task")
+                    else ""
+                )
+                rows.append(
+                    f'<span style="color:{status_color}">●</span> '
+                    f"{escape(str(result['_display_label']))}: "
+                    f"{task}"
+                    f"{escape(str(result.get('split', 'train')))} "
+                    f"trial {escape(str(result.get('trial', '?')))} · "
+                    f"reward {float(result.get('reward', 0.0)):.3f} · {status} · "
+                    f"{float(result.get('elapsed_seconds') or 0.0):.1f}s"
+                )
+            evaluation_details = (
+                '<div style="margin-top:6px;color:#4b5563;font-size:0.92em">'
+                + "<br>".join(rows)
+                + "</div>"
+            )
+        if complete:
+            progress = (
+                '<progress value="1" max="1" style="width:320px"></progress> '
+                f"{self._evaluations} HELIX evaluations used "
+                f"({self._max_evaluations} maximum)"
+            )
+        else:
+            progress = (
+                f'<progress value="{self._evaluations}" max="{self._max_evaluations}" '
+                'style="width:320px"></progress> '
+                f"{self._evaluations} HELIX evaluations used "
+                f"({self._max_evaluations} maximum)"
+            )
         markup = (
             f"<b>HELIX generation {escape(self._generation)}</b> — {detail}<br>"
-            f'<progress value="{self._evaluations}" max="{self._max_evaluations}" '
-            'style="width:320px"></progress> '
-            f"{self._evaluations}/{self._max_evaluations} evaluations"
+            f"{progress}{evaluation_details}"
         )
         if color != "#2563eb":
             markup = f'<span style="color:{color}">{markup}</span>'
@@ -344,9 +397,88 @@ class _NotebookHelixProgress:
                 self._handle.update(self._HTML(markup))
             self._last_html = markup
 
+    def _poll_evaluations(self) -> str | None:
+        try:
+            with self._evaluation_log.open(encoding="utf-8") as stream:
+                stream.seek(self._evaluation_log_offset)
+                lines = stream.readlines()
+                self._evaluation_log_offset = stream.tell()
+        except (FileNotFoundError, OSError):
+            return None
+
+        message = None
+        for line in lines:
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if event.get("event") == "started":
+                self._active_evaluation = event
+                self._last_tick_second = -1
+            elif event.get("event") == "completed":
+                self._active_evaluation = None
+                if event.get("origin") == "agent-self-check":
+                    self._agent_self_checks += 1
+                    event["_display_label"] = (
+                        f"Agent self-check {self._agent_self_checks}"
+                    )
+                else:
+                    self._helix_evaluations += 1
+                    event["_display_label"] = (
+                        f"HELIX eval {self._helix_evaluations}"
+                    )
+                    self._evaluations = max(
+                        self._evaluations, self._helix_evaluations
+                    )
+                self._evaluation_history.append(event)
+                outcome = "solved" if event.get("task_completed") else "not solved"
+                message = (
+                    f"{event['_display_label']} complete · "
+                    f"reward {float(event.get('reward', 0.0)):.3f} · {outcome}"
+                )
+        return message
+
+    def tick(self) -> None:
+        evaluation_message = self._poll_evaluations()
+        if evaluation_message:
+            self._render(evaluation_message)
+            return
+
+        if self._active_evaluation is not None:
+            elapsed = max(
+                0, int(time.time() - float(self._active_evaluation["started_at"]))
+            )
+            if elapsed != self._last_tick_second:
+                self._last_tick_second = elapsed
+                if self._active_evaluation.get("origin") == "agent-self-check":
+                    label = f"Agent self-check {self._agent_self_checks + 1}"
+                else:
+                    label = f"HELIX eval {self._helix_evaluations + 1}"
+                task = (
+                    f"{self._active_evaluation['task']} · "
+                    if self._active_evaluation.get("task")
+                    else ""
+                )
+                self._render(
+                    f"{label} running · "
+                    f"{task}"
+                    f"{self._active_evaluation.get('split', 'train')} "
+                    f"trial {self._active_evaluation.get('trial', '?')} · "
+                    f"{elapsed}s elapsed"
+                )
+            return
+
+        elapsed = int(time.monotonic() - self._phase_started)
+        if elapsed != self._last_tick_second:
+            self._last_tick_second = elapsed
+            self._render(f"{self._phase} · {elapsed}s elapsed")
+
     def __call__(self, raw_line: str) -> None:
+        evaluation_message = self._poll_evaluations()
         line = self._ansi.sub("", raw_line).replace("\r", "\n").splitlines()[-1:]
         if not line:
+            if evaluation_message:
+                self._render(evaluation_message)
             return
         text = line[0].strip()
 
@@ -355,8 +487,12 @@ class _NotebookHelixProgress:
             self._generation = f"{generation.group(1)}/{generation.group(2)}"
 
         phase = re.search(r"Status:\s*([^│]+)", text)
-        if phase:
-            self._phase = phase.group(1).strip()
+        if phase and self._active_evaluation is None:
+            new_phase = phase.group(1).strip()
+            if new_phase != self._phase:
+                self._phase = new_phase
+                self._phase_started = time.monotonic()
+                self._last_tick_second = -1
 
         budget = re.search(r"(\d+)/(\d+)\s+evals", text)
         if budget:
@@ -374,11 +510,29 @@ class _NotebookHelixProgress:
             if prefix in text:
                 message = text[text.index(prefix) :].strip()
                 break
-        self._render(message)
+        if evaluation_message:
+            self._render(evaluation_message)
+        elif self._active_evaluation is not None:
+            # Rich redraws its whole terminal frame while an evaluation runs.
+            # Keep the side-channel evaluation status authoritative instead of
+            # alternating it with stale "Applying mutation" frame lines.
+            self.tick()
+        elif message is not None:
+            self._render(message)
+        else:
+            # Keep the elapsed-time rendering authoritative between meaningful
+            # HELIX events. Rich redraws otherwise remove and restore the
+            # seconds suffix several times per second.
+            self.tick()
 
     def finish(self, result: BoundedRun) -> None:
+        self._poll_evaluations()
         if result.returncode == 0:
-            self._render(f"complete in {result.elapsed_seconds:.1f}s", color="#15803d")
+            self._render(
+                f"complete in {result.elapsed_seconds:.1f}s",
+                color="#15803d",
+                complete=True,
+            )
         elif result.timed_out:
             self._render(
                 f"stopped at the {result.elapsed_seconds:.0f}s deadline",
@@ -388,13 +542,13 @@ class _NotebookHelixProgress:
             self._render(f"failed (exit {result.returncode})", color="#b91c1c")
 
 
-def _notebook_progress() -> _NotebookHelixProgress | None:
+def _notebook_progress(evaluation_log: Path) -> _NotebookHelixProgress | None:
     try:
         from IPython import get_ipython
 
         shell = get_ipython()
         if shell is not None and shell.__class__.__name__ == "ZMQInteractiveShell":
-            return _NotebookHelixProgress()
+            return _NotebookHelixProgress(evaluation_log)
     except Exception:
         pass
     return None
@@ -404,9 +558,9 @@ def _safe_reset(path: Path) -> None:
     resolved = path.resolve()
     if not resolved.exists():
         return
-    allowed = WORKSHOP_ROOT.resolve()
-    if resolved != allowed and allowed not in resolved.parents:
-        raise ValueError(f"refusing to remove path outside {allowed}: {resolved}")
+    temporary_root = Path("/tmp").resolve()
+    if resolved == temporary_root or temporary_root not in resolved.parents:
+        raise ValueError(f"refusing to remove non-workshop path: {resolved}")
     shutil.rmtree(resolved)
 
 
@@ -608,11 +762,15 @@ def service_status() -> dict[int, bool]:
     return {port: _port_open(port) for port in SERVICE_PORTS}
 
 
-def ensure_services(progress: Callable[[str], None] = print) -> list[Any]:
+def ensure_services(
+    progress: Callable[[str], None] = print,
+    *,
+    model: str = MODEL,
+) -> list[Any]:
     """Start/reuse Lemonade, OWLv2, SAM2, Contact-GraspNet, and PyRoKi."""
     from capx_demo import SERVICE_LOG, ensure_lemonade, quiet_output
 
-    lemonade_seconds = ensure_lemonade(MODEL, progress=progress)
+    lemonade_seconds = ensure_lemonade(model, progress=progress)
     started = time.monotonic()
     old_cwd = Path.cwd()
     try:
@@ -690,6 +848,7 @@ def run_bounded(
     timeout_seconds: float,
     env: dict[str, str] | None = None,
     progress: Callable[[str], None] | None = None,
+    heartbeat: Callable[[], None] | None = None,
 ) -> BoundedRun:
     """Run a command in its own process group and enforce a wall-clock limit."""
     started = time.monotonic()
@@ -716,14 +875,25 @@ def run_bounded(
     timed_out = False
     stream_done = False
     deadline = started + timeout_seconds
+    process_exited_at: float | None = None
 
     while proc.poll() is None or not stream_done:
+        if proc.poll() is not None:
+            if process_exited_at is None:
+                process_exited_at = time.monotonic()
+            elif not stream_done and time.monotonic() - process_exited_at >= 1.0:
+                # A detached descendant can inherit stdout after the bounded
+                # process group exits. Do not let that orphaned pipe defeat the
+                # wall-clock limit.
+                break
         if proc.poll() is None and time.monotonic() >= deadline:
             timed_out = True
             _terminate_group(proc)
         try:
             line = output_queue.get(timeout=0.1)
         except queue.Empty:
+            if heartbeat is not None:
+                heartbeat()
             continue
         if line is None:
             stream_done = True
@@ -732,6 +902,7 @@ def run_bounded(
         if progress is not None:
             progress(line.rstrip())
 
+    proc.stdout.close()
     return BoundedRun(
         returncode=124 if timed_out else int(proc.returncode or 0),
         timed_out=timed_out,
@@ -743,13 +914,13 @@ def run_bounded(
 def _trial_id(candidate_root: Path, split: str, example_id: str) -> int:
     if split not in {"train", "val"}:
         raise ValueError(f"unknown evaluation split: {split}")
-    int(example_id)  # HELIX IDs remain positional strings, with one fixed item.
     override = os.environ.get("RHO_TRIAL_ID")
     if override is not None:
         trial = int(override)
         if trial < 0:
             raise ValueError("trial override must be non-negative")
         return trial
+    int(example_id)  # The legacy single-task evaluator uses positional IDs.
     path = candidate_root / "provenance.json"
     provenance = json.loads(path.read_text()) if path.exists() else {}
     key = "training_trial" if split == "train" else "heldout_trial"
@@ -843,17 +1014,24 @@ def _live_evaluation(
     example_id: str,
     *,
     capture: bool,
+    config_path: str = CONFIG_PATH,
+    policy_path: str = "solver/program.py",
 ) -> dict[str, Any]:
     old_cwd = Path.cwd()
+    old_sys_path = list(sys.path)
     env = None
     try:
+        # Candidate policies may import editable repository modules such as
+        # solver.geometry and solver.runtime. Keep those imports available
+        # after changing into the CaP-X source tree for simulator setup.
+        sys.path.insert(0, str(candidate_root.resolve()))
         os.chdir(CAPX_ROOT)
         from capx.envs.configs.instantiate import instantiate
         from capx.envs.launch import LaunchArgs
         from capx.utils.launch_utils import _load_config
 
         args = LaunchArgs(
-            config_path=CONFIG_PATH,
+            config_path=config_path,
             model=MODEL,
             server_url="http://127.0.0.1:13305/api/v1/chat/completions",
             temperature=0.2,
@@ -866,7 +1044,7 @@ def _live_evaluation(
 
         if capture:
             env.enable_video_capture()
-        program = (candidate_root / "solver" / "program.py").read_text()
+        program = (candidate_root / policy_path).read_text()
         captured_stdout = io.StringIO()
         captured_stderr = io.StringIO()
         try:
@@ -878,6 +1056,7 @@ def _live_evaluation(
             stderr = captured_stderr.getvalue()
             return {
                 "reward": 0.0,
+                "raw_reward": 0.0,
                 "task_completed": False,
                 "split": split,
                 "trial": trial,
@@ -943,17 +1122,33 @@ def _live_evaluation(
     finally:
         if env is not None and hasattr(env, "close"):
             env.close()
+        sys.path[:] = old_sys_path
         os.chdir(old_cwd)
 
 
-def _worker_result(candidate_root: Path, split: str, example_id: str, capture: bool) -> dict[str, Any]:
+def _worker_result(
+    candidate_root: Path,
+    split: str,
+    example_id: str,
+    capture: bool,
+    config_path: str = CONFIG_PATH,
+    policy_path: str = "solver/program.py",
+) -> dict[str, Any]:
     try:
         if os.environ.get("RHO_MOCK_EVAL") == "1":
             return _mock_evaluation(candidate_root, split, example_id)
-        return _live_evaluation(candidate_root, split, example_id, capture=capture)
+        return _live_evaluation(
+            candidate_root,
+            split,
+            example_id,
+            capture=capture,
+            config_path=config_path,
+            policy_path=policy_path,
+        )
     except Exception:
         return {
             "reward": 0.0,
+            "raw_reward": 0.0,
             "task_completed": False,
             "split": split,
             "trial": _trial_id(candidate_root, split, example_id),
@@ -973,6 +1168,8 @@ def score_candidate(
     trial: int | None = None,
     capture: bool = False,
     timeout_seconds: float = EVALUATION_TIMEOUT,
+    config_path: str = CONFIG_PATH,
+    policy_path: str = "solver/program.py",
 ) -> dict[str, Any]:
     """Evaluate one layout in a killable child without modifying the candidate."""
     candidate_root = Path(candidate_root).resolve()
@@ -980,6 +1177,7 @@ def score_candidate(
         raise ValueError("trial must be non-negative")
     selected_trial = int(trial) if trial is not None else _trial_id(candidate_root, split, example_id)
     worker_env = os.environ.copy()
+    worker_env["RHO_VIDEO_ROOT"] = str(VIDEO_ROOT)
     if trial is not None:
         worker_env["RHO_TRIAL_ID"] = str(trial)
     worker = run_bounded(
@@ -991,6 +1189,8 @@ def score_candidate(
             split,
             str(example_id),
             "1" if capture else "0",
+            config_path,
+            policy_path,
         ],
         cwd=candidate_root,
         timeout_seconds=timeout_seconds,
@@ -999,6 +1199,7 @@ def score_candidate(
     if worker.timed_out:
         return {
             "reward": 0.0,
+            "raw_reward": 0.0,
             "task_completed": False,
             "split": split,
             "trial": selected_trial,
@@ -1022,6 +1223,7 @@ def score_candidate(
             return result
     return {
         "reward": 0.0,
+        "raw_reward": 0.0,
         "task_completed": False,
         "split": split,
         "trial": selected_trial,
@@ -1035,6 +1237,18 @@ def score_candidate(
     }
 
 
+def _append_progress_event(event: Mapping[str, Any]) -> None:
+    path_value = os.environ.get("RHO_PROGRESS_FILE")
+    if not path_value:
+        return
+    try:
+        with Path(path_value).open("a", encoding="utf-8") as stream:
+            stream.write(json.dumps(dict(event), separators=(",", ":")) + "\n")
+    except OSError:
+        # Notebook feedback must never make an evaluation fail.
+        pass
+
+
 def evaluate_cli() -> int:
     """Emit HELIX's exact positional per-example result protocol."""
     root = Path.cwd()
@@ -1044,9 +1258,36 @@ def evaluate_cli() -> int:
         raise ValueError("helix_batch.json must be a JSON list of strings")
     split = os.environ.get("HELIX_SPLIT", "train")
     timeout = float(os.environ.get("RHO_EVAL_TIMEOUT", EVALUATION_TIMEOUT))
+    origin = os.environ.get("RHO_EVAL_ORIGIN", "helix")
     payload: list[list[Any]] = []
     for example_id in ids:
+        trial = _trial_id(root, split, example_id)
+        evaluation_id = f"{os.getpid()}-{time.time_ns()}-{example_id}"
+        _append_progress_event(
+            {
+                "event": "started",
+                "evaluation_id": evaluation_id,
+                "started_at": time.time(),
+                "origin": origin,
+                "split": split,
+                "trial": trial,
+            }
+        )
         result = score_candidate(root, split, example_id, timeout_seconds=timeout)
+        _append_progress_event(
+            {
+                "event": "completed",
+                "evaluation_id": evaluation_id,
+                "origin": origin,
+                "split": result["split"],
+                "trial": result["trial"],
+                "reward": result["reward"],
+                "raw_reward": result.get("raw_reward", result["reward"]),
+                "task_completed": result["task_completed"],
+                "timed_out": result.get("timed_out", False),
+                "elapsed_seconds": result.get("elapsed_seconds"),
+            }
+        )
         side_info = {
             "reward": result["reward"],
             "raw_reward": result.get("raw_reward", result["reward"]),
@@ -1074,11 +1315,19 @@ def run_helix(
     generations: int = 1,
     timeout_seconds: float = DEFAULT_TIMEOUT,
     progress: Callable[[str], None] = print,
+    merge: bool = False,
 ) -> BoundedRun:
     """Stream a bounded HELIX evolution in the disposable candidate repo."""
     if not 1 <= generations <= 4:
         raise ValueError("workshop generations must be between 1 and 4")
-    root = Path(root)
+    root = Path(root).resolve()
+    evaluation_log = Path(
+        f"/tmp/rho-evaluations-{os.getpid()}-{time.time_ns()}.jsonl"
+    )
+    evaluation_log.write_text("", encoding="utf-8")
+    run_env = os.environ.copy()
+    run_env.pop("RHO_EVAL_ORIGIN", None)
+    run_env["RHO_PROGRESS_FILE"] = str(evaluation_log)
     command = [
         str(HELIX if HELIX.exists() else Path("helix")),
         "evolve",
@@ -1088,18 +1337,23 @@ def run_helix(
         "helix.toml",
         "--generations",
         str(generations),
-        "--no-merge",
     ]
-    notebook_display = _notebook_progress() if progress is print else None
+    if not merge:
+        command.append("--no-merge")
+    notebook_display = (
+        _notebook_progress(evaluation_log) if progress is print else None
+    )
     result = run_bounded(
         command,
         cwd=root,
         timeout_seconds=timeout_seconds,
-        env=os.environ.copy(),
+        env=run_env,
         progress=notebook_display or progress,
+        heartbeat=notebook_display.tick if notebook_display is not None else None,
     )
     if notebook_display is not None:
         notebook_display.finish(result)
+    evaluation_log.unlink(missing_ok=True)
     if result.timed_out:
         progress(f"HELIX stopped at the {timeout_seconds:.0f}s workshop deadline.")
     return result
@@ -1266,7 +1520,14 @@ def _main(argv: list[str]) -> int:
     if argv[0] == "live-smoke":
         return live_smoke_cli()
     if argv[0] == "_evaluate_worker":
-        result = _worker_result(Path(argv[1]), argv[2], argv[3], bool(int(argv[4])))
+        result = _worker_result(
+            Path(argv[1]),
+            argv[2],
+            argv[3],
+            bool(int(argv[4])),
+            argv[5] if len(argv) > 5 else CONFIG_PATH,
+            argv[6] if len(argv) > 6 else "solver/program.py",
+        )
         print(json.dumps(result, separators=(",", ":")))
         return 0
     if argv[0] == "_sleep":

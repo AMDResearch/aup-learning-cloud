@@ -182,14 +182,47 @@ models = {
         "gemma-4-E4B-it-Q4_K_M.gguf",
         "mmproj-F16.gguf",
     ],
+    "unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF": [
+        "Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf",
+    ],
 }
 for repository, files in models.items():
     snapshot_download(repository, allow_patterns=files)
 PY
 
+# Lemonade's built-in Qwen3-Coder alias currently selects a different
+# quantization. Register the workshop-proven Q4_K_M file under an explicit,
+# stable loader name. Lemonade loads
+# user.Qwen3-Coder-30B-A3B-Instruct-Q4_K_M; its OpenAI endpoint exposes the
+# corresponding OpenCode id without the user. registry prefix.
+RUN set -euo pipefail; \
+    export HF_HOME="${LEMONADE_HF_HOME}"; \
+    export XDG_RUNTIME_DIR=/tmp/lemonade-build-runtime; \
+    mkdir -p "${XDG_RUNTIME_DIR}"; \
+    chmod 700 "${XDG_RUNTIME_DIR}"; \
+    lemond "${LEMONADE_CACHE}" > /tmp/lemond-build.log 2>&1 & \
+    LEMOND_PID=$!; \
+    trap 'kill "${LEMOND_PID}" 2>/dev/null || true' EXIT; \
+    for _ in $(seq 1 60); do \
+      lemonade status >/dev/null 2>&1 && break; \
+      sleep 1; \
+    done; \
+    lemonade status >/dev/null 2>&1 \
+    || { printf '%s\n' "lemond failed during Qwen registration:" >&2; \
+         tail -n 100 /tmp/lemond-build.log >&2; exit 1; }; \
+    lemonade pull user.Qwen3-Coder-30B-A3B-Instruct-Q4_K_M \
+      --checkpoint main \
+        unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF:Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf \
+      --recipe llamacpp \
+      --label coding; \
+    kill "${LEMOND_PID}"; \
+    wait "${LEMOND_PID}" || true; \
+    trap - EXIT; \
+    rm -rf "${XDG_RUNTIME_DIR}" /tmp/lemond-build.log
+
 # ---------------------------------------------------------------------------
 # CaP-X (Code-as-Policies eXtended) - the code-generating manipulation agent
-# behind 04_code_as_policies_with_capx.ipynb. Robosuite/MuJoCo rendered
+# behind 3_code_as_policy.ipynb. Robosuite/MuJoCo rendered
 # headless through EGL on the iGPU, perception and IK served on localhost.
 #
 # CaP-X pins dependencies that would fight the RAI stack (numpy, transformers,
@@ -559,6 +592,7 @@ COPY ./course_data/lemonade_env.sh \
      ./course_data/notebook_demo.py \
      ./course_data/capx_demo.py \
      ./course_data/rho_demo.py \
+     ./course_data/rho_multitask_demo.py \
      /ryzers/
 
 RUN ln -s /ryzers/notebooks/tests/test_ros.sh /ryzers/test_ros.sh \
@@ -567,11 +601,13 @@ RUN ln -s /ryzers/notebooks/tests/test_ros.sh /ryzers/test_ros.sh \
     && ln -s /ryzers/notebooks/tests/test_lemonade-sdk.sh /ryzers/test_lemonade-sdk.sh \
     && ln -s /ryzers/notebooks/tests/test_capx.sh /ryzers/test_capx.sh \
     && ln -s /ryzers/notebooks/tests/test_rho.sh /ryzers/test_rho.sh \
+    && ln -s /ryzers/notebooks/tests/test_rho_multitask.sh /ryzers/test_rho_multitask.sh \
     && ln -s /ryzers/notebooks/tests/test_rai_toy_evolution.sh /ryzers/test_rai_toy_evolution.sh \
     && chmod +x \
       /ryzers/lemonade_env.sh \
       /ryzers/manipulation_demo_headless.sh \
       /ryzers/test_rho.sh \
+      /ryzers/test_rho_multitask.sh \
       /ryzers/test_rai_toy_evolution.sh \
     && chown -R jovyan:100 \
       /home/jovyan/.cache \

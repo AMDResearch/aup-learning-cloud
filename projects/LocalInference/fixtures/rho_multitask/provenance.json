@@ -1,0 +1,44 @@
+{
+  "schema_version": "rho-multitask-fixtures/v1",
+  "seed_model": "Gemma-4-E4B-it-GGUF",
+  "policies": {
+    "cube_stack": {
+      "file": "cube_stack.py",
+      "source": "fixtures/capx_gemma_e4b_sam3_cube_stack_trial_01.py",
+      "source_policy_sha256": "1e832d66a724443636ef68cdc1d70c4357169317a44b2c65b80b42faa52dd17c",
+      "source_prompt": "Pick up the red cube and gently stack it on top of the green cube, then release it.",
+      "source_prompt_file": "../capx_gemma_e4b_sam3_cube_stack_trial_01_prompt.txt",
+      "source_prompt_sha256": "fb532e91e6977c096e373861b1eb3b6c1e45e01e2a60a33c1d0f565d8d48bfed",
+      "source_git_commit": "53e9966",
+      "source_trial": 1,
+      "source_task_completed": false,
+      "relationship": "whitespace-normalized authentic generated policy"
+    },
+    "spill_wipe": {
+      "file": "spill_wipe.py",
+      "source": "/results/live-20260821/full/capx/spill_wipe/attempt_03/artifacts/scenarios/Gemma-4-E4B-it-GGUF/spill_wipe/trial_01_sandboxrc_0_reward_0.980_taskcompleted_0/code.py",
+      "source_policy_sha256": "e31ccc884d4872ced181d6614d46b5dafc425548471206ceac32eff6a9dbac59",
+      "source_prompt": "Wipe the complete detected brown spill region with the Franka end effector.",
+      "source_prompt_file": null,
+      "source_prompt_sha256": null,
+      "prompt_note": "The source run retained the generated policy and task goal but not the fully expanded runtime API suffix.",
+      "source_git_commit": "7f55f31",
+      "source_trial": 1,
+      "source_task_completed": false,
+      "relationship": "normalized authentic generated raster policy retaining its overrun failure mode"
+    },
+    "cube_lift": {
+      "file": "cube_lift.py",
+      "source": "experiment_results/generalization-20260822/generated/cube_lift/artifacts/scenarios/Gemma-4-E4B-it-GGUF/cube_lift/trial_01_sandboxrc_0_reward_1.000_taskcompleted_1/code.py",
+      "source_policy_sha256": "a14c36438960311aa1ad74b4b68445b43bc77f6b4e5026bb7e540a62b4d694ca",
+      "source_prompt": "Pick up the red cube and lift it vertically while maintaining a secure grasp.",
+      "source_prompt_file": null,
+      "source_prompt_sha256": null,
+      "prompt_note": "The source run retained the generated policy and task goal but not the fully expanded runtime API suffix.",
+      "source_git_commit": "7f55f31",
+      "source_trial": 1,
+      "source_task_completed": true,
+      "relationship": "comment-normalized authentic generated policy"
+    }
+  }
+}

@@ -34,6 +34,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 import rho_demo
 from helix.config import load_config
@@ -60,6 +61,15 @@ assert (root / ".git").is_dir()
 assert (root / "solver" / "program.py").read_text() == rho_demo.DEFAULT_PROGRAM
 assert "program.py" in (root / "solver" / "policy.py").read_text()
 assert (root / "solver" / "strategy.py").read_text() == "CLEARANCE = 0.1\n"
+
+with tempfile.TemporaryDirectory(prefix="rho-custom-root-", dir="/tmp") as temporary:
+    custom_root = Path(temporary) / "candidate"
+    custom_root.mkdir()
+    stale = custom_root / "stale.txt"
+    stale.write_text("remove me")
+    prepared = rho_demo.prepare_workshop(custom_root)
+    assert prepared == custom_root.resolve()
+    assert not stale.exists()
 
 provenance = json.loads((root / "provenance.json").read_text())
 assert provenance["source"] == "recorded_capx_generation"
@@ -96,6 +106,7 @@ custom_config = rho_demo.helix_config(
 assert 'objective = """Repair another task."""' in custom_config
 assert 'background = """Edit solver/program.py first."""' in custom_config
 assert '"RHO_CONFIG_PATH"' in custom_config
+assert '"RHO_PROGRESS_FILE"' in custom_config
 try:
     rho_demo.helix_config(5)
 except ValueError:
@@ -110,8 +121,16 @@ assert permissions["edit"]["*"] == "deny"
 assert permissions["edit"]["solver/**"] == "allow"
 assert permissions["edit"]["**/solver/**"] == "allow"
 assert permissions["bash"]["*"] == "deny"
+assert (
+    permissions["bash"][
+        "RHO_EVAL_ORIGIN=agent-self-check /opt/capx-venv/bin/python probe.py*"
+    ]
+    == "allow"
+)
+assert "/opt/capx-venv/bin/python probe.py*" not in permissions["bash"]
 assert list(permissions["edit"])[0] == "*"
 assert list(permissions["bash"])[0] == "*"
+assert "RHO_EVAL_ORIGIN=agent-self-check" in rho_demo.DEFAULT_BACKGROUND
 
 # The default authentic recording deterministically reproduces its scalar-index
 # error without importing CaP-X.
@@ -123,7 +142,13 @@ assert "green_pose[0]" in before["traceback"]
 
 (root / "helix_batch.json").write_text('["0"]\n')
 env = os.environ.copy()
-env.update(RHO_MOCK_EVAL="1", HELIX_SPLIT="train")
+with tempfile.NamedTemporaryFile(prefix="rho-evaluation-progress-", delete=False) as stream:
+    progress_path = Path(stream.name)
+env.update(
+    RHO_MOCK_EVAL="1",
+    HELIX_SPLIT="train",
+    RHO_PROGRESS_FILE=str(progress_path),
+)
 done = subprocess.run(
     [sys.executable, str(Path(rho_demo.__file__)), "evaluate"],
     cwd=root,
@@ -138,6 +163,69 @@ payload = json.loads(lines[0].split("=", 1)[1])
 assert payload[0][0] == 0.0
 assert payload[0][1]["task_completed"] is False
 assert payload[0][1]["trial"] == 1
+progress_events = [
+    json.loads(line) for line in progress_path.read_text().splitlines()
+]
+progress_path.unlink()
+assert [event["event"] for event in progress_events] == ["started", "completed"]
+assert progress_events[0]["trial"] == progress_events[1]["trial"] == 1
+assert progress_events[1]["reward"] == 0.0
+assert progress_events[0]["origin"] == progress_events[1]["origin"] == "helix"
+
+class DisplayHandle:
+    def __init__(self):
+        self.updates = []
+
+    def update(self, value):
+        self.updates.append(value.data)
+
+
+with tempfile.NamedTemporaryFile(
+    prefix="rho-widget-progress-", mode="w", delete=False
+) as stream:
+    widget_progress_path = Path(stream.name)
+handle = DisplayHandle()
+with patch("IPython.display.display", return_value=handle):
+    widget = rho_demo._NotebookHelixProgress(widget_progress_path)
+with widget_progress_path.open("a") as stream:
+    stream.write(json.dumps(progress_events[0]) + "\n")
+widget("Status: Applying mutation")
+assert "HELIX eval 1 running" in handle.updates[-1]
+widget("Status: Evaluating")
+assert "Applying mutation" not in handle.updates[-1]
+assert "Status: Evaluating" not in handle.updates[-1]
+with widget_progress_path.open("a") as stream:
+    stream.write(json.dumps(progress_events[1]) + "\n")
+widget.tick()
+assert "reward 0.000" in handle.updates[-1]
+assert "HELIX eval 1" in handle.updates[-1]
+assert widget._evaluations == 1
+widget("Status: Applying mutation")
+assert "Applying mutation · 0s elapsed" in handle.updates[-1]
+stable_update = handle.updates[-1]
+widget("unrelated Rich redraw")
+assert handle.updates[-1] == stable_update
+
+self_check_started = {
+    **progress_events[0],
+    "evaluation_id": "self-check",
+    "origin": "agent-self-check",
+}
+self_check_completed = {
+    **progress_events[1],
+    "evaluation_id": "self-check",
+    "origin": "agent-self-check",
+    "reward": 1.0,
+    "task_completed": True,
+}
+with widget_progress_path.open("a") as stream:
+    stream.write(json.dumps(self_check_started) + "\n")
+    stream.write(json.dumps(self_check_completed) + "\n")
+widget.tick()
+assert "Agent self-check 1" in handle.updates[-1]
+assert widget._evaluations == 1
+widget_progress_path.unlink()
+
 assert {
     "reward",
     "stdout",

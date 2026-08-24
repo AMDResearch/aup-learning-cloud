@@ -2,18 +2,22 @@
 
 Complete the notebooks in order:
 
-1. `02_local_inference_with_lemonade.ipynb`
-2. `03_robot_agents.ipynb`
-3. `04_code_as_policies_with_capx.ipynb`
-4. `05_repository_as_policy_with_rho.ipynb`
-5. `06_evolving_rai_for_o3de.ipynb`
+0. `0_overview.ipynb`
+1. `1_local_inference.ipynb`
+2. `2_robot_agents.ipynb`
+3. `3_code_as_policy.ipynb`
+4. `4_robot_harness_optimization.ipynb`
+5. `temp_evolving_rai.ipynb`
 
-Notebook 05 runs one bounded HELIX/OpenCode mutation against a small CaP-X
-repository. It demonstrates RHO's repository-as-policy loop with local models;
-it is not a reproduction of the paper's full training run.
+Notebook 4 runs a two-generation, three-task HELIX/OpenCode evolution against
+a multi-file CaP-X repository. Qwen3-Coder proposes stack and wipe specialists,
+HELIX retains per-task winners on an instance frontier, cube lift guards against
+regressions, and generation 2 may select or merge frontier parents. It is a
+bounded teaching experiment, not a reproduction of a paper-scale run.
 
-Notebook 06 applies the same one-generation repository-evolution pattern to a
-live RAI tool-calling agent. A deterministic in-memory tabletop replaces the
+The temporary Evolving RAI notebook applies the same one-generation
+repository-evolution pattern to a live RAI tool-calling agent. A deterministic
+in-memory tabletop replaces the
 full O3DE benchmark so it fits the workshop: HELIX edits both `prompt.py` and
 `tools.py`, the notebook displays the selected files, and RAI reruns one
 held-out manipulation test. It does not replay or claim to reproduce paper
@@ -72,11 +76,14 @@ The compact, tracked result is
 `fixtures/capx_rho_generalization_5_trials.json`. Full evaluator feedback is
 written under `experiment_results/generalization-20260822/`.
 
-Notebook 05 performs a separate paired experiment: it samples five held-out
-seed/trial IDs once, runs the frozen cube-stack policy before evolution, evolves
-with HELIX/OpenCode, and reruns the same seeds. The committed execution observed
-0/5 to 5/5 task completion and 5 to 0 execution failures. It includes all five
-post-evolution rollout videos.
+The previous single-task five-seed notebook execution is retained in the
+generalization fixture above as historical evidence. Notebook 4 now keeps
+stack, wipe, and lift scores separate, records candidate lineage and frontier
+coverage, and finishes with five frozen hidden rollouts and videos per task.
+Its success criterion uses aggregate completion and reward evidence: a
+difficult task must improve meaningfully while the unchanged lift policy stays
+within a one-rollout noise tolerance. It does not require or claim a universal
+winner.
 
 Example:
 
@@ -107,10 +114,10 @@ The committed notebook executions on the workshop GPU measured:
 
 - CaP-X: 4.5 seconds for model setup, 11.4 seconds for perception/control
   setup, 14.2 seconds for one LLM call, and 11.8 seconds for one rollout.
-- RHO: 4.7 seconds for model setup, 12.3 seconds for perception/control setup,
-  and 109.5 seconds for HELIX. llama.cpp attributed 31.0 seconds of HELIX to
-  prompt processing and token generation; candidate simulation consumed most
-  of the remaining time.
+- Historical single-task RHO run: 4.7 seconds for model setup, 12.3 seconds for
+  perception/control setup, and 109.5 seconds for one HELIX generation. Notebook
+  05 reports fresh Qwen model load, agent event estimates, serialized simulator
+  time, and total two-generation wall time from its live run.
 
 Environment checks:
 
@@ -121,6 +128,7 @@ Environment checks:
 /ryzers/test_lemonade-sdk.sh
 /ryzers/test_capx.sh
 /ryzers/test_rho.sh
+/ryzers/test_rho_multitask.sh
 /ryzers/test_rai_toy_evolution.sh
 ```
 
@@ -131,11 +139,11 @@ LocalInference image, opt into a real RAI seed-versus-repaired agent check:
 RAI_TOY_RUN_LIVE=1 /ryzers/test_rai_toy_evolution.sh
 ```
 
-The workshop's Gemma E2B and Gemma E4B GGUFs are baked under
-`/opt/lemonade-cache`, outside the JupyterHub home-volume mount. Removing the
-unused Qwen3 Coder checkpoint saves 17.3 GB. SAM2.1 Large and OWLv2 Large are
-likewise baked under `/opt/capx-cache`; neither runtime path needs a Hugging Face
-token or a first-run model download. Their checkpoints are staged through FP16
-before an on-device FP32 conversion to avoid a multi-minute ROCm transfer while
-retaining FP32 execution. Matching `*_fast.yaml` CaP-X configs retain SAM2.1
-Small and OWLv2 Base for comparisons.
+The workshop's Gemma E2B, Gemma E4B, and Qwen3-Coder Q4_K_M GGUFs are baked
+under `/opt/lemonade-cache`, outside the JupyterHub home-volume mount.
+Notebook 4 uses the 17.3 GB Qwen checkpoint for repository mutations. SAM2.1
+Large and OWLv2 Large are likewise baked under `/opt/capx-cache`; neither
+runtime path needs a Hugging Face token or a first-run model download. Their
+checkpoints are staged through FP16 before an on-device FP32 conversion to avoid
+a multi-minute ROCm transfer while retaining FP32 execution. Matching
+`*_fast.yaml` CaP-X configs retain SAM2.1 Small and OWLv2 Base for comparisons.
