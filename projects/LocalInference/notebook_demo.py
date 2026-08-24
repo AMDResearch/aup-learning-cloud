@@ -64,6 +64,12 @@ CAMERA_TOPIC = "/color_image5"
 VIDEO_PORT = 8080
 LEMONADE_URL = "http://localhost:13305"
 DEFAULT_MODEL = "Gemma-4-E2B-it-GGUF"
+LEMONADE_CACHE = os.environ.get(
+    "LEMONADE_CACHE", "/opt/lemonade-cache/lemonade"
+)
+LEMONADE_HF_HOME = os.environ.get(
+    "LEMONADE_HF_HOME", "/opt/lemonade-cache/huggingface"
+)
 
 # Same layouts the Streamlit sidebar offers, keyed by scene config file stem
 SCENARIO_NAMES = {
@@ -168,10 +174,16 @@ def ensure_lemonade(model: str = DEFAULT_MODEL) -> None:
         # after we return, so a context manager would close it out from under.
         log = open("/tmp/lemond.log", "a")  # noqa: SIM115
         subprocess.Popen(
-            ["lemond"],
+            ["lemond", LEMONADE_CACHE],
             stdout=log,
             stderr=subprocess.STDOUT,
             start_new_session=True,
+            env={
+                **os.environ,
+                "HF_HOME": LEMONADE_HF_HOME,
+                "LEMONADE_CACHE": LEMONADE_CACHE,
+                "LEMONADE_HF_HOME": LEMONADE_HF_HOME,
+            },
         )
         for _ in range(120):
             if running():

@@ -1,0 +1,74 @@
+
+You are controlling a Franka Emika robot with the API described below.
+Goal: Pick up the red cube and gently stack it on top of the green cube, then release it.
+
+Key rules:
+- The extent from get_object_pose(..., return_bbox_extent=True) is the FULL side length. Use extent[2]/2 for half-height.
+- For placement orientation, reuse the grasp quaternion from sample_grasp_pose. Do NOT use the quaternion from get_object_pose (it is unreliable for orientation).
+- Always use z_approach=0.1 when approaching an object for grasping or placing.
+- After grasping, lift the cube to a safe height (at least +0.2m in Z) before moving laterally to the placement location.
+- The stacking height formula is: place_z = green_center_z + green_extent[2]/2 + red_extent[2]/2
+- Nothing should be dropped from a height. Always approach with z_approach for controlled descent.
+
+Write ONLY executable Python code (no code fences). Import numpy if needed.
+
+APIs:
+
+get_object_pose(object_name: str, return_bbox_extent: bool = False) -> tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray | None]
+  Doc:
+    Get the pose of an object in the environment from a natural language description.
+    The quaternion from get_object_pose may be unreliable, so disregard it and use the grasp pose quaternion OR (0, 0, 1, 0) wxyz as the gripper down orientation if using this for placement position.
+    
+    Args:
+        object_name: The name of the object to get the pose of.
+        return_bbox_extent:  Whether to return the extent of the oriented bounding box (oriented by quaternion_wxyz). Default is False.
+    
+    Returns:
+        position: (3,) XYZ in meters.
+        quaternion_wxyz: (4,) WXYZ unit quaternion.
+        bbox_extent: (3,) XYZ in meters (full side length, not half-length extent). If return_bbox_extent is False, returns None.
+
+sample_grasp_pose(object_name: str) -> tuple[numpy.ndarray, numpy.ndarray]
+  Doc:
+    Sample a grasp pose for an object in the environment from a natural language description.
+    Do use the grasp sample quaternion from sample_grasp_pose.
+    
+    Args:
+        object_name: The name of the object to sample a grasp pose for.
+    
+    Returns:
+        position: (3,) XYZ in meters.
+        quaternion_wxyz: (4,) WXYZ unit quaternion.
+
+goto_pose(position: numpy.ndarray, quaternion_wxyz: numpy.ndarray, z_approach: float = 0.0) -> None
+  Doc:
+    Go to pose using Inverse Kinematics.
+    There is no need to call a second goto_pose with the same position and quaternion_wxyz after calling it with z_approach.
+    Args:
+        position: (3,) XYZ in meters.
+        quaternion_wxyz: (4,) WXYZ unit quaternion.
+        z_approach: (float) Z-axis distance offset for goto_pose insertion approach motion. Will first arrive at position + z_approach meters in Z-axis before moving to the requested pose. Useful for more precise grasp approaches. Default is 0.0.
+    Returns:
+        None
+
+open_gripper() -> None
+  Doc:
+    Open gripper fully.
+    
+    Args:
+        None
+
+close_gripper() -> None
+  Doc:
+    Close gripper fully.
+    
+    Args:
+        None
+
+home_pose() -> None
+  Doc:
+    Move the robot to a safe home pose.
+    Args:
+        None
+    Returns:
+        None

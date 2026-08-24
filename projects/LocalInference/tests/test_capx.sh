@@ -2,11 +2,11 @@
 # Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
 # SPDX-License-Identifier: MIT
 #
-# Test for the CaP-X stack used by 04_code_as_policies_with_capx.ipynb.
+# Test for the CaP-X stack used by 3_code_as_policy.ipynb.
 # Three stages:
 #   1. Sign-of-life: ROCm torch sees the GPU, the stack and Robosuite import,
-#      MuJoCo renders headless through EGL, and the SAM3 weights are in the
-#      image cache.
+#      MuJoCo renders headless through EGL, and the ungated OWLv2 + SAM2
+#      weights are in the image cache.
 #   2. Oracle eval (always runs, no LLM): one full CaP-Gym episode driven by the
 #      environment's ground-truth code through the real sim + PyRoKi IK
 #      pipeline, asserting task success (reward 1.0). This is the deterministic
@@ -20,7 +20,7 @@ set -euo pipefail
 CAPX_ROOT="${CAPX_ROOT:-/ryzers/cap-x}"
 CAPX_PY="${CAPX_VENV:-/opt/capx-venv}/bin/python"
 # The CaP-X kernel sets this too; a terminal run needs it to find the
-# pre-fetched SAM3 weights instead of trying to download gated ones.
+# pre-fetched perception weights.
 export HF_HOME="${CAPX_CACHE:-/opt/capx-cache}"
 export MUJOCO_GL=egl
 export PYOPENGL_PLATFORM=egl
@@ -43,7 +43,9 @@ for i in range(torch.cuda.device_count()):
 
 # jax is CPU-only by design (matches CaP-X's lock: jax 0.4.29, no GPU plugin).
 "${CAPX_PY}" -c "
-import capx, sam3, contact_graspnet_pytorch
+import capx, contact_graspnet_pytorch
+from capx.integrations.vision.owlvit import init_owlvit
+from capx.integrations.vision.sam2 import init_sam2
 import jax; print('jax', jax.__version__, 'devices (CPU expected):', jax.devices())
 import pyroki, jaxls
 import robosuite; print('robosuite', robosuite.__version__)
@@ -69,10 +71,31 @@ finally:
 from pathlib import Path
 config = Path('${CAPX_ROOT}/env_configs/cube_stack/franka_robosuite_cube_stack.yaml')
 assert config.is_file(), f'{config} missing'
+fast_config = config.with_name('franka_robosuite_cube_stack_fast.yaml')
+assert fast_config.is_file(), f'{fast_config} missing'
 hub = Path('${HF_HOME}/hub')
-repo = 'models--facebook--sam3'
-assert (hub / repo).is_dir(), f'SAM3 weights not cached: {repo}'
-print('cube_stack config and pre-fetched SAM3 weights OK')
+repos = {
+    'models--facebook--sam2.1-hiera-small',
+    'models--google--owlv2-base-patch16-ensemble',
+    'models--facebook--sam2.1-hiera-large',
+    'models--google--owlv2-large-patch14-ensemble',
+}
+missing = sorted(repo for repo in repos if not (hub / repo).is_dir())
+assert not missing, f'Perception weights not cached: {missing}'
+text = config.read_text()
+assert 'launch_owlvit_server.main' in text
+assert 'launch_sam2_server.main' in text
+assert 'google/owlv2-large-patch14-ensemble' in text
+assert 'facebook/sam2.1-hiera-large' in text
+assert 'launch_sam3_server.main' not in text
+fast_text = fast_config.read_text()
+assert 'google/owlv2-base-patch16-ensemble' in fast_text
+assert 'facebook/sam2.1-hiera-small' in fast_text
+for server_name in ('launch_owlvit_server.py', 'launch_sam2_server.py'):
+    server_text = (Path('${CAPX_ROOT}/capx/serving') / server_name).read_text()
+    assert 'dtype=load_dtype' in server_text, server_name
+    assert '_MODEL = _MODEL.float()' in server_text, server_name
+print('cube_stack large/default and optional fast perception profiles OK')
 "
 
 echo "================ [2/3] Oracle eval (no LLM) ================"
@@ -128,7 +151,7 @@ else
 fi
 
 echo "================ [3/3] LLM eval (optional) ================"
-# Default to the Lemonade server from notebook 02 when it is already serving.
+# Default to the Lemonade server from notebook 1 when it is already serving.
 if [ -z "${CAPX_LLM_SERVER_URL:-}" ] && lemonade status >/dev/null 2>&1; then
     CAPX_LLM_SERVER_URL="http://localhost:13305/api/v1/chat/completions"
     CAPX_LLM_MODEL="${CAPX_LLM_MODEL:-Gemma-4-E2B-it-GGUF}"

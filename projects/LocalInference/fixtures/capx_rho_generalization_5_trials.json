@@ -1,0 +1,124 @@
+{
+  "schema_version": "capx-rho-generalization/v1",
+  "copyright": "Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.",
+  "license": "MIT",
+  "finished_at_utc": "2026-08-22T17:44:06Z",
+  "method": {
+    "trials": [1, 2, 3, 4, 5],
+    "policy_control": "Each policy file was held byte-for-byte constant across its five evaluations.",
+    "reset_control": "The simulator was independently reset with each listed trial ID and seed.",
+    "caveat": "The simulator, grasp sampler, and perception stack may still contain nondeterminism. These n=5 results are descriptive, not confidence-bounded estimates.",
+    "execution_failure_policy": "A policy that raises receives evaluator reward 0 and task_completed=false; raw simulator reward is retained."
+  },
+  "models": {
+    "capx_generation": "Gemma-4-E4B-it-GGUF",
+    "rho_mutation": "Qwen3-Coder-30B-A3B-Instruct-GGUF",
+    "perception": "sam3"
+  },
+  "results": {
+    "cube_stack_before_rho": {
+      "policy_sha256": "1e832d66a724443636ef68cdc1d70c4357169317a44b2c65b80b42faa52dd17c",
+      "completed": 0,
+      "success_rate": 0.0,
+      "mean_reward": 0.0,
+      "mean_raw_reward": 0.7077890200885057,
+      "execution_failures": 5,
+      "trial_completed": [false, false, false, false, false]
+    },
+    "cube_stack_after_rho": {
+      "policy_sha256": "83b711e61a4e30e66ae0f83b1d35a4d568d05eca9b283cf491e20ea7129570a4",
+      "mutation": {
+        "green_pose[0][2]": "green_pose[2]",
+        "green_pose[0][0]": "green_pose[0]",
+        "green_pose[0][1]": "green_pose[1]"
+      },
+      "completed": 3,
+      "success_rate": 0.6,
+      "mean_reward": 0.6074424895575115,
+      "mean_raw_reward": 0.6074424895575115,
+      "execution_failures": 0,
+      "trial_rewards": [
+        0.034933124515307626,
+        0.002279323272249431,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "trial_completed": [false, false, true, true, true]
+    },
+    "cube_lift_fixed_policy": {
+      "policy_sha256": "a14c36438960311aa1ad74b4b68445b43bc77f6b4e5026bb7e540a62b4d694ca",
+      "completed": 4,
+      "success_rate": 0.8,
+      "mean_reward": 0.9076976896512544,
+      "mean_raw_reward": 0.9076976896512544,
+      "execution_failures": 0,
+      "trial_rewards": [1.0, 1.0, 0.5384884482562718, 1.0, 1.0],
+      "trial_completed": [true, true, false, true, true]
+    },
+    "spill_wipe_fixed_policy": {
+      "policy_sha256": "e31ccc884d4872ced181d6614d46b5dafc425548471206ceac32eff6a9dbac59",
+      "completed": 1,
+      "success_rate": 0.2,
+      "mean_reward": 0.2,
+      "mean_raw_reward": 0.844,
+      "execution_failures": 4,
+      "trial_raw_rewards": [0.57, 0.65, 1.0, 1.0, 1.0],
+      "trial_completed": [false, false, false, true, false],
+      "failure": "The raster loop usually continues issuing goto_pose after the environment terminates."
+    },
+    "cube_restack_before_rho": {
+      "policy_sha256": "74743a0a48b73d80fa0b69c3d043fc79f92824afb1e78e963cce24e7aa0b76e7",
+      "completed": 0,
+      "success_rate": 0.0,
+      "mean_reward": 0.0,
+      "mean_raw_reward": 0.034667739682379455,
+      "execution_failures": 5,
+      "trial_completed": [false, false, false, false, false],
+      "failure": "NameError: name 'numpy' is not defined"
+    },
+    "cube_restack_after_rho": {
+      "policy_sha256": "d66fa055ada420c96ef9a94fe5e0184b8af5f1889d34e8c998a3773246e5d03e",
+      "mutation": {
+        "inserted": "import numpy"
+      },
+      "rho_accepted": true,
+      "rho_elapsed_seconds": 93.87160452711396,
+      "completed": 0,
+      "success_rate": 0.0,
+      "mean_reward": 0.0018230546794954533,
+      "mean_raw_reward": 0.0018230546794954533,
+      "execution_failures": 0,
+      "trial_rewards": [
+        0.0006138985117153245,
+        0.0010302835423499357,
+        0.002780285322674353,
+        0.0014373131942660156,
+        0.003253492826471638
+      ],
+      "trial_completed": [false, false, false, false, false],
+      "interpretation": "RHO generalized the execution repair across all five trials, but the unchanged manipulation strategy did not complete the task."
+    }
+  },
+  "rho_restack_attempts": [
+    {
+      "attempt": 1,
+      "accepted": false,
+      "mutation": "Imported numpy as np and changed only one of several numpy.array calls.",
+      "reason": "Later numpy.array calls still raised NameError; strict-improvement gate rejected the candidate."
+    },
+    {
+      "attempt": 2,
+      "accepted": true,
+      "mutation": "Inserted exact line: import numpy",
+      "reason": "Removed the execution failure and produced a strict reward improvement."
+    }
+  ],
+  "source_reports": [
+    "experiment_results/generalization-20260822/cube_stack_before_after.json",
+    "experiment_results/generalization-20260822/other_tasks.json",
+    "experiment_results/generalization-20260822/rho_cube_restack/repair_report.json",
+    "experiment_results/generalization-20260822/rho_cube_restack_exact/repair_report.json",
+    "experiment_results/generalization-20260822/cube_restack_rho_five.json"
+  ]
+}

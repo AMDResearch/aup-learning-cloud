@@ -6,7 +6,7 @@
 # Serving the model is useful on its own, without any of the RAI or ROS setup
 # that follows it, so that half can be run in a subshell instead:
 #     bash lemonade_env.sh --serve-only [MODEL]
-# That is what notebook 04 does. It skips the config.toml rewrite and the ROS
+# That is what notebook 3 does. It skips the config.toml rewrite and the ROS
 # overlay below, which belong to RAI and would put the wrong cwd and the wrong
 # Python packages on the CaP-X kernel.
 
@@ -17,10 +17,13 @@ if [ "${1:-}" = "--serve-only" ]; then
 fi
 
 MODEL="${1:-Gemma-4-E2B-it-GGUF}"
+LEMONADE_CACHE="${LEMONADE_CACHE:-/opt/lemonade-cache/lemonade}"
+LEMONADE_HF_HOME="${LEMONADE_HF_HOME:-/opt/lemonade-cache/huggingface}"
+export HF_HOME="${LEMONADE_HF_HOME}"
 
 # Start lemond if it isn't already up; log to /tmp/lemond.log
 if ! lemonade status >/dev/null 2>&1; then
-    lemond > /tmp/lemond.log 2>&1 &
+    lemond "${LEMONADE_CACHE}" > /tmp/lemond.log 2>&1 &
     # Bounded, so a server that never binds fails here instead of hanging the
     # shell (or, under --serve-only, the caller waiting on this script)
     for _ in $(seq 300); do
@@ -33,7 +36,7 @@ if ! lemonade status >/dev/null 2>&1; then
     fi
 fi
 
-# Load the model (downloads on first use; no-op if already loaded)
+# Load the image-cached model (no-op if already loaded).
 lemonade load "$MODEL"
 
 if [ "$SERVE_ONLY" -eq 0 ]; then

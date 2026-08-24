@@ -39,7 +39,7 @@ print('  - Pipeline: available')
 print('  - PipelineBuilder: available')
 "
 
-# Test the perception stack and assets used by 03_robot_agents.ipynb.
+# Test the perception stack and assets used by 2_robot_agents.ipynb.
 echo ""
 echo "Testing RAI manipulation demo..."
 PYTHONWARNINGS=ignore python3 -c "
