@@ -50,12 +50,6 @@ echo "PermitRootLogin yes" > /etc/ssh/sshd_config.d/allow-root.conf
 echo "PermitRootLogin prohibit-password" > /etc/ssh/sshd_config.d/allow-root.conf
 {% endif %}
 
-# -- GPU udev rules (let containers access AMD GPUs) --
-tee /etc/udev/rules.d/70-amdgpu.rules << RULES
-KERNEL=="kfd", MODE="0666"
-KERNEL=="renderD[0-9]*", MODE="0666"
-RULES
-
 # -- Disable systemd-networkd (kernel ip=dhcp handles NFS root networking) --
 rm -f /etc/netplan/*.yaml
 systemctl disable systemd-networkd        2>/dev/null || true

@@ -19,88 +19,10 @@
 
 import { useState, useEffect, useCallback, useMemo, memo } from 'react';
 import { Table, Button, Form, InputGroup, Alert, Spinner, Modal, Badge } from 'react-bootstrap';
-import AsyncSelect from 'react-select/async';
-import type { MultiValue, ActionMeta, StylesConfig } from 'react-select';
+import { useNavigate } from 'react-router-dom';
 import type { Group } from '@auplc/shared';
-
-// Dark mode aware styles for react-select
-const getSelectStyles = (isDark: boolean): StylesConfig<UserOption, true> => {
-
-  return {
-    menuPortal: (base) => ({ ...base, zIndex: 9999 }),
-    control: (base, state) => ({
-      ...base,
-      minHeight: '38px',
-      backgroundColor: isDark ? '#212529' : base.backgroundColor,
-      borderColor: isDark ? '#495057' : base.borderColor,
-      '&:hover': {
-        borderColor: isDark ? '#6c757d' : base.borderColor,
-      },
-      ...(state.isFocused && {
-        borderColor: isDark ? '#0d6efd' : '#86b7fe',
-        boxShadow: isDark ? '0 0 0 0.25rem rgba(13, 110, 253, 0.25)' : '0 0 0 0.25rem rgba(13, 110, 253, 0.25)',
-      }),
-    }),
-    menu: (base) => ({
-      ...base,
-      backgroundColor: isDark ? '#212529' : base.backgroundColor,
-      border: isDark ? '1px solid #495057' : base.border,
-    }),
-    option: (base, state) => ({
-      ...base,
-      backgroundColor: state.isFocused
-        ? (isDark ? '#495057' : '#deebff')
-        : (isDark ? '#212529' : base.backgroundColor),
-      color: isDark ? '#fff' : base.color,
-      '&:active': {
-        backgroundColor: isDark ? '#6c757d' : '#b2d4ff',
-      },
-    }),
-    input: (base) => ({
-      ...base,
-      color: isDark ? '#fff' : base.color,
-    }),
-    placeholder: (base) => ({
-      ...base,
-      color: isDark ? '#adb5bd' : base.color,
-    }),
-    singleValue: (base) => ({
-      ...base,
-      color: isDark ? '#fff' : base.color,
-    }),
-    multiValue: (base) => ({
-      ...base,
-      backgroundColor: '#6c757d',
-    }),
-    multiValueLabel: (base) => ({
-      ...base,
-      color: 'white',
-    }),
-    multiValueRemove: (base) => ({
-      ...base,
-      color: 'white',
-      ':hover': {
-        backgroundColor: '#5a6268',
-        color: 'white',
-      },
-    }),
-    noOptionsMessage: (base) => ({
-      ...base,
-      color: isDark ? '#adb5bd' : base.color,
-    }),
-    loadingMessage: (base) => ({
-      ...base,
-      color: isDark ? '#adb5bd' : base.color,
-    }),
-  };
-};
 import * as api from '@auplc/shared';
 import { EditGroupModal } from '../components/EditGroupModal';
-
-interface UserOption {
-  value: string;
-  label: string;
-}
 
 const COLLAPSED_LIMIT = 3;
 
@@ -138,73 +60,35 @@ function ResourceBadges({ resources }: { resources: string[] }) {
   );
 }
 
-// Memoized GroupRow component with inline member management
+function MemberSummary({ members }: { members: string[] }) {
+  const preview = members.slice(0, COLLAPSED_LIMIT);
+  const hidden = members.length - preview.length;
+
+  return (
+    <div>
+      <div className="fw-semibold">
+        {members.length} {members.length === 1 ? 'member' : 'members'}
+      </div>
+      {preview.length > 0 && (
+        <div className="d-flex flex-wrap gap-1 align-items-center mt-1">
+          {preview.map(member => <Badge key={member} bg="secondary" className="fw-normal">{member}</Badge>)}
+          {hidden > 0 && <Badge bg="secondary" className="fw-normal">+{hidden} more</Badge>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Memoized GroupRow component with compact member summary
 interface GroupRowProps {
   group: Group;
   onEdit: (group: Group) => void;
-  onMembersChange: (groupName: string, members: string[]) => void;
-  loadUserOptions: (inputValue: string, excludeUsers: string[]) => Promise<UserOption[]>;
 }
 
-const GroupRow = memo(function GroupRow({ group, onEdit, onMembersChange, loadUserOptions }: GroupRowProps) {
-  const [isUpdating, setIsUpdating] = useState(false);
-  const [isDark, setIsDark] = useState(() =>
-    document.documentElement.getAttribute('data-bs-theme') === 'dark'
-  );
-
+const GroupRow = memo(function GroupRow({ group, onEdit }: GroupRowProps) {
   const isGitHubTeam = group.source === 'github-team';
-  const isReadOnly = group.source === 'system';
-
-  // Watch for theme changes
-  useEffect(() => {
-    const observer = new MutationObserver(() => {
-      setIsDark(document.documentElement.getAttribute('data-bs-theme') === 'dark');
-    });
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ['data-bs-theme'],
-    });
-    return () => observer.disconnect();
-  }, []);
-
-  // Convert current members to options
-  const currentMembers: UserOption[] = group.users.map(name => ({
-    value: name,
-    label: name,
-  }));
-
-  // Load options excluding current members
-  const loadOptions = useCallback(async (inputValue: string): Promise<UserOption[]> => {
-    return loadUserOptions(inputValue, group.users);
-  }, [loadUserOptions, group.users]);
-
-  // Handle member changes
-  const handleChange = useCallback(async (
-    _newValue: MultiValue<UserOption>,
-    actionMeta: ActionMeta<UserOption>
-  ) => {
-    if (isUpdating) return;
-
-    setIsUpdating(true);
-    try {
-      if (actionMeta.action === 'select-option' && actionMeta.option) {
-        await api.addUserToGroup(group.name, actionMeta.option.value);
-        onMembersChange(group.name, [...group.users, actionMeta.option.value]);
-      } else if (actionMeta.action === 'remove-value' && actionMeta.removedValue) {
-        await api.removeUserFromGroup(group.name, actionMeta.removedValue.value);
-        onMembersChange(group.name, group.users.filter(u => u !== actionMeta.removedValue!.value));
-      } else if (actionMeta.action === 'clear') {
-        for (const user of group.users) {
-          await api.removeUserFromGroup(group.name, user);
-        }
-        onMembersChange(group.name, []);
-      }
-    } catch (err) {
-      console.error('Failed to update group members:', err);
-    } finally {
-      setIsUpdating(false);
-    }
-  }, [group.name, group.users, onMembersChange, isUpdating]);
+  const navigate = useNavigate();
+  const openGroup = () => navigate(`/groups/${encodeURIComponent(group.name)}`);
 
   return (
     <tr>
@@ -221,46 +105,35 @@ const GroupRow = memo(function GroupRow({ group, onEdit, onMembersChange, loadUs
             <Badge bg="secondary" title="Manually managed group">Manual</Badge>
           )}
         </div>
-        <div style={{ fontSize: '0.7rem', color: 'var(--home-text-muted)', marginTop: '2px' }}>
-          {group.users.length} {group.users.length === 1 ? 'member' : 'members'}
-          {(group.resources?.length ?? 0) > 0 && ` · ${group.resources!.length} resources`}
-        </div>
+        {(group.resources?.length ?? 0) > 0 && (
+          <div style={{ fontSize: '0.7rem', color: 'var(--home-text-muted)', marginTop: '2px' }}>
+            {group.resources!.length} resources
+          </div>
+        )}
       </td>
-      <td>
-        <AsyncSelect<UserOption, true>
-          isMulti
-          cacheOptions
-          defaultOptions={false}
-          value={currentMembers}
-          loadOptions={loadOptions}
-          onChange={handleChange}
-          isDisabled={isUpdating || isReadOnly}
-          isClearable={!isReadOnly}
-          isLoading={isUpdating}
-          placeholder={isReadOnly ? 'System-managed members' : (isGitHubTeam ? 'Add users (synced members are auto-managed)...' : 'Type to search and add users...')}
-          noOptionsMessage={({ inputValue }) =>
-            inputValue ? 'No users found' : 'Type to search users'
-          }
-          loadingMessage={() => 'Searching...'}
-          menuPortalTarget={document.body}
-          styles={getSelectStyles(isDark)}
-          {...(isReadOnly && {
-            components: { MultiValueRemove: () => null },
-          })}
-        />
+      <td style={{ minWidth: '320px' }}>
+        <MemberSummary members={group.users} />
+        <Button variant="link" size="sm" className="p-0 mt-2" onClick={openGroup}>
+          View members
+        </Button>
       </td>
       <td style={{ verticalAlign: 'middle' }}>
         <ResourceBadges resources={group.resources ?? []} />
       </td>
       <td style={{ width: '120px', verticalAlign: 'middle' }}>
-        <Button
-          variant="outline-secondary"
-          size="sm"
-          onClick={() => onEdit(group)}
-          title="Edit Properties"
-        >
-          Properties
-        </Button>
+        <div className="d-flex gap-1">
+          <Button variant="outline-dark" size="sm" onClick={openGroup}>
+            View
+          </Button>
+          <Button
+            variant="outline-secondary"
+            size="sm"
+            onClick={() => onEdit(group)}
+            title="Edit Properties"
+          >
+            Properties
+          </Button>
+        </div>
       </td>
     </tr>
   );
@@ -323,33 +196,6 @@ export function GroupList() {
   const handleEditGroup = useCallback((group: Group) => {
     setSelectedGroup(group);
     setShowEditModal(true);
-  }, []);
-
-  // Load user options for AsyncSelect
-  const loadUserOptions = useCallback(async (inputValue: string, excludeUsers: string[]): Promise<UserOption[]> => {
-    if (!inputValue || inputValue.length < 1) {
-      return [];
-    }
-    try {
-      const response = await api.getUsers({ offset: 0, limit: 20, nameFilter: inputValue });
-      const users = response.items || [];
-      return users
-        .filter(user => !excludeUsers.includes(user.name))
-        .map(user => ({
-          value: user.name,
-          label: user.admin ? `${user.name} (Admin)` : user.name,
-        }));
-    } catch (err) {
-      console.error('Failed to load users:', err);
-      return [];
-    }
-  }, []);
-
-  // Handle members change from GroupRow
-  const handleMembersChange = useCallback((groupName: string, newMembers: string[]) => {
-    setGroups(prev => prev.map(g =>
-      g.name === groupName ? { ...g, users: newMembers } : g
-    ));
   }, []);
 
   const handleCreateGroup = async () => {
@@ -535,8 +381,6 @@ export function GroupList() {
               key={group.name}
               group={group}
               onEdit={handleEditGroup}
-              onMembersChange={handleMembersChange}
-              loadUserOptions={loadUserOptions}
             />
           ))}
         </tbody>

@@ -20,6 +20,7 @@
 import { useState, useCallback, useMemo } from 'react';
 import { Modal, Button, Form, Alert, Spinner, InputGroup, Row, Col, Badge } from 'react-bootstrap';
 import * as api from '@auplc/shared';
+import { generateStrongPassword, getPasswordError, isStrongPassword, PASSWORD_RULES } from '@auplc/shared';
 
 interface Props {
   show: boolean;
@@ -38,6 +39,12 @@ interface CreatedUser {
   error?: string;
 }
 
+const parseBoundedInteger = (value: string, fallback: number, min: number, max: number) => {
+  const parsed = Number.parseInt(value, 10);
+  if (Number.isNaN(parsed)) return fallback;
+  return Math.min(Math.max(parsed, min), max);
+};
+
 export function CreateUserModal({ show, onHide, onSuccess, quotaEnabled = false, defaultQuota = 0 }: Props) {
   const [usernames, setUsernames] = useState('');
   const [password, setPassword] = useState('');
@@ -51,27 +58,21 @@ export function CreateUserModal({ show, onHide, onSuccess, quotaEnabled = false,
   const [prefix, setPrefix] = useState('');
   const [count, setCount] = useState(10);
   const [startNum, setStartNum] = useState(1);
+  const [suffixWidth, setSuffixWidth] = useState(2);
   const [quotaValue, setQuotaValue] = useState(String(defaultQuota || 0));
 
   const handleGenerateNames = useCallback(() => {
     if (!prefix.trim()) return;
-    const names = Array.from({ length: count }, (_, i) => `${prefix.trim()}${startNum + i}`);
+    const names = Array.from({ length: count }, (_, i) => {
+      const suffix = String(startNum + i);
+      return `${prefix.trim()}${suffixWidth > 0 ? suffix.padStart(suffixWidth, '0') : suffix}`;
+    });
     setUsernames(names.join('\n'));
-  }, [prefix, count, startNum]);
-
-  const generateRandomPassword = () => {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
-    let result = '';
-    for (let i = 0; i < 16; i++) {
-      result += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    return result;
-  };
+  }, [prefix, count, startNum, suffixWidth]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    setLoading(true);
 
     try {
       const names = usernames
@@ -81,110 +82,75 @@ export function CreateUserModal({ show, onHide, onSuccess, quotaEnabled = false,
 
       if (names.length === 0) {
         setError('Please enter at least one username');
-        setLoading(false);
         return;
       }
+
+      const passwordError = generateRandom ? null : getPasswordError(password);
+      if (passwordError) {
+        setError(passwordError);
+        return;
+      }
+
+      setLoading(true);
 
       // Generate passwords for all users upfront
       const passwordMap = new Map(
         names.map(username => [
           username,
-          generateRandom ? generateRandomPassword() : password,
-        ])
-      );
-
-      // Initialize result tracking
-      const results: Map<string, CreatedUser> = new Map(
-        names.map(username => [
-          username,
-          { username, password: passwordMap.get(username)!, status: 'created' as const, passwordSet: false, quotaSet: false },
+          generateRandom ? generateStrongPassword() : password,
         ])
       );
 
       const warnings: string[] = [];
 
-      // Step 1: Batch create users
-      let createdNames: string[] = [];
-      try {
-        const created = await api.createUsers(names, isAdmin);
-        // API returns only newly created users; existing ones are silently skipped
-        createdNames = created.map(u => u.name);
-        const existedNames = names.filter(n => !createdNames.includes(n));
-        for (const name of existedNames) {
-          const r = results.get(name)!;
-          r.status = 'existed';
-        }
-        if (existedNames.length > 0) {
-          warnings.push(`${existedNames.length} user(s) already existed: ${existedNames.join(', ')}`);
-        }
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Unknown error';
-        // If 409 (all users exist), mark them all as existed and continue with password/quota
-        if (msg.includes('already exist')) {
-          for (const name of names) {
-            results.get(name)!.status = 'existed';
-          }
-          createdNames = [];
-          warnings.push(`All ${names.length} user(s) already existed`);
-        } else {
-          // Fatal error - can't determine which users were created
-          setError(`Failed to create users: ${msg}`);
-          setLoading(false);
-          return;
-        }
-      }
-
-      // Step 2: Set passwords (only for newly created users)
-      if (createdNames.length > 0) {
-        const passwordEntries = createdNames.map(username => ({
-          username,
-          password: passwordMap.get(username)!,
-        }));
-
-        try {
-          const pwResult = await api.batchSetPasswords(passwordEntries, forceChange);
-          for (const r of pwResult.results) {
-            const entry = results.get(r.username);
-            if (entry) {
-              if (r.status === 'success') {
-                entry.passwordSet = true;
-              } else {
-                entry.error = r.error || 'Password set failed';
-              }
-            }
-          }
-          if (pwResult.failed > 0) {
-            warnings.push(`${pwResult.failed} password(s) failed to set`);
-          }
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : 'Unknown error';
-          warnings.push(`Password setting failed: ${msg}`);
-        }
-      }
-
-      // Step 3: Set quota if enabled (only for newly created users)
-      if (quotaEnabled && createdNames.length > 0) {
+      let quota: { amount?: number; unlimited?: boolean } | undefined;
+      if (quotaEnabled) {
         const input = quotaValue.trim();
         const isUnlimited = input === '-1' || input === '∞' || input.toLowerCase() === 'unlimited';
-        const amount = isUnlimited ? 0 : (parseInt(input) || 0);
-        if (isUnlimited || amount > 0) {
-          try {
-            await api.batchSetQuota(
-              createdNames.map(username => ({
-                username,
-                amount,
-                ...(isUnlimited ? { unlimited: true } : {}),
-              }))
-            );
-            for (const name of createdNames) {
-              const entry = results.get(name);
-              if (entry) entry.quotaSet = true;
-            }
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : 'Unknown error';
-            warnings.push(`Quota setting failed: ${msg}`);
-          }
+        if (!isUnlimited && input !== '' && !/^\d+$/.test(input)) {
+          setError('Initial quota must be a non-negative integer, -1, or unlimited');
+          return;
         }
+        const amount = isUnlimited ? 0 : (Number(input) || 0);
+        if (isUnlimited || amount > 0) {
+          quota = isUnlimited ? { amount: 0, unlimited: true } : { amount };
+        }
+      }
+
+      const userEntries = names.map(username => ({ username, password: passwordMap.get(username)! }));
+
+      const response = await api.provisionUsers({
+        users: userEntries,
+        admin: isAdmin,
+        force_change: forceChange,
+        quota,
+      });
+
+      const results = new Map<string, CreatedUser>();
+      for (const [index, entry] of userEntries.entries()) {
+        const r = response.results[index];
+        const displayUsername = r?.username || entry.username;
+        results.set(`${index}:${entry.username}`, {
+          username: displayUsername,
+          password: entry.password,
+          status: r?.status === 'existed'
+            ? 'existed'
+            : r?.created || r?.status === 'success'
+              ? 'created'
+              : 'failed',
+          passwordSet: r?.password_set ?? false,
+          quotaSet: r?.quota_set ?? false,
+          error: r?.error,
+        });
+      }
+
+      const existedNames = response.results.filter(r => r.status === 'existed').map(r => r.username);
+      if (existedNames.length > 0) {
+        warnings.push(`${existedNames.length} user(s) already existed: ${existedNames.join(', ')}`);
+      }
+      const failedResults = response.results.filter(r => r.status === 'failed');
+      if (failedResults.length > 0) {
+        warnings.push(...failedResults.map(r => `${r.username}: ${r.error || 'Provisioning failed'}`));
       }
 
       // Set warnings as non-fatal error for display
@@ -214,6 +180,7 @@ export function CreateUserModal({ show, onHide, onSuccess, quotaEnabled = false,
     setPrefix('');
     setCount(10);
     setStartNum(1);
+    setSuffixWidth(2);
     setQuotaValue(String(defaultQuota || 0));
     onHide();
   };
@@ -243,6 +210,9 @@ export function CreateUserModal({ show, onHide, onSuccess, quotaEnabled = false,
     a.click();
     URL.revokeObjectURL(url);
   };
+
+  const manualPasswordError = generateRandom ? null : getPasswordError(password);
+  const canSubmit = !loading && (generateRandom || isStrongPassword(password));
 
   return (
     <Modal show={show} onHide={handleClose} size="lg">
@@ -276,8 +246,21 @@ export function CreateUserModal({ show, onHide, onSuccess, quotaEnabled = false,
                       min={0}
                       max={9999}
                       value={startNum}
-                      onChange={(e) => setStartNum(parseInt(e.target.value) || 1)}
+                      onChange={(e) => setStartNum(parseBoundedInteger(e.target.value, 1, 0, 9999))}
                       style={{ width: 70 }}
+                    />
+                  </InputGroup>
+                </Col>
+                <Col xs="auto">
+                  <InputGroup size="sm">
+                    <InputGroup.Text>digits (0 = none)</InputGroup.Text>
+                    <Form.Control
+                      type="number"
+                      min={0}
+                      max={6}
+                      value={suffixWidth}
+                      onChange={(e) => setSuffixWidth(parseBoundedInteger(e.target.value, 0, 0, 6))}
+                      style={{ width: 60 }}
                     />
                   </InputGroup>
                 </Col>
@@ -289,7 +272,7 @@ export function CreateUserModal({ show, onHide, onSuccess, quotaEnabled = false,
                       min={1}
                       max={1000}
                       value={count}
-                      onChange={(e) => setCount(parseInt(e.target.value) || 1)}
+                      onChange={(e) => setCount(parseBoundedInteger(e.target.value, 1, 1, 1000))}
                       style={{ width: 70 }}
                     />
                   </InputGroup>
@@ -343,6 +326,13 @@ export function CreateUserModal({ show, onHide, onSuccess, quotaEnabled = false,
               />
             </Form.Group>
 
+            <Alert variant="info" className="py-2">
+              <div className="fw-semibold mb-1">Native passwords must meet all rules before users are created.</div>
+              <div className="small">
+                {PASSWORD_RULES.map((rule) => rule.label).join(' · ')}
+              </div>
+            </Alert>
+
             {!generateRandom && (
               <Form.Group className="mb-3">
                 <Form.Label>Password (same for all users)</Form.Label>
@@ -354,17 +344,28 @@ export function CreateUserModal({ show, onHide, onSuccess, quotaEnabled = false,
                     placeholder="Enter password"
                     required={!generateRandom}
                     minLength={8}
+                    isInvalid={Boolean(manualPasswordError)}
+                    isValid={isStrongPassword(password)}
                   />
                   <Button
                     variant="outline-secondary"
-                    onClick={() => setPassword(generateRandomPassword())}
+                    onClick={() => setPassword(generateStrongPassword())}
                   >
                     Generate
                   </Button>
+                  {manualPasswordError && (
+                    <Form.Control.Feedback type="invalid">
+                      {manualPasswordError}
+                    </Form.Control.Feedback>
+                  )}
                 </InputGroup>
-                <Form.Text className="text-muted">
-                  Minimum 8 characters
-                </Form.Text>
+                <div className="mt-2 small">
+                  {PASSWORD_RULES.map((rule, i) => (
+                    <div key={i} className={rule.test(password) ? 'text-success' : 'text-danger'}>
+                      {rule.test(password) ? '✓' : '●'} {rule.label}
+                    </div>
+                  ))}
+                </div>
               </Form.Group>
             )}
 
@@ -485,7 +486,7 @@ export function CreateUserModal({ show, onHide, onSuccess, quotaEnabled = false,
             <Button
               variant="dark"
               onClick={handleSubmit}
-              disabled={loading}
+              disabled={!canSubmit}
             >
               {loading ? (
                 <>

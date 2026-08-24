@@ -41,12 +41,63 @@ from __future__ import annotations
 
 import os
 from contextlib import suppress
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypedDict
 
 import bcrypt
 
 if TYPE_CHECKING:
-    pass
+    from core.config import AuthCapabilities
+
+
+class AuthTemplateVars(TypedDict):
+    auth_auto_login: bool
+    auth_dummy: bool
+    auth_native: bool
+    auth_github: bool
+    password_management_enabled: bool
+    hide_logout: bool
+
+
+def _build_auth_template_vars(auth: AuthCapabilities) -> AuthTemplateVars:
+    auth.validate()
+    return {
+        "auth_auto_login": auth.auto_login,
+        "auth_dummy": auth.dummy,
+        "auth_native": auth.native,
+        "auth_github": auth.github,
+        "password_management_enabled": auth.native,
+        "hide_logout": auth.auto_login,
+    }
+
+
+def _bootstrap_admin_password(admin_username: str, admin_password: str) -> None:
+    from core.authenticators.models import UserPassword
+    from core.database import session_scope
+
+    created = False
+    with session_scope() as session:
+        user_pw = session.query(UserPassword).filter_by(username=admin_username).first()
+        if user_pw is None:
+            password_hash = bcrypt.hashpw(admin_password.encode(), bcrypt.gensalt())
+            session.add(
+                UserPassword(
+                    username=admin_username,
+                    password_hash=password_hash,
+                    force_change=False,
+                )
+            )
+            created = True
+
+    if created:
+        print(f"[SETUP] Admin '{admin_username}' password set automatically")
+    else:
+        print(f"[SETUP] Admin '{admin_username}' password already set")
+
+
+def _configure_api_token(c: Any, api_token: str | None, admin_username: str) -> None:
+    if api_token:
+        c.JupyterHub.api_tokens = {api_token: admin_username}
+        print(f"[SETUP] API token loaded for administrator '{admin_username}'")
 
 
 def setup_hub(c: Any) -> None:
@@ -66,9 +117,7 @@ def setup_hub(c: Any) -> None:
     from core import z2jh
     from core.authenticators import (
         GITHUB_USERNAME_PREFIX,
-        CustomFirstUseAuthenticator,
-        CustomGitHubOAuthenticator,
-        create_authenticator,
+        configure_authenticator,
     )
     from core.config import HubConfig
     from core.database import create_all_tables, init_database
@@ -78,11 +127,18 @@ def setup_hub(c: Any) -> None:
 
     # Get the initialized config singleton
     config = HubConfig.get()
-    github_app_id = z2jh.get_config("hub.config.GitHubOAuthenticator.app_id", "")
-    github_app_installation_id = z2jh.get_config("hub.config.GitHubOAuthenticator.installation_id", "")
-    github_app_private_key = z2jh.get_config("hub.config.GitHubOAuthenticator.private_key", "")
-    github_app_private_key_file = z2jh.get_config("hub.config.GitHubOAuthenticator.private_key_file", "")
-    github_team_sync_ttl_seconds = z2jh.get_config("hub.config.GitHubOAuthenticator.team_sync_ttl_seconds", 3600)
+    auth = config.auth
+    github_app_id = ""
+    github_app_installation_id = ""
+    github_app_private_key = ""
+    github_app_private_key_file = ""
+    github_team_sync_ttl_seconds = 3600
+    if auth.github:
+        github_app_id = z2jh.get_config("hub.config.GitHubOAuthenticator.app_id", "")
+        github_app_installation_id = z2jh.get_config("hub.config.GitHubOAuthenticator.installation_id", "")
+        github_app_private_key = z2jh.get_config("hub.config.GitHubOAuthenticator.private_key", "")
+        github_app_private_key_file = z2jh.get_config("hub.config.GitHubOAuthenticator.private_key_file", "")
+        github_team_sync_ttl_seconds = z2jh.get_config("hub.config.GitHubOAuthenticator.team_sync_ttl_seconds", 3600)
 
     # =========================================================================
     # Configure Spawner
@@ -109,7 +165,11 @@ def setup_hub(c: Any) -> None:
     # Ensure system-managed groups exist at startup (before any user logs in).
     # Note: load_groups does NOT set properties on existing groups, so the
     # source=system backfill is handled lazily in the admin groups API handler.
-    c.JupyterHub.load_groups = {"native-users": [], "github-users": []}
+    c.JupyterHub.load_groups = {}
+    if auth.native:
+        c.JupyterHub.load_groups["native-users"] = []
+    if auth.github:
+        c.JupyterHub.load_groups["github-users"] = []
 
     # =========================================================================
     # Configure Authenticator
@@ -122,7 +182,7 @@ def setup_hub(c: Any) -> None:
         if auth_state is None:
             spawner.github_access_token = None
             # Still assign native users to their default group
-            if not spawner.user.name.startswith(GITHUB_USERNAME_PREFIX):
+            if auth.native and not spawner.user.name.startswith(GITHUB_USERNAME_PREFIX):
                 try:
                     from core.groups import assign_user_to_group
 
@@ -132,7 +192,7 @@ def setup_hub(c: Any) -> None:
             return
         spawner.github_access_token = auth_state.get("access_token")
 
-        if spawner.user.name.startswith(GITHUB_USERNAME_PREFIX):
+        if auth.github and spawner.user.name.startswith(GITHUB_USERNAME_PREFIX):
             try:
                 from core.groups import sync_github_teams_for_user
 
@@ -161,7 +221,7 @@ def setup_hub(c: Any) -> None:
                 assign_user_to_group(spawner.user, "github-users", spawner.user.db)
             except Exception as e:
                 print(f"[GROUPS] Warning: Failed to assign github-users group for {spawner.user.name}: {e}")
-        elif not spawner.user.name.startswith(GITHUB_USERNAME_PREFIX):
+        elif auth.native and not spawner.user.name.startswith(GITHUB_USERNAME_PREFIX):
             # Native user with auth_state but no GitHub teams
             try:
                 from core.groups import assign_user_to_group
@@ -172,23 +232,7 @@ def setup_hub(c: Any) -> None:
 
     c.Spawner.auth_state_hook = auth_state_hook
 
-    # Set authenticator based on mode
-    c.JupyterHub.authenticator_class = create_authenticator(config.auth_mode)
-
-    if config.auth_mode == "auto-login":
-        c.Authenticator.allow_all = True
-    elif config.auth_mode == "multi":
-        c.MultiAuthenticator.authenticators = [
-            {
-                "authenticator_class": CustomGitHubOAuthenticator,
-                "url_prefix": "/github",
-            },
-            {
-                "authenticator_class": CustomFirstUseAuthenticator,
-                "url_prefix": "/native",
-                "config": {"prefix": "", "allow_all": True},
-            },
-        ]
+    configure_authenticator(c, auth)
 
     # =========================================================================
     # Configure Handlers
@@ -202,7 +246,6 @@ def setup_hub(c: Any) -> None:
         default_quota=config.quota.defaultQuota,
         team_resource_mapping=dict(config.teams.mapping),
         github_org=config.github_org_name,
-        auth_mode=config.auth_mode,
         platform_name=config.platform_display_name,
     )
 
@@ -329,13 +372,27 @@ def setup_hub(c: Any) -> None:
             print(f"[QUOTA] Warning: Failed to run quota migration: {e}")
 
     # =========================================================================
-    # API Token
+    # Auto-Create Admin User
     # =========================================================================
 
+    admin_password = os.environ.get("JUPYTERHUB_ADMIN_PASSWORD", "")
+    admin_username = os.environ.get("JUPYTERHUB_ADMIN_USERNAME", "admin")
     api_token = os.environ.get("JUPYTERHUB_API_TOKEN")
-    if api_token:
-        c.JupyterHub.api_tokens = {api_token: "admin"}
-        print("[SETUP] API token loaded for admin user")
+
+    if admin_password and not auth.native:
+        raise RuntimeError("Administrator password bootstrap requires native authentication")
+
+    if admin_password:
+        try:
+            _bootstrap_admin_password(admin_username, admin_password)
+        except Exception as e:
+            raise RuntimeError("Failed to bootstrap administrator credentials") from e
+
+    _configure_api_token(c, api_token, admin_username)
+
+    if admin_password:
+        c.Authenticator.admin_users = {admin_username}
+        print(f"[SETUP] Admin user configured: {admin_username}")
 
     # =========================================================================
     # Template Paths
@@ -345,46 +402,17 @@ def setup_hub(c: Any) -> None:
     c.JupyterHub.template_paths = [template_path]
 
     # =========================================================================
-    # Auto-Create Admin User
-    # =========================================================================
-
-    admin_password = os.environ.get("JUPYTERHUB_ADMIN_PASSWORD", "")
-    admin_username = "admin"
-
-    if admin_password:
-        c.Authenticator.admin_users = {admin_username}
-        print(f"[SETUP] Admin user configured: {admin_username}")
-
-        try:
-            from core.authenticators.models import UserPassword
-            from core.database import session_scope
-
-            with session_scope() as session:
-                user_pw = session.query(UserPassword).filter_by(username=admin_username).first()
-                if user_pw:
-                    print(f"[SETUP] Admin '{admin_username}' password already set")
-                else:
-                    password_hash = bcrypt.hashpw(admin_password.encode(), bcrypt.gensalt())
-                    user_pw = UserPassword(
-                        username=admin_username,
-                        password_hash=password_hash,
-                        force_change=False,
-                    )
-                    session.add(user_pw)
-                    print(f"[SETUP] Admin '{admin_username}' password set automatically")
-        except Exception as e:
-            print(f"[SETUP] Warning: Failed to set admin password: {e}")
-
-    # =========================================================================
     # Template Vars
     # =========================================================================
 
     if not isinstance(c.JupyterHub.template_vars, dict):
         c.JupyterHub.template_vars = {}
-    c.JupyterHub.template_vars["authenticator_mode"] = config.auth_mode  # type: ignore[assignment]
-    c.JupyterHub.template_vars["hide_logout"] = config.auth_mode == "auto-login"  # type: ignore[assignment]
+    c.JupyterHub.template_vars.update(_build_auth_template_vars(auth))
     c.JupyterHub.template_vars["cluster_name"] = config.cluster_name  # type: ignore[assignment]
     c.JupyterHub.template_vars["platform_name"] = config.platform_display_name  # type: ignore[assignment]
 
-    print(f"[SETUP] Hub setup complete: auth_mode={config.auth_mode}")
+    print(
+        "[SETUP] Hub setup complete: auth="
+        f"auto_login:{auth.auto_login},dummy:{auth.dummy},native:{auth.native},github:{auth.github}"
+    )
     print(f"[SETUP] template_vars: {c.JupyterHub.template_vars}")

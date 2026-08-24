@@ -1,0 +1,140 @@
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+---
+- name: Discover fleet GPU-access evidence
+  hosts: k3s_cluster
+  gather_facts: false
+  become: false
+  ignore_unreachable: true
+  vars:
+    _auplc_gpu_access_unknown_evidence:
+      reachable: false
+      lspci:
+        rc: 255
+        stdout: ""
+      sysfs:
+        rc: 255
+        stdout: ""
+  pre_tasks:
+    - name: Require a safe local discovery evidence output path
+      ansible.builtin.assert:
+        that:
+          - gpu_access_discovery_output_path is defined
+          - gpu_access_discovery_output_path is string
+          - gpu_access_discovery_output_path is match('^/')
+        fail_msg: Set gpu_access_discovery_output_path to an absolute controller-local path before running discovery.
+      delegate_to: localhost
+      run_once: true
+      changed_when: false
+
+    - name: Inspect local discovery evidence parent
+      ansible.builtin.stat:
+        path: "{{ gpu_access_discovery_output_path | dirname }}"
+        follow: false
+      delegate_to: localhost
+      run_once: true
+      register: _auplc_discovery_output_parent
+      changed_when: false
+
+    - name: Require safe local discovery evidence parent
+      ansible.builtin.assert:
+        that:
+          - _auplc_discovery_output_parent.stat.exists
+          - _auplc_discovery_output_parent.stat.isdir
+          - not _auplc_discovery_output_parent.stat.islnk
+        fail_msg: Discovery output parent must be an existing non-symlink directory.
+      delegate_to: localhost
+      run_once: true
+      changed_when: false
+
+    - name: Inspect local discovery evidence destination
+      ansible.builtin.stat:
+        path: "{{ gpu_access_discovery_output_path }}"
+        follow: false
+      delegate_to: localhost
+      run_once: true
+      register: _auplc_discovery_output_destination
+      changed_when: false
+
+    - name: Require safe local discovery evidence destination
+      ansible.builtin.assert:
+        that:
+          - >-
+            not _auplc_discovery_output_destination.stat.exists or
+            (_auplc_discovery_output_destination.stat.isreg and
+            not _auplc_discovery_output_destination.stat.islnk)
+        fail_msg: Discovery output destination must be absent or a regular non-symlink file.
+      delegate_to: localhost
+      run_once: true
+      changed_when: false
+  tasks:
+    - name: Discover AMD VGA display BDFs with lspci
+      ansible.builtin.command:
+        argv: [lspci, -Dnn, -d, "1002::0300"]
+      register: _auplc_discovery_lspci_vga
+      changed_when: false
+      failed_when: false
+
+    - name: Discover AMD 3D display BDFs with lspci
+      ansible.builtin.command:
+        argv: [lspci, -Dnn, -d, "1002::0302"]
+      register: _auplc_discovery_lspci_3d
+      changed_when: false
+      failed_when: false
+
+    - name: Discover AMD display-controller BDFs with lspci
+      ansible.builtin.command:
+        argv: [lspci, -Dnn, -d, "1002::0380"]
+      register: _auplc_discovery_lspci_display
+      changed_when: false
+      failed_when: false
+
+    - name: Combine AMD display lspci evidence
+      ansible.builtin.set_fact:
+        _auplc_discovery_lspci:
+          rc: >-
+            {{ 0 if _auplc_discovery_lspci_vga.rc == 0 and
+            _auplc_discovery_lspci_3d.rc == 0 and
+            _auplc_discovery_lspci_display.rc == 0 else 1 }}
+          stdout: >-
+            {{ [_auplc_discovery_lspci_vga.stdout | default(''),
+            _auplc_discovery_lspci_3d.stdout | default(''),
+            _auplc_discovery_lspci_display.stdout | default('')]
+            | reject('equalto', '') | join('\n') }}
+      changed_when: false
+
+    - name: Discover AMD display BDFs through shared sysfs detector
+      ansible.builtin.include_role:
+        name: gpu_access
+        tasks_from: detect
+
+    - name: Record machine-readable GPU access discovery evidence
+      ansible.builtin.set_fact:
+        _auplc_gpu_access_discovery_evidence:
+          host: "{{ inventory_hostname }}"
+          reachable: true
+          lspci:
+            rc: "{{ _auplc_discovery_lspci.rc }}"
+            stdout: "{{ _auplc_discovery_lspci.stdout | default('') }}"
+          sysfs:
+            rc: "{{ _auplc_gpu_access_sysfs.rc }}"
+            stdout: "{{ _auplc_gpu_access_sysfs.stdout | default('') }}"
+      changed_when: false
+
+    - name: Write machine-readable GPU access discovery evidence locally
+      ansible.builtin.copy:
+        content: |
+          {"version":1,"hosts":[{% for discovery_host in ansible_play_hosts_all %}
+          {{ (
+            hostvars[discovery_host]._auplc_gpu_access_discovery_evidence
+            | default(
+              _auplc_gpu_access_unknown_evidence | combine({'host': discovery_host}),
+              true
+            )
+            | to_json
+          ) }}{% if not loop.last %},{% endif %}
+          {% endfor %}]}
+        dest: "{{ gpu_access_discovery_output_path }}"
+        mode: "0600"
+      delegate_to: localhost
+      run_once: true
+      changed_when: false

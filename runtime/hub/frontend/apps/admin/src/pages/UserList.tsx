@@ -19,7 +19,7 @@
 
 import React, { useState, useEffect, useCallback, useMemo, memo } from 'react';
 import { Table, Button, Form, InputGroup, Badge, Spinner, Alert, ButtonGroup, Modal, Dropdown } from 'react-bootstrap';
-import type { User, UserQuota, Server } from '@auplc/shared';
+import type { User, UserQuota, Server, Group } from '@auplc/shared';
 import * as api from '@auplc/shared';
 import { isGitHubUser, isNativeUser as isNativeUsername } from '@auplc/shared';
 import { CreateUserModal } from '../components/CreateUserModal';
@@ -358,6 +358,7 @@ const ServerDetails = memo(function ServerDetails({ serverName, server, userName
 
 export function UserList() {
   const [users, setUsers] = useState<User[]>([]);
+  const [groups, setGroups] = useState<Group[]>([]);
   const [totalUsers, setTotalUsers] = useState(0);
   const [loading, setLoading] = useState(true);
   const [initialLoading, setInitialLoading] = useState(true);
@@ -387,6 +388,9 @@ export function UserList() {
   const [userToDelete, setUserToDelete] = useState<User | null>(null);
   const [showBatchDeleteModal, setShowBatchDeleteModal] = useState(false);
   const [showBatchPasswordModal, setShowBatchPasswordModal] = useState(false);
+  const [showBatchGroupModal, setShowBatchGroupModal] = useState(false);
+  const [batchGroupMode, setBatchGroupMode] = useState<'add' | 'remove'>('add');
+  const [batchGroupName, setBatchGroupName] = useState('');
   const [showQuotaRefreshModal, setShowQuotaRefreshModal] = useState(false);
   const [usageUsername, setUsageUsername] = useState<string | null>(null);
 
@@ -409,6 +413,57 @@ export function UserList() {
       return user && isNativeUsername(user.name);
     });
   }, [selectedUsers, users]);
+
+  const mutableGroups = useMemo(
+    () => groups.filter(group => group.source !== 'system'),
+    [groups]
+  );
+
+  const selectedUsernames = useMemo(
+    () => Array.from(selectedUsers),
+    [selectedUsers]
+  );
+
+  const allCurrentPageSelected = useMemo(
+    () => users.length > 0 && users.every(user => selectedUsers.has(user.name)),
+    [selectedUsers, users]
+  );
+
+  const selectedOnCurrentPage = useMemo(
+    () => users.filter(user => selectedUsers.has(user.name)).length,
+    [selectedUsers, users]
+  );
+
+  const batchGroupNameTrimmed = batchGroupName.trim();
+
+  const existingBatchGroup = useMemo(
+    () => groups.find(group => group.name === batchGroupNameTrimmed),
+    [batchGroupNameTrimmed, groups]
+  );
+
+  const selectedBatchGroup = useMemo(
+    () => mutableGroups.find(group => group.name === batchGroupNameTrimmed),
+    [batchGroupNameTrimmed, mutableGroups]
+  );
+
+  const canCreateBatchGroup = useMemo(
+    () => (
+      batchGroupMode === 'add'
+      && batchGroupNameTrimmed.length > 0
+      && !existingBatchGroup
+      && /^[a-zA-Z0-9_-]+$/.test(batchGroupNameTrimmed)
+    ),
+    [batchGroupMode, batchGroupNameTrimmed, existingBatchGroup]
+  );
+
+  const batchGroupInputInvalid = useMemo(
+    () => (
+      batchGroupNameTrimmed.length > 0
+      && !selectedBatchGroup
+      && !canCreateBatchGroup
+    ),
+    [batchGroupNameTrimmed, canCreateBatchGroup, selectedBatchGroup]
+  );
 
   // Debounce search input
   useEffect(() => {
@@ -476,6 +531,15 @@ export function UserList() {
     }
   }, []);
 
+  const loadGroups = useCallback(async () => {
+    try {
+      const response = await api.getGroups();
+      setGroups(response.groups);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load groups');
+    }
+  }, []);
+
   // Load users when pagination, search, sort, or filter changes
   useEffect(() => {
     loadUsers();
@@ -485,6 +549,10 @@ export function UserList() {
   useEffect(() => {
     loadQuota();
   }, [loadQuota]);
+
+  useEffect(() => {
+    loadGroups();
+  }, [loadGroups]);
 
   const handleQuotaEdit = (username: string, currentBalance: number, isUnlimited: boolean) => {
     setEditingQuota(username);
@@ -566,6 +634,47 @@ export function UserList() {
     }
   };
 
+  const openBatchGroupModal = (mode: 'add' | 'remove') => {
+    if (selectedUsers.size === 0) {
+      setError('Please select users first');
+      return;
+    }
+    setBatchGroupMode(mode);
+    setBatchGroupName('');
+    setError(null);
+    setShowBatchGroupModal(true);
+  };
+
+  const handleBatchGroupSave = async () => {
+    if (selectedUsernames.length === 0) {
+      setError('Please select users first');
+      return;
+    }
+    if (!selectedBatchGroup && !canCreateBatchGroup) {
+      setError(batchGroupMode === 'add'
+        ? 'Select a mutable group or enter a new group name'
+        : 'Please select a mutable group from the list');
+      return;
+    }
+
+    try {
+      setActionLoading('batch-group');
+      const targetGroup = selectedBatchGroup ?? await api.createGroup(batchGroupNameTrimmed);
+      if (batchGroupMode === 'add') {
+        await api.addUsersToGroup(targetGroup.name, selectedUsernames);
+      } else {
+        await api.removeUsersFromGroup(targetGroup.name, selectedUsernames);
+      }
+      await Promise.all([loadUsers(true), loadGroups()]);
+      setShowBatchGroupModal(false);
+      setSelectedUsers(new Set());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update group membership');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   // Handle sort column click - only allow sortable columns
   const handleSort = (column: typeof sortColumn) => {
     // Only allow sorting by columns the API supports
@@ -613,7 +722,7 @@ export function UserList() {
     setQuotaInput(value);
   }, []);
 
-  const handleStartServer = async (user: User) => {
+  const handleStartServer = useCallback(async (user: User) => {
     try {
       setActionLoading(`start-${user.name}`);
       await api.startServer(user.name);
@@ -623,9 +732,9 @@ export function UserList() {
     } finally {
       setActionLoading(null);
     }
-  };
+  }, [loadUsers]);
 
-  const handleStopServer = async (user: User) => {
+  const handleStopServer = useCallback(async (user: User) => {
     try {
       setActionLoading(`stop-${user.name}`);
       await api.stopServer(user.name);
@@ -635,7 +744,7 @@ export function UserList() {
     } finally {
       setActionLoading(null);
     }
-  };
+  }, [loadUsers]);
 
   const handleStartAll = async () => {
     const usersToStart = selectedUsers.size > 0
@@ -679,13 +788,15 @@ export function UserList() {
 
   const toggleSelectAll = useCallback(() => {
     setSelectedUsers(prev => {
-      if (prev.size === users.length) {
-        return new Set();
+      const newSelected = new Set(prev);
+      if (allCurrentPageSelected) {
+        users.forEach(user => newSelected.delete(user.name));
       } else {
-        return new Set(users.map(u => u.name));
+        users.forEach(user => newSelected.add(user.name));
       }
+      return newSelected;
     });
-  }, [users]);
+  }, [allCurrentPageSelected, users]);
 
   const openPasswordModal = useCallback((user: User) => {
     setSelectedUser(user);
@@ -740,15 +851,6 @@ export function UserList() {
     }
   };
 
-  // Memoize start/stop server handlers with useCallback
-  const handleStartServerCallback = useCallback((user: User) => {
-    handleStartServer(user);
-  }, []);
-
-  const handleStopServerCallback = useCallback((user: User) => {
-    handleStopServer(user);
-  }, []);
-
   // Only show full-screen spinner on initial load
   if (initialLoading) {
     return (
@@ -783,40 +885,59 @@ export function UserList() {
             {actionLoading === 'stop-all' ? <Spinner animation="border" size="sm" /> : 'Stop All'}
           </Button>
           {quotaEnabled && (
-            <>
-              <Button
-                variant="secondary"
-                onClick={() => setShowBatchQuotaModal(true)}
-                disabled={selectedUsers.size === 0}
-                title={selectedUsers.size === 0 ? 'Select users first' : `Set quota for ${selectedUsers.size} users`}
-              >
-                Set Quota ({selectedUsers.size})
-              </Button>
-              <Button
-                variant="secondary"
-                onClick={() => setShowQuotaRefreshModal(true)}
-                title="Refresh quota for all users"
-              >
-                <i className="bi bi-arrow-clockwise me-1" />Refresh Quota
-              </Button>
-            </>
+            <Button
+              variant="secondary"
+              onClick={() => setShowQuotaRefreshModal(true)}
+              title="Refresh quota for all users"
+            >
+              <i className="bi bi-arrow-clockwise me-1" />Refresh Quota
+            </Button>
           )}
-          <Button
-            variant="secondary"
-            onClick={() => setShowBatchPasswordModal(true)}
-            disabled={nativeSelected.length === 0}
-            title={nativeSelected.length === 0 ? 'Select native users first' : `Reset passwords for ${nativeSelected.length} users`}
-          >
-            Reset PW ({nativeSelected.length})
-          </Button>
-          <Button
-            variant="outline-danger"
-            onClick={() => setShowBatchDeleteModal(true)}
-            disabled={deletableSelected.length === 0}
-            title={deletableSelected.length === 0 ? 'Select users first' : `Delete ${deletableSelected.length} users`}
-          >
-            Delete ({deletableSelected.length})
-          </Button>
+          <Dropdown>
+            <Dropdown.Toggle
+              variant="secondary"
+              disabled={selectedUsers.size === 0 || actionLoading !== null}
+              title={selectedUsers.size === 0 ? 'Select users first' : `Actions for ${selectedUsers.size} selected users`}
+            >
+              Selected ({selectedUsers.size})
+            </Dropdown.Toggle>
+            <Dropdown.Menu>
+              {quotaEnabled && (
+                <Dropdown.Item onClick={() => setShowBatchQuotaModal(true)}>
+                  <i className="bi bi-speedometer2 me-2" />Set Quota
+                </Dropdown.Item>
+              )}
+              <Dropdown.Item
+                onClick={() => setShowBatchPasswordModal(true)}
+                disabled={nativeSelected.length === 0}
+                title={nativeSelected.length === 0 ? 'No native users selected' : `Reset passwords for ${nativeSelected.length} users`}
+              >
+                <i className="bi bi-key me-2" />Reset PW ({nativeSelected.length})
+              </Dropdown.Item>
+              <Dropdown.Divider />
+              <Dropdown.Item
+                onClick={() => openBatchGroupModal('add')}
+              >
+                <i className="bi bi-person-plus me-2" />Add to group
+              </Dropdown.Item>
+              <Dropdown.Item
+                onClick={() => openBatchGroupModal('remove')}
+                disabled={mutableGroups.length === 0}
+                title={mutableGroups.length === 0 ? 'No mutable groups available' : undefined}
+              >
+                <i className="bi bi-person-dash me-2" />Remove from group
+              </Dropdown.Item>
+              <Dropdown.Divider />
+              <Dropdown.Item
+                className="text-danger"
+                onClick={() => setShowBatchDeleteModal(true)}
+                disabled={deletableSelected.length === 0}
+                title={deletableSelected.length === 0 ? 'No deletable users selected' : `Delete ${deletableSelected.length} users`}
+              >
+                <i className="bi bi-trash me-2" />Delete ({deletableSelected.length})
+              </Dropdown.Item>
+            </Dropdown.Menu>
+          </Dropdown>
           <Button
             variant="danger"
             onClick={handleShutdownHub}
@@ -894,6 +1015,21 @@ export function UserList() {
         />
       </div>
 
+      {selectedUsers.size > 0 && (
+        <Alert variant="light" className="border py-2 d-flex justify-content-between align-items-center">
+          <span>
+            <strong>{selectedUsers.size}</strong> user(s) selected
+            {selectedOnCurrentPage !== selectedUsers.size && (
+              <span className="text-muted"> · {selectedOnCurrentPage} on this page</span>
+            )}
+            <span className="text-muted"> · header checkbox selects this page only</span>
+          </span>
+          <Button variant="outline-secondary" size="sm" onClick={() => setSelectedUsers(new Set())}>
+            Clear selection
+          </Button>
+        </Alert>
+      )}
+
       {/* User Table */}
       <Table striped hover responsive>
         <thead>
@@ -902,8 +1038,9 @@ export function UserList() {
             <th style={{ width: '40px' }}>
               <Form.Check
                 type="checkbox"
-                checked={selectedUsers.size === users.length && users.length > 0}
+                checked={allCurrentPageSelected}
                 onChange={toggleSelectAll}
+                title="Select users on this page"
               />
             </th>
             <th style={{ cursor: 'pointer' }} onClick={() => handleSort('name')}>
@@ -946,8 +1083,8 @@ export function UserList() {
               onQuotaInputChange={handleQuotaInputChange}
               onQuotaSave={handleQuotaSave}
               onQuotaCancel={handleQuotaCancel}
-              onStartServer={handleStartServerCallback}
-              onStopServer={handleStopServerCallback}
+              onStartServer={handleStartServer}
+              onStopServer={handleStopServer}
               onEditUser={openEditModal}
               onPasswordReset={openPasswordModal}
               onDeleteUser={openDeleteModal}
@@ -1098,6 +1235,110 @@ export function UserList() {
         usernames={nativeSelected}
         onHide={() => setShowBatchPasswordModal(false)}
       />
+
+      {/* Batch Group Membership Modal */}
+      <Modal
+        show={showBatchGroupModal}
+        onHide={() => {
+          if (actionLoading !== 'batch-group') setShowBatchGroupModal(false);
+        }}
+      >
+        <Modal.Header closeButton>
+          <Modal.Title>
+            {batchGroupMode === 'add' ? 'Add Users to Group' : 'Remove Users from Group'}
+          </Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          <Alert variant={batchGroupMode === 'add' ? 'info' : 'warning'} className="py-2">
+            This will {batchGroupMode} <strong>{selectedUsernames.length}</strong> selected user(s){' '}
+            {batchGroupMode === 'add' ? 'to' : 'from'} the selected group.
+            {batchGroupMode === 'remove' && ' Users who are not members are skipped.'}
+          </Alert>
+
+          {batchGroupMode === 'remove' && selectedBatchGroup?.source === 'github-team' && (
+            <Alert variant="warning" className="py-2">
+              <i className="bi bi-github me-1" />
+              This is a GitHub-synced group. Members synced from GitHub may be added back after login or group synchronization.
+              Use this mainly to remove manually added members.
+            </Alert>
+          )}
+
+          <div className="mb-3">
+            <strong>Users:</strong>{' '}
+            {selectedUsernames.slice(0, 10).map(name => (
+              <Badge key={name} bg="secondary" className="me-1">{name}</Badge>
+            ))}
+            {selectedUsernames.length > 10 && (
+              <Badge bg="secondary">+{selectedUsernames.length - 10} more</Badge>
+            )}
+          </div>
+
+          <Form.Group>
+            <Form.Label>Group</Form.Label>
+            <Form.Control
+              type="text"
+              list="batch-group-options"
+              value={batchGroupName}
+              onChange={(e) => setBatchGroupName(e.target.value)}
+              placeholder="Type or select a group"
+              disabled={actionLoading === 'batch-group'}
+              isInvalid={batchGroupInputInvalid}
+              autoComplete="off"
+            />
+            <datalist id="batch-group-options">
+              {mutableGroups.map(group => (
+                <option key={group.name} value={group.name}>
+                  {group.users.length} {group.users.length === 1 ? 'member' : 'members'}
+                  {group.source === 'github-team' ? ' · GitHub' : ''}
+                </option>
+              ))}
+            </datalist>
+            {batchGroupInputInvalid && (
+              <Form.Control.Feedback type="invalid">
+                {existingBatchGroup?.source === 'system'
+                  ? 'System-managed groups are read-only.'
+                  : batchGroupMode === 'add'
+                    ? 'Use letters, numbers, hyphens, and underscores for new group names.'
+                    : 'Select a mutable group from the suggestions.'}
+              </Form.Control.Feedback>
+            )}
+            {canCreateBatchGroup && (
+              <Form.Text className="text-success">
+                New group &quot;{batchGroupNameTrimmed}&quot; will be created before adding users.
+              </Form.Text>
+            )}
+            <Form.Text className="text-muted">
+              Start typing to search. {batchGroupMode === 'add'
+                ? 'You can also enter a new group name.'
+                : 'Remove requires an existing mutable group.'}{' '}
+              System-managed groups are read-only and are not listed here.
+            </Form.Text>
+          </Form.Group>
+        </Modal.Body>
+        <Modal.Footer>
+          <Button
+            variant="secondary"
+            onClick={() => setShowBatchGroupModal(false)}
+            disabled={actionLoading === 'batch-group'}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="dark"
+            onClick={handleBatchGroupSave}
+            disabled={actionLoading === 'batch-group' || (!selectedBatchGroup && !canCreateBatchGroup)}
+          >
+            {actionLoading === 'batch-group' ? (
+              <>
+                <Spinner animation="border" size="sm" className="me-2" />
+                Updating...
+              </>
+            ) : (
+              `${canCreateBatchGroup ? 'Create Group and Add' : batchGroupMode === 'add' ? 'Add' : 'Remove'} ${selectedUsernames.length} Users`
+            )}
+          </Button>
+        </Modal.Footer>
+      </Modal>
 
       {/* Batch Delete Confirmation Modal */}
       <ConfirmModal

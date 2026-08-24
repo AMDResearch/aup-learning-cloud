@@ -1,0 +1,42 @@
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+
+---
+- name: Validate GPU access enablement policy
+  ansible.builtin.assert:
+    that:
+      - auplc_gpu_access_enabled is defined
+      - >-
+        auplc_gpu_access_enabled is boolean or
+        (auplc_gpu_access_enabled is string and auplc_gpu_access_enabled == 'auto')
+    fail_msg: >-
+      Set auplc_gpu_access_enabled to true, false, or unquoted auto for every
+      host before running GPU access tasks.
+  changed_when: false
+
+- name: Detect GPU access hardware for auto policy
+  ansible.builtin.import_tasks: detect.yml
+  when: auplc_gpu_access_enabled == 'auto'
+
+- name: Require successful GPU access hardware detection for auto policy
+  ansible.builtin.assert:
+    that:
+      - _auplc_gpu_access_sysfs.rc == 0
+    fail_msg: >-
+      GPU access hardware detection failed for auto policy; no GPU access
+      mutation was attempted.
+  when: auplc_gpu_access_enabled == 'auto'
+  changed_when: false
+
+- name: Resolve GPU access enablement
+  ansible.builtin.set_fact:
+    _auplc_gpu_access_enabled_resolved: >-
+      {{ auplc_gpu_access_enabled if auplc_gpu_access_enabled is boolean
+      else (_auplc_gpu_access_sysfs.stdout | trim | length > 0) }}
+  changed_when: false
+
+- name: Require resolved GPU access enablement boolean
+  ansible.builtin.assert:
+    that:
+      - _auplc_gpu_access_enabled_resolved is boolean
+    fail_msg: GPU access enablement did not resolve to a boolean.
+  changed_when: false

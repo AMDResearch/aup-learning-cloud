@@ -3172,29 +3172,110 @@ properties:
       accelerators, resources, teams, quota management, and API service configuration.
     properties:
       authMode:
-        type: string
-        enum: [auto-login, dummy, github, multi]
+        type: [string, "null"]
+        enum: [null, auto-login, dummy, github, local, multi]
         description: |
-          Authentication mode for the JupyterHub instance.
+          Deprecated authentication mode retained for one release. Do not combine
+          this field with `custom.auth`.
 
           - `auto-login`: No credentials required, auto-login as 'student' (for demos/single-node)
           - `dummy`: Accept any username/password (for testing)
           - `github`: GitHub App authentication only
-          - `multi`: GitHub App + Local native accounts (recommended for production)
+          - `local`: Native accounts without GitHub authentication
+          - `multi`: GitHub App + native accounts (recommended for production)
+
+      auth:
+        type: object
+        additionalProperties: false
+        description: |
+          Composable authentication providers. Omitted providers are disabled.
+          Exactly one of auto-login, dummy, native, GitHub, or native plus GitHub
+          must be enabled whenever this object is present.
+        properties:
+          autoLogin:
+            type: boolean
+          dummy:
+            type: boolean
+          native:
+            type: boolean
+          github:
+            type: boolean
+        oneOf:
+          - required: [autoLogin]
+            properties:
+              autoLogin:
+                const: true
+              dummy:
+                const: false
+              native:
+                const: false
+              github:
+                const: false
+          - required: [dummy]
+            properties:
+              autoLogin:
+                const: false
+              dummy:
+                const: true
+              native:
+                const: false
+              github:
+                const: false
+          - required: [native]
+            properties:
+              autoLogin:
+                const: false
+              dummy:
+                const: false
+              native:
+                const: true
+              github:
+                const: false
+          - required: [github]
+            properties:
+              autoLogin:
+                const: false
+              dummy:
+                const: false
+              native:
+                const: false
+              github:
+                const: true
+          - required: [native, github]
+            properties:
+              autoLogin:
+                const: false
+              dummy:
+                const: false
+              native:
+                const: true
+              github:
+                const: true
+
+      runtimeLimitEnabled:
+        type: boolean
+        description: |
+          Controls enforcement of the selected session runtime and automatic Pod
+          shutdown. Set to false only when quota is also disabled.
 
       adminUser:
         type: object
         additionalProperties: false
         description: |
-          Auto-create admin user configuration.
-          When enabled, Helm will generate random credentials and store them in a Secret.
+          Bootstrap configuration for an administrator account in native
+          authentication modes. Leave `existingSecret` empty for chart-generated
+          credentials, or provide an external Secret with `admin-password` and
+          optional `api-token` keys.
         properties:
           enabled:
             type: boolean
             description: |
-              Enable auto-admin creation on first install.
-              Credentials will be stored in `jupyterhub-admin-credentials` secret.
-
+              Enable administrator bootstrap on first install.
+          username:
+            type: string
+            pattern: "^[a-z0-9][a-z0-9._-]{0,63}$"
+          existingSecret:
+            type: string
       notifications:
         type: object
         additionalProperties: false
@@ -3567,8 +3648,8 @@ properties:
             type: [boolean, "null"]
             description: |
               Enable/disable quota system.
-              Set to `null` for auto-detection based on authMode
-              (disabled for auto-login/dummy, enabled otherwise).
+              Canonical configurations set this explicitly. A null or omitted value
+              retains historical defaults only for one-release `authMode` migration.
           cpuRate:
             type: integer
             minimum: 1
@@ -3782,6 +3863,65 @@ properties:
               pullPolicy:
                 enum: ["", IfNotPresent, Always, Never, "null"]
                 description: Image pull policy.
+
+    allOf:
+      - not:
+          required: [authMode, auth]
+      - if:
+          required: [runtimeLimitEnabled]
+          properties:
+            runtimeLimitEnabled:
+              const: false
+        then:
+          required: [quota]
+          properties:
+            quota:
+              required: [enabled]
+              properties:
+                enabled:
+                  const: false
+      - if:
+          required: [authMode, quota]
+          properties:
+            authMode:
+              enum: [auto-login, local]
+            quota:
+              required: [enabled]
+              properties:
+                enabled:
+                  const: true
+        then:
+          required: [runtimeLimitEnabled]
+          properties:
+            runtimeLimitEnabled:
+              const: true
+      - if:
+          required: [adminUser]
+          properties:
+            adminUser:
+              required: [enabled]
+              properties:
+                enabled:
+                  const: true
+        then:
+          oneOf:
+            - required: [auth]
+              properties:
+                auth:
+                  required: [native]
+                  properties:
+                    native:
+                      const: true
+            - required: [authMode]
+              properties:
+                authMode:
+                  enum: [local, multi]
+          properties:
+            adminUser:
+              required: [username]
+              properties:
+                username:
+                  minLength: 1
 
   cull:
     type: object

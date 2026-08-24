@@ -20,6 +20,7 @@
 import { useState, useMemo } from 'react';
 import { Modal, Button, Form, Alert, Spinner, InputGroup, Badge } from 'react-bootstrap';
 import * as api from '@auplc/shared';
+import { generateStrongPassword, getPasswordError, isStrongPassword, PASSWORD_RULES } from '@auplc/shared';
 
 interface Props {
   show: boolean;
@@ -43,23 +44,21 @@ export function BatchPasswordModal({ show, usernames, onHide }: Props) {
   const [results, setResults] = useState<PasswordResult[]>([]);
   const [step, setStep] = useState<'input' | 'result'>('input');
 
-  const generateRandomPassword = () => {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
-    let result = '';
-    for (let i = 0; i < 16; i++) {
-      result += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    return result;
-  };
-
   const handleSubmit = async () => {
     setError(null);
+
+    const passwordError = generateRandom ? null : getPasswordError(password);
+    if (passwordError) {
+      setError(passwordError);
+      return;
+    }
+
     setLoading(true);
 
     try {
       const entries = usernames.map(username => ({
         username,
-        password: generateRandom ? generateRandomPassword() : password,
+        password: generateRandom ? generateStrongPassword() : password,
       }));
 
       const response = await api.batchSetPasswords(entries, forceChange);
@@ -123,6 +122,9 @@ export function BatchPasswordModal({ show, usernames, onHide }: Props) {
     URL.revokeObjectURL(url);
   };
 
+  const manualPasswordError = generateRandom ? null : getPasswordError(password);
+  const canSubmit = !loading && (generateRandom || isStrongPassword(password));
+
   return (
     <Modal show={show} onHide={handleClose} size="lg">
       <Modal.Header closeButton>
@@ -159,6 +161,13 @@ export function BatchPasswordModal({ show, usernames, onHide }: Props) {
               />
             </Form.Group>
 
+            <Alert variant="info" className="py-2">
+              <div className="fw-semibold mb-1">Passwords must meet all native-login rules.</div>
+              <div className="small">
+                {PASSWORD_RULES.map((rule) => rule.label).join(' · ')}
+              </div>
+            </Alert>
+
             {!generateRandom && (
               <Form.Group className="mb-3">
                 <Form.Label>Password (same for all users)</Form.Label>
@@ -169,17 +178,28 @@ export function BatchPasswordModal({ show, usernames, onHide }: Props) {
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="Enter password"
                     minLength={8}
+                    isInvalid={Boolean(manualPasswordError)}
+                    isValid={isStrongPassword(password)}
                   />
                   <Button
                     variant="outline-secondary"
-                    onClick={() => setPassword(generateRandomPassword())}
+                    onClick={() => setPassword(generateStrongPassword())}
                   >
                     Generate
                   </Button>
+                  {manualPasswordError && (
+                    <Form.Control.Feedback type="invalid">
+                      {manualPasswordError}
+                    </Form.Control.Feedback>
+                  )}
                 </InputGroup>
-                <Form.Text className="text-muted">
-                  Minimum 8 characters
-                </Form.Text>
+                <div className="mt-2 small">
+                  {PASSWORD_RULES.map((rule, i) => (
+                    <div key={i} className={rule.test(password) ? 'text-success' : 'text-danger'}>
+                      {rule.test(password) ? '✓' : '●'} {rule.label}
+                    </div>
+                  ))}
+                </div>
               </Form.Group>
             )}
 
@@ -269,7 +289,7 @@ export function BatchPasswordModal({ show, usernames, onHide }: Props) {
             <Button
               variant="dark"
               onClick={handleSubmit}
-              disabled={loading || (!generateRandom && password.length < 8)}
+              disabled={!canSubmit}
             >
               {loading ? (
                 <>

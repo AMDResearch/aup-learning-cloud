@@ -87,10 +87,14 @@ SOFTWARE.
         #auplc-powered-by-footer {
           margin-top: auto;
           text-align: center;
-          padding: 6px 0;
+          padding: 6px var(--bs-gutter-x, 0.75rem);
           font-size: 0.72rem;
-          opacity: 0.55;
+          color: var(--bs-secondary-color);
+          overflow-wrap: anywhere;
           border-top: 1px solid rgba(128, 128, 128, 0.15);
+        }
+        #auplc-powered-by-footer a {
+          color: var(--bs-link-color);
         }
         #notification-banner-mount {
           width: 100%;
@@ -211,9 +215,11 @@ SOFTWARE.
       <script src="{{static_url("components/jquery/dist/jquery.min.js") }}"
               type="text/javascript"
               charset="utf-8"></script>
-      <script src="{{static_url("js/darkmode.js") }}"
-              type="text/javascript"
-              charset="utf-8"></script>
+      {% block darkmode_script %}
+        <script src="{{static_url("js/darkmode.js") }}"
+                type="text/javascript"
+                charset="utf-8"></script>
+      {% endblock darkmode_script %}
       <script type="text/javascript">
         // Keep auplc-theme (React apps) and jupyterhub-bs-theme (darkmode.js)
         // in sync by observing data-bs-theme attribute changes on <html>.
@@ -371,7 +377,7 @@ SOFTWARE.
                       {% if user %}
                         <span class="me-1">{{ user.name }}</span>
                         {% if not hide_logout %}
-                          {% if not user.name.startswith('github:') %}
+                          {% if password_management_enabled and not user.name.startswith('github:') %}
                           <a id="change-password"
                              role="button"
                              class="btn btn-sm btn-outline-secondary me-1"
@@ -384,7 +390,7 @@ SOFTWARE.
                              class="btn btn-sm btn-outline-secondary"
                              href="{{ logout_url }}"> <i aria-hidden="true" class="fa fa-sign-out"></i> Logout</a>
                         {% endif %}
-                      {% else %}
+                      {% elif not hide_logout %}
                         <a id="login"
                            role="button"
                            class="btn btn-sm btn-outline-secondary"
@@ -542,7 +548,7 @@ SOFTWARE.
         });
       })();
     </script>
-    {% if user and not user.name.startswith('github:') and not hide_logout %}
+    {% if user and password_management_enabled and not user.name.startswith('github:') %}
     <script type="text/javascript">
       // Check if user needs to change password (only for native users)
       (function() {

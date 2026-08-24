@@ -63,6 +63,7 @@ def run(
     env: Mapping[str, str] | None = None,
     cwd: str | Path | None = None,
     input_text: str | None = None,
+    capture_output: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     """Run a command synchronously, optionally with sudo, raise on failure.
 
@@ -83,7 +84,7 @@ def run(
     """
     full = _build_cmd(cmd, sudo=sudo)
 
-    if _VERBOSE or input_text is not None:
+    if _VERBOSE or input_text is not None or capture_output:
         # Verbose path or stdin-feeding path: subprocess.run is fine
         # (Popen with stdin pipes complicates feeding ``input_text``).
         popen_kwargs: dict[str, object] = {
@@ -93,7 +94,7 @@ def run(
             "text": True,
             "input": input_text,
         }
-        if not _VERBOSE:
+        if capture_output or not _VERBOSE:
             # Quiet but with input_text: still capture for failure dump.
             popen_kwargs["stdout"] = subprocess.PIPE
             popen_kwargs["stderr"] = subprocess.STDOUT

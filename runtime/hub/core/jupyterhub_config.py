@@ -151,7 +151,7 @@ c.JupyterHub.tornado_settings = {
 
 # Inject platform identity into every Jinja template context so that
 # {{ powered_by }} is available in all Hub-rendered pages.
-c.JupyterHub.template_vars = {"powered_by": "AUP Learning Cloud"}
+c.JupyterHub.template_vars["powered_by"] = "AUP Learning Cloud"
 
 # Database configuration
 db_type = z2jh.get_config("hub.db.type")

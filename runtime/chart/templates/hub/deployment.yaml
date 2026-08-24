@@ -215,8 +215,25 @@ spec:
                     function on the user managed k8s Secret which is assumed to
                     not be possible.
                   */}}
-                  name: {{ include "jupyterhub.hub.fullname" . }}
-                  key: hub.config.ConfigurableHTTPProxy.auth_token
+                   name: {{ include "jupyterhub.hub.fullname" . }}
+                   key: hub.config.ConfigurableHTTPProxy.auth_token
+            {{- if and .Values.custom .Values.custom.adminUser .Values.custom.adminUser.enabled }}
+            - name: JUPYTERHUB_ADMIN_USERNAME
+              value: {{ .Values.custom.adminUser.username | quote }}
+            - name: JUPYTERHUB_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.custom.adminUser.existingSecret | default "jupyterhub-admin-credentials" }}
+                  key: admin-password
+            - name: JUPYTERHUB_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.custom.adminUser.existingSecret | default "jupyterhub-admin-credentials" }}
+                  key: api-token
+                  {{- if .Values.custom.adminUser.existingSecret }}
+                  optional: true
+                  {{- end }}
+            {{- end }}
             {{- with .Values.hub.extraEnv }}
             {{- include "jupyterhub.extraEnv" . | nindent 12 }}
             {{- end }}

@@ -28,14 +28,11 @@ from __future__ import annotations
 from multiauthenticator import MultiAuthenticator
 from multiauthenticator.multiauthenticator import PREFIX_SEPARATOR
 
-LOCAL_ACCOUNT_PREFIX = "LocalAccount"
-
 
 class CustomMultiAuthenticator(MultiAuthenticator):
     """
-    MultiAuthenticator with custom login page HTML and refresh_user support.
+    MultiAuthenticator with refresh_user support.
 
-    Provides a unified login page supporting multiple authentication methods.
     Delegates ``refresh_user`` to the sub-authenticator that owns the user.
     """
 
@@ -75,45 +72,21 @@ class CustomMultiAuthenticator(MultiAuthenticator):
             return True
         return await authenticator.refresh_user(user, handler)
 
-    def get_custom_html(self, base_url):
-        html = []
+    def add_user(self, user):
+        from core.authenticators.github_app import GITHUB_USERNAME_PREFIX
 
-        for authenticator in self._authenticators:
-            name = getattr(authenticator, "service_name", "authenticator")
-            login_service = getattr(authenticator, "login_service", name)
-            url = authenticator.login_url(base_url)
+        authenticator = self._find_authenticator_for_user(user)
+        if user.name.startswith(GITHUB_USERNAME_PREFIX) and authenticator is not None:
+            authenticator.add_user(user)
+        return super().add_user(user)
 
-            if name == LOCAL_ACCOUNT_PREFIX:
-                html.append(f"""
-                <div class="login-option mb-6 bg-white rounded-xl shadow-lg p-6">
-                <form action="{url}" method="post">
-                    <input type="hidden" name="_xsrf" value="{{{{ xsrf }}}}" />
-                    <div class="mb-4">
-                    <input type="text" name="username" placeholder="Username"
-                            class="block w-full px-4 py-2 border rounded-md shadow-sm focus:ring-2 focus:ring-blue-500"
-                            required />
-                    </div>
-                    <div class="mb-4">
-                    <input type="password" name="password" placeholder="Password"
-                            class="block w-full px-4 py-2 border rounded-md shadow-sm focus:ring-2 focus:ring-blue-500"
-                            required />
-                    </div>
-                    <button type="submit"
-                            class="w-full py-2 px-4 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-md">
-                    Use LocalAccount Login
-                    </button>
-                </form>
-                </div>
-                """)
-            else:
-                html.append(f"""
-                <div class="login-option mb-4">
-                <a role="button" class="w-full inline-block text-center py-3 px-4 bg-gray-800 text-white
-                                    rounded-md hover:bg-gray-900 font-medium"
-                    href="{url}{{% if next is defined and next|length %}}?next={{{{next}}}}{{% endif %}}">
-                    Use {login_service} Login
-                </a>
-                </div>
-                """)
+    def delete_user(self, user):
+        from core.authenticators.github_app import GITHUB_USERNAME_PREFIX
 
-        return "\n".join(html)
+        authenticator = self._find_authenticator_for_user(user)
+        if user.name.startswith(GITHUB_USERNAME_PREFIX) and authenticator is not None:
+            authenticator.delete_user(user)
+        return super().delete_user(user)
+
+    def get_custom_html(self, base_url: str) -> str:
+        return ""

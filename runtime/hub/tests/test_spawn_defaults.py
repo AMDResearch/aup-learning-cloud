@@ -17,28 +17,49 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
----
-- name: Create /etc/udev/rules.d/70-kfd.rules
-  copy:
-    dest: /etc/udev/rules.d/70-kfd.rules
-    content: |
-      KERNEL=="kfd", MODE="0666"
-      SUBSYSTEM=="drm", KERNEL=="renderD*", MODE="0666"
-    owner: root
-    group: root
-    mode: '0644'
+from pathlib import Path
+from typing import Protocol, TypedDict
 
-- name: Reload udev rules
-  command: udevadm control --reload-rules
+import yaml
 
-- name: Trigger udev rules
-  command: udevadm trigger
 
-- name: Reboot the system (optional)
-  reboot:
-    msg: "Rebooting to apply udev rule changes"
-    pre_reboot_delay: 5
-    reboot_timeout: 300
-    post_reboot_delay: 30
-  when: udev_rocm_reboot_enabled
+class SpawnerValues(TypedDict):
+    http_timeout: int
 
+
+class HubConfigValues(TypedDict):
+    Spawner: SpawnerValues
+
+
+class HubValues(TypedDict):
+    config: HubConfigValues
+    consecutiveFailureLimit: int
+
+
+class SingleuserValues(TypedDict):
+    startTimeout: int
+
+
+class SpawnDefaults(TypedDict):
+    hub: HubValues
+    singleuser: SingleuserValues
+
+
+class YamlLoader(Protocol):
+    def safe_load(self, stream: str, /) -> SpawnDefaults: ...
+
+
+def load_yaml(loader: YamlLoader, stream: str) -> SpawnDefaults:
+    return loader.safe_load(stream)
+
+
+def test_spawn_defaults() -> None:
+    values_path = Path(__file__).resolve().parents[3] / "runtime" / "chart" / "values.yaml"
+    values = load_yaml(
+        yaml,
+        values_path.read_text(encoding="utf-8"),
+    )
+
+    assert values["hub"]["config"]["Spawner"]["http_timeout"] == 60
+    assert values["hub"]["consecutiveFailureLimit"] == 0
+    assert values["singleuser"]["startTimeout"] == 300
