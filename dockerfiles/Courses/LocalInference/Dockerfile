@@ -90,12 +90,17 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
       > /etc/ld.so.conf.d/ros-sdformat.conf \
     && ldconfig
 
+# Ownership is set here rather than in a final `chown -R`: on the overlayfs
+# snapshotter, chowning a file from an earlier layer copies the whole file into
+# the new layer, so a trailing recursive chown would duplicate every large tree
+# in the image. Each layer therefore hands off its own files already owned.
 RUN mkdir -p /ryzers \
     && git clone https://github.com/RobotecAI/rai.git /ryzers/rai \
     && git -C /ryzers/rai checkout "${RAI_COMMIT}" \
     && cd /ryzers/rai \
     && vcs import < ros_deps.repos \
-    && vcs import < demos.repos
+    && vcs import < demos.repos \
+    && chown -R jovyan:100 /ryzers
 
 # Reuse the ROCm torch from auplc-base and prevent Python dependencies from
 # replacing it with CUDA wheels.
@@ -149,7 +154,8 @@ RUN sed -i \
     && mkdir -p /opt/rai-cache \
     && download-perception-models \
     && python3 -c \
-      "import torch; assert torch.version.hip, 'RAI dependencies replaced ROCm torch'; print('RAI ROCm environment OK:', torch.__version__)"
+      "import torch; assert torch.version.hip, 'RAI dependencies replaced ROCm torch'; print('RAI ROCm environment OK:', torch.__version__)" \
+    && chown -R jovyan:100 /ryzers/rai
 
 # Lemonade local OpenAI-compatible model server.
 RUN add-apt-repository ppa:lemonade-team/stable \
@@ -167,8 +173,12 @@ ENV LEMONADE_CACHE=/opt/lemonade-cache/lemonade \
 # Models exercised by the workshop notebooks and script-first demos. Download
 # only the quantizations Lemonade's built-in aliases use; pulling each complete
 # GGUF repository would include many redundant quantizations.
-RUN mkdir -p "${LEMONADE_CACHE}" "${LEMONADE_HF_HOME}" \
-    && HF_HOME="${LEMONADE_HF_HOME}" python3 - <<'PY'
+# Downloaded as jovyan so the weights are owned correctly on creation. A later
+# `chown -R` over this tree would copy all ~29 GB into an extra layer.
+RUN install -d -o jovyan -g 100 \
+      /opt/lemonade-cache "${LEMONADE_CACHE}" "${LEMONADE_HF_HOME}" \
+    && runuser -u jovyan -- env HF_HOME="${LEMONADE_HF_HOME}" \
+      /opt/rai-venv/bin/python3 - <<'PY'
 from huggingface_hub import snapshot_download
 
 models = {
@@ -218,7 +228,12 @@ RUN set -euo pipefail; \
     kill "${LEMOND_PID}"; \
     wait "${LEMOND_PID}" || true; \
     trap - EXIT; \
-    rm -rf "${XDG_RUNTIME_DIR}" /tmp/lemond-build.log
+    rm -rf "${XDG_RUNTIME_DIR}" /tmp/lemond-build.log; \
+    : "lemond runs as root and drops .lemonade_registry.json beside the weights" \
+      "under LEMONADE_HF_HOME, so the sweep covers the whole cache rather than" \
+      "just LEMONADE_CACHE. Only root-owned files are touched, and they were" \
+      "written in this layer, so nothing is copied up."; \
+    find /opt/lemonade-cache -user root -exec chown jovyan:100 {} +
 
 # ---------------------------------------------------------------------------
 # CaP-X (Code-as-Policies eXtended) - the code-generating manipulation agent
@@ -285,7 +300,8 @@ RUN /usr/bin/python3 -m venv --system-site-packages ${CAPX_VENV} \
     && git -C ${CAPX_ROOT} checkout ${CAPX_REF} \
     && git -C ${CAPX_ROOT} submodule update --init \
       capx/third_party/contact_graspnet_pytorch \
-      capx/third_party/robosuite
+      capx/third_party/robosuite \
+    && chown -R jovyan:100 ${CAPX_ROOT}
 
 WORKDIR /ryzers/cap-x
 
@@ -467,8 +483,9 @@ PY
 
 # Pre-fetch the default large and optional fast perception profiles.
 # Excluding duplicate .pt/.bin files keeps both profiles reasonably compact.
-RUN mkdir -p "${CAPX_CACHE}" \
-    && HF_HOME="${CAPX_CACHE}" ${CAPX_VENV}/bin/python - <<'PY'
+RUN install -d -o jovyan -g 100 "${CAPX_CACHE}" \
+    && runuser -u jovyan -- env HF_HOME="${CAPX_CACHE}" \
+      ${CAPX_VENV}/bin/python - <<'PY'
 from huggingface_hub import snapshot_download
 
 snapshot_download(
@@ -549,7 +566,29 @@ RUN mkdir -p /usr/local/share/jupyter/kernels/capx \
     && MUJOCO_GL=egl ${CAPX_VENV}/bin/python -c \
       "import torch, capx, robosuite, mujoco, pyroki; \
 assert torch.version.hip, 'CaP-X dependencies replaced ROCm torch'; \
-print('CaP-X ROCm environment OK:', torch.__version__, '| robosuite', robosuite.__version__)"
+print('CaP-X ROCm environment OK:', torch.__version__, '| robosuite', robosuite.__version__)" \
+    && : "The editable installs and config rewrites above ran as root. Only" \
+         "those files are still root-owned, and they were already copied into" \
+         "their own layers when written, so fixing them up here is free." \
+    && find ${CAPX_ROOT} -user root -exec chown jovyan:100 {} +
+
+# The RAI kernel. langchain_core and rai_core live only in /opt/rai-venv, so the
+# stock "python3" kernelspec cannot run the RAI notebooks: its argv is a bare
+# "python", and jupyter_client rewrites that to its own sys.executable
+# (/usr/bin/python3) rather than resolving it from PATH. Naming the interpreter
+# explicitly, as the CaP-X kernel does, is what makes those imports resolve.
+# ROS and the colcon overlay still arrive through the environment that
+# start-local-inference.sh sources before the notebook server starts.
+RUN mkdir -p /usr/local/share/jupyter/kernels/rai \
+    && printf '%s\n' \
+      '{' \
+      '  "argv": ["/opt/rai-venv/bin/python", "-m", "ipykernel_launcher", "-f", "{connection_file}"],' \
+      '  "display_name": "RAI (ROCm)",' \
+      '  "language": "python"' \
+      '}' \
+      > /usr/local/share/jupyter/kernels/rai/kernel.json \
+    && /opt/rai-venv/bin/python -c \
+      "import ipykernel, langchain_core; print('RAI kernel environment OK')"
 
 # HELIX drives repository-level evolution; OpenCode is its local coding-agent
 # backend. Keep this after the expensive CaP-X/weights layers so workshop
@@ -568,32 +607,28 @@ RUN apt-get update \
     && ${CAPX_VENV}/bin/helix --help >/dev/null \
     && opencode --version \
     && MUJOCO_GL=egl ${CAPX_VENV}/bin/python -c \
-      "import capx, helix, torch; assert torch.version.hip; print('HELIX/OpenCode workshop stack OK')"
+      "import capx, helix, torch; assert torch.version.hip; print('HELIX/OpenCode workshop stack OK')" \
+    && chown -R jovyan:100 /ryzers/helix
 
 WORKDIR /ryzers
 
 RUN getent group audio >/dev/null || groupadd audio \
     && getent group kvm >/dev/null || groupadd kvm \
     && usermod -aG audio,kvm jovyan \
-    && mkdir -p \
+    && install -d -o jovyan -g 100 \
+      /home/jovyan/.cache \
       /home/jovyan/.cache/huggingface \
       /home/jovyan/.cache/lemonade \
       /home/jovyan/.streamlit \
       /ryzers/notebooks \
-      /tmp/runtime-jovyan \
-    && chmod 700 /tmp/runtime-jovyan \
+    && install -d -o jovyan -g 100 -m 700 /tmp/runtime-jovyan \
     && printf 'pcm.!default = null;\n' > /home/jovyan/.asoundrc \
-    && printf '[general]\nemail = ""\n' > /home/jovyan/.streamlit/credentials.toml
+    && printf '[general]\nemail = ""\n' > /home/jovyan/.streamlit/credentials.toml \
+    && chown jovyan:100 \
+      /home/jovyan/.asoundrc \
+      /home/jovyan/.streamlit/credentials.toml
 
-COPY ./course_data /ryzers/notebooks
-COPY ./course_data/lemonade_env.sh \
-     ./course_data/manipulation_demo_headless.sh \
-     ./course_data/manipulation_demo_streamlit.py \
-     ./course_data/notebook_demo.py \
-     ./course_data/capx_demo.py \
-     ./course_data/rho_demo.py \
-     ./course_data/rho_multitask_demo.py \
-     /ryzers/
+COPY --chown=jovyan:100 ./course_data /ryzers/notebooks
 
 RUN ln -s /ryzers/notebooks/tests/test_ros.sh /ryzers/test_ros.sh \
     && ln -s /ryzers/notebooks/tests/test_o3de.sh /ryzers/test_o3de.sh \
@@ -604,19 +639,15 @@ RUN ln -s /ryzers/notebooks/tests/test_ros.sh /ryzers/test_ros.sh \
     && ln -s /ryzers/notebooks/tests/test_rho_multitask.sh /ryzers/test_rho_multitask.sh \
     && ln -s /ryzers/notebooks/tests/test_rai_toy_evolution.sh /ryzers/test_rai_toy_evolution.sh \
     && chmod +x \
-      /ryzers/lemonade_env.sh \
-      /ryzers/manipulation_demo_headless.sh \
+      /ryzers/notebooks/scripts/*.sh \
       /ryzers/test_rho.sh \
       /ryzers/test_rho_multitask.sh \
       /ryzers/test_rai_toy_evolution.sh \
-    && chown -R jovyan:100 \
-      /home/jovyan/.cache \
-      /home/jovyan/.streamlit \
-      /home/jovyan/.asoundrc \
-      /opt/capx-cache \
-      /opt/lemonade-cache \
-      /ryzers \
-      /tmp/runtime-jovyan \
+    && : "Only the symlinks created just above need an owner change. Every" \
+         "large tree was already handed over by the layer that built it, so" \
+         "there is deliberately no recursive chown here - one would copy the" \
+         "model caches and /ryzers into this layer a second time." \
+    && chown -h jovyan:100 /ryzers/test_*.sh \
     && printf '%s\n' \
       '#!/usr/bin/env bash' \
       'set -e' \

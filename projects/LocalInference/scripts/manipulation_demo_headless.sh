@@ -119,5 +119,5 @@ fi
 
 # 4. Streamlit page: simulation view + agent chat
 echo "Starting the demo - open http://localhost:8501 once the scene has loaded"
-streamlit run /ryzers/manipulation_demo_streamlit.py \
+streamlit run /ryzers/notebooks/scripts/manipulation_demo_streamlit.py \
     --server.headless true --server.address 0.0.0.0

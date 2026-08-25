@@ -1,0 +1,23 @@
+# build.sh copies projects/LocalInference into ./course_data, so anything a
+# local test run leaves behind in the source tree would otherwise be baked
+# into /ryzers/notebooks. Keep generated artifacts out of the image.
+
+# Python bytecode and tool caches
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.ruff_cache
+**/.mypy_cache
+
+# Notebook checkpoint snapshots
+**/.ipynb_checkpoints
+
+# Local editor and OS metadata
+**/.DS_Store
+**/.vscode
+**/.idea
+
+# Temporary files
+**/*.tmp
+**/*.swp
+**/*.swo

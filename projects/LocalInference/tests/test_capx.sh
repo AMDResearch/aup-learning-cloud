@@ -55,6 +55,24 @@ print('capx + pyroki + API import OK')
 "
 
 "${CAPX_PY}" -c "
+import sys
+sys.path.insert(0, '/ryzers/notebooks/scripts')
+from capx_demo import analyze_program
+analysis = analyze_program('''
+pose, _, extent = get_object_pose(\"red cube\", return_bbox_extent=True)
+grasp, quat = sample_grasp_pose(\"red cube\")
+goto_pose(grasp, quat, z_approach=0.1)
+close_gripper()
+''')
+assert analysis['syntax_error'] is None
+assert analysis['perception_calls'] == 2
+assert analysis['planner_calls'] == 1
+assert analysis['uses_bbox_extent']
+assert analysis['uses_approach_offset']
+print('generated-program introspection helpers OK')
+"
+
+"${CAPX_PY}" -c "
 import mujoco
 m = mujoco.MjModel.from_xml_string('<mujoco><worldbody><geom type=\"box\" size=\".1 .1 .1\"/></worldbody></mujoco>')
 d = mujoco.MjData(m)

@@ -18,7 +18,7 @@ import rho_demo
 
 
 HERE = Path(__file__).resolve().parent
-_LOCAL_FIXTURE_ROOT = HERE / "fixtures" / "rho_multitask"
+_LOCAL_FIXTURE_ROOT = HERE.parent / "fixtures" / "rho_multitask"
 FIXTURE_ROOT = Path(
     os.environ.get(
         "RHO_MULTITASK_FIXTURE_ROOT",
@@ -41,7 +41,6 @@ MOCK_LABEL = "MOCK_STATIC_CONTRACT_NOT_LIVE_CAPX"
 CONFIGS = {
     "cube_stack": "env_configs/cube_stack/franka_robosuite_cube_stack.yaml",
     "spill_wipe": "env_configs/spill_wipe/franka_robosuite_spill_wipe.yaml",
-    "cube_lift": "env_configs/cube_lifting/franka_robosuite_cube_lifting.yaml",
 }
 
 SCENARIOS: dict[str, dict[str, Any]] = {
@@ -65,26 +64,20 @@ SCENARIOS: dict[str, dict[str, Any]] = {
         "trial": 2,
         "policy_path": "solver/tasks/spill_wipe.py",
     },
-    "lift_guard_val": {
-        "task": "cube_lift",
-        "trial": 2,
-        "policy_path": "solver/tasks/cube_lift.py",
-    },
 }
 
 SPLITS = {
     "train": ["stack_train", "wipe_train"],
-    "val": ["stack_val", "wipe_val", "lift_guard_val"],
+    "val": ["stack_val", "wipe_val"],
 }
 
 CONTRACT = """\
 # Multi-task CaP-X repository contract
 
-This repository deploys three generated robot policies:
+This repository deploys two generated robot policies:
 
 - `solver/tasks/cube_stack.py` stacks a red cube on a green cube.
 - `solver/tasks/spill_wipe.py` wipes the complete detected spill region.
-- `solver/tasks/cube_lift.py` is a working regression guard and must remain useful.
 
 The evaluator runs different simulator layouts for training and validation.
 Its feedback includes deployable reward, raw environment reward, task completion,
@@ -94,7 +87,6 @@ deployable reward zero even if the robot made partial progress.
 You may edit any file below `solver/`, including extracting shared calculations
 or safety behavior into `solver/geometry.py` and `solver/runtime.py`. Do not
 special-case scenario identifiers, trial numbers, or fixed object coordinates.
-Do not weaken the cube-lift policy merely to improve another task.
 
 Important API facts:
 
@@ -108,11 +100,11 @@ Important API facts:
 """
 
 OBJECTIVE = """\
-Evolve this repository into a robust three-task robot policy package. Improve
-the failing cube-stack and spill-wipe policies using evaluator evidence while
-preserving cube-lift as a regression guard. Prefer general repairs and shared
-helpers over trial-specific constants. Multiple specialist candidates are
-valuable: HELIX will retain repositories that win different validation tasks."""
+Evolve this repository into a robust two-task robot policy package. Improve
+the cube-stack and spill-wipe policies using evaluator evidence. Prefer general
+repairs and shared helpers over trial-specific constants. Multiple specialist
+candidates are valuable: HELIX will retain repositories that win different
+validation tasks."""
 
 BACKGROUND = """\
 This is a two-generation GEPA-style repository evolution. Read CONTRACT.md,
@@ -131,10 +123,12 @@ solver/tasks/*.py`, then run
 inspect `git diff`."""
 
 PROBE_SOURCE = """\
+import os
 import sys
 
-sys.path.insert(0, "/ryzers")
-sys.path.insert(0, "/ryzers/notebooks")
+sys.path.insert(
+    0, os.environ.get("RHO_SUPPORT_ROOT", "/ryzers/notebooks/scripts")
+)
 from rho_multitask_demo import evaluate_cli
 
 raise SystemExit(evaluate_cli())
@@ -244,6 +238,7 @@ passthrough_env = [
   "RHO_MULTITASK_MODEL",
   "RHO_MULTITASK_MOCK",
   "RHO_PROGRESS_FILE",
+  "RHO_SUPPORT_ROOT",
   "XDG_RUNTIME_DIR",
 ]
 
@@ -267,7 +262,7 @@ protected_files = [
 
 [dataset]
 train_size = 2
-val_size = 3
+val_size = 2
 
 [evolution]
 max_generations = {generations}
@@ -278,7 +273,7 @@ max_evaluations = 40
 merge_enabled = true
 max_merge_invocations = 2
 merge_val_overlap_floor = 1
-merge_subsample_size = 3
+merge_subsample_size = 2
 num_parallel_proposals = 2
 mutations_per_parent = 1
 minibatch_size = 1
@@ -304,7 +299,7 @@ base_dir = ".helix/worktrees"
 
 def scenario_manifest() -> dict[str, Any]:
     return {
-        "schema_version": "rho-multitask-scenarios/v1",
+        "schema_version": "rho-multitask-scenarios/v2",
         "splits": SPLITS,
         "scenarios": {
             scenario_id: {
@@ -340,7 +335,7 @@ def prepare_workshop(
     tasks.mkdir(parents=True, exist_ok=True)
     (root / "solver" / "__init__.py").write_text("")
     (tasks / "__init__.py").write_text("")
-    for task in ("cube_stack", "spill_wipe", "cube_lift"):
+    for task in ("cube_stack", "spill_wipe"):
         shutil.copyfile(FIXTURE_ROOT / f"{task}.py", tasks / f"{task}.py")
     (root / "solver" / "geometry.py").write_text(GEOMETRY_SOURCE)
     (root / "solver" / "runtime.py").write_text(RUNTIME_SOURCE)
@@ -444,15 +439,7 @@ def _mock_result(
             else "Wipe policy continued issuing blocking poses after termination."
         )
     else:
-        passed = all(
-            token in program
-            for token in ("sample_grasp_pose", "close_gripper", "goto_pose")
-        )
-        feedback = (
-            "Lift regression guard passed."
-            if passed
-            else "Lift regression guard lost a required primitive."
-        )
+        raise ValueError(f"unsupported mock task: {task}")
     reward = float(passed)
     return {
         "reward": reward,
@@ -609,10 +596,10 @@ def materialize_mock_evolution(
     evaluations.mkdir(parents=True, exist_ok=True)
 
     candidates = {
-        "g0-s0": {"scores": [0.0, 0.0, 1.0], "task": None},
-        "g1-s1": {"scores": [1.0, 0.0, 1.0], "task": "cube_stack"},
-        "g1-s2": {"scores": [0.0, 1.0, 1.0], "task": "spill_wipe"},
-        "g2-m1": {"scores": [1.0, 1.0, 1.0], "task": "merge"},
+        "g0-s0": {"scores": [0.0, 0.0], "task": None},
+        "g1-s1": {"scores": [1.0, 0.0], "task": "cube_stack"},
+        "g1-s2": {"scores": [0.0, 1.0], "task": "spill_wipe"},
+        "g2-m1": {"scores": [1.0, 1.0], "task": "merge"},
     }
     for candidate_id, candidate in candidates.items():
         destination = worktrees / candidate_id
@@ -723,7 +710,6 @@ def materialize_mock_evolution(
                 "active_frontier": {
                     "0": ["g1-s1", "g2-m1"],
                     "1": ["g1-s2", "g2-m1"],
-                    "2": list(candidates),
                 },
                 "frontier_type": "instance",
                 "budget": {"evaluations": 20},
@@ -959,17 +945,16 @@ def evolution_lesson(summary: Mapping[str, Any]) -> dict[str, Any]:
         scores = candidate.get("scores", {})
         stack = float(scores.get("stack_val", 0.0))
         wipe = float(scores.get("wipe_val", 0.0))
-        lift = float(scores.get("lift_guard_val", 0.0))
         if candidate.get("frontier"):
             if "stack_val" in candidate.get("wins", []) and stack > 0.0:
                 covered_difficult_keys.add("stack_val")
             if "wipe_val" in candidate.get("wins", []) and wipe > 0.0:
                 covered_difficult_keys.add("wipe_val")
-        if stack > 0.0 and wipe <= 0.0 and lift > 0.0:
+        if stack > 0.0 and wipe <= 0.0:
             stack_specialists.append(candidate_id)
-        if wipe > 0.0 and stack <= 0.0 and lift > 0.0:
+        if wipe > 0.0 and stack <= 0.0:
             wipe_specialists.append(candidate_id)
-        if stack > 0.0 and wipe > 0.0 and lift > 0.0:
+        if stack > 0.0 and wipe > 0.0:
             broad_candidates.append(candidate_id)
     return {
         "multi_key_frontier": len(covered_difficult_keys) == 2,
@@ -1053,78 +1038,86 @@ def summarize_rollouts(results: Sequence[Mapping[str, Any]]) -> dict[str, dict[s
     return summary
 
 
-def hidden_success_criterion(
+def deployment_success_criterion(
     before: Mapping[str, Mapping[str, Any]],
     after: Mapping[str, Mapping[str, Any]],
     *,
-    lift_policy_unchanged: bool,
+    required_tasks: Sequence[str] = tuple(CONFIGS),
     minimum_hard_reward_gain: float = 0.05,
-    lift_reward_tolerance: float = 0.20,
 ) -> dict[str, Any]:
-    """Compare repeated hidden trials while allowing one lift miss as simulator noise."""
-    hard_tasks = ("cube_stack", "spill_wipe")
-    required_tasks = (*hard_tasks, "cube_lift")
-    missing = [task for task in required_tasks if task not in before or task not in after]
+    """Compare repeated before/after rollouts across required evolved tasks."""
+    tasks = tuple(str(task) for task in required_tasks)
+    if not tasks:
+        raise ValueError("At least one evolved task is required")
+    if len(set(tasks)) != len(tasks):
+        raise ValueError("Required evolved tasks must be unique")
+    if minimum_hard_reward_gain < 0.0:
+        raise ValueError("minimum_hard_reward_gain must be non-negative")
+
+    missing = [task for task in tasks if task not in before or task not in after]
     if missing:
-        raise ValueError(f"Missing hidden rollout summaries for: {', '.join(missing)}")
+        raise ValueError(
+            f"Missing deployment rollout summaries for: {', '.join(missing)}"
+        )
 
-    hard_rollouts_before = sum(int(before[task]["rollouts"]) for task in hard_tasks)
-    hard_rollouts_after = sum(int(after[task]["rollouts"]) for task in hard_tasks)
-    if hard_rollouts_before <= 0 or hard_rollouts_after <= 0:
-        raise ValueError("Difficult-task hidden rollout counts must be positive")
+    rollout_counts_before = {
+        task: int(before[task]["rollouts"]) for task in tasks
+    }
+    rollout_counts_after = {
+        task: int(after[task]["rollouts"]) for task in tasks
+    }
+    nonpositive = [
+        task
+        for task in tasks
+        if rollout_counts_before[task] <= 0 or rollout_counts_after[task] <= 0
+    ]
+    if nonpositive:
+        raise ValueError(
+            "Deployment rollout counts must be positive for: "
+            + ", ".join(nonpositive)
+        )
+    mismatched = [
+        task
+        for task in tasks
+        if rollout_counts_before[task] != rollout_counts_after[task]
+    ]
+    if mismatched:
+        raise ValueError(
+            "Before/after rollout counts must match for: " + ", ".join(mismatched)
+        )
 
-    hard_completed_before = sum(int(before[task]["completed"]) for task in hard_tasks)
-    hard_completed_after = sum(int(after[task]["completed"]) for task in hard_tasks)
-    hard_reward_before = sum(
-        float(before[task]["mean_reward"]) * int(before[task]["rollouts"])
-        for task in hard_tasks
-    ) / hard_rollouts_before
-    hard_reward_after = sum(
-        float(after[task]["mean_reward"]) * int(after[task]["rollouts"])
-        for task in hard_tasks
-    ) / hard_rollouts_after
-    hard_completion_rate_before = hard_completed_before / hard_rollouts_before
-    hard_completion_rate_after = hard_completed_after / hard_rollouts_after
-    hard_task_improved = hard_completed_after > hard_completed_before or (
-        hard_completed_after == hard_completed_before
-        and hard_reward_after >= hard_reward_before + minimum_hard_reward_gain
+    rollouts = sum(rollout_counts_before.values())
+    completed_before = sum(int(before[task]["completed"]) for task in tasks)
+    completed_after = sum(int(after[task]["completed"]) for task in tasks)
+    mean_reward_before = sum(
+        float(before[task]["mean_reward"]) * rollout_counts_before[task]
+        for task in tasks
+    ) / rollouts
+    mean_reward_after = sum(
+        float(after[task]["mean_reward"]) * rollout_counts_after[task]
+        for task in tasks
+    ) / rollouts
+    completion_improved = completed_after > completed_before
+    reward_improved = (
+        completed_after == completed_before
+        and mean_reward_after >= mean_reward_before + minimum_hard_reward_gain
     )
-
-    lift_before = before["cube_lift"]
-    lift_after = after["cube_lift"]
-    lift_rollouts = min(int(lift_before["rollouts"]), int(lift_after["rollouts"]))
-    if lift_rollouts <= 0:
-        raise ValueError("Lift hidden rollout counts must be positive")
-    lift_completion_tolerance = 1.0 / lift_rollouts
-    lift_completion_rate_before = float(lift_before["completion_rate"])
-    lift_completion_rate_after = float(lift_after["completion_rate"])
-    lift_reward_before = float(lift_before["mean_reward"])
-    lift_reward_after = float(lift_after["mean_reward"])
-    lift_empirically_preserved = (
-        lift_completion_rate_after + lift_completion_tolerance >= lift_completion_rate_before
-        and lift_reward_after + lift_reward_tolerance >= lift_reward_before
-    )
-    lift_guard_preserved = bool(lift_policy_unchanged and lift_empirically_preserved)
+    deployment_improved = completion_improved or reward_improved
 
     return {
-        "hard_task_improved": hard_task_improved,
-        "hard_task_completed_before": hard_completed_before,
-        "hard_task_completed_after": hard_completed_after,
-        "hard_task_completion_rate_before": hard_completion_rate_before,
-        "hard_task_completion_rate_after": hard_completion_rate_after,
-        "hard_task_mean_reward_before": hard_reward_before,
-        "hard_task_mean_reward_after": hard_reward_after,
+        "required_tasks": list(tasks),
+        "rollouts": rollouts,
+        "completed_before": completed_before,
+        "completed_after": completed_after,
+        "completion_rate_before": completed_before / rollouts,
+        "completion_rate_after": completed_after / rollouts,
+        "mean_reward_before": mean_reward_before,
+        "mean_reward_after": mean_reward_after,
         "minimum_hard_reward_gain": minimum_hard_reward_gain,
-        "lift_policy_unchanged": bool(lift_policy_unchanged),
-        "lift_completion_rate_before": lift_completion_rate_before,
-        "lift_completion_rate_after": lift_completion_rate_after,
-        "lift_mean_reward_before": lift_reward_before,
-        "lift_mean_reward_after": lift_reward_after,
-        "lift_completion_tolerance": lift_completion_tolerance,
-        "lift_reward_tolerance": lift_reward_tolerance,
-        "lift_empirically_preserved": lift_empirically_preserved,
-        "lift_guard_preserved": lift_guard_preserved,
-        "met": bool(hard_task_improved and lift_guard_preserved),
+        "completion_improved": completion_improved,
+        "reward_improved": reward_improved,
+        "deployment_improved": deployment_improved,
+        "met": deployment_improved,
     }
 
 

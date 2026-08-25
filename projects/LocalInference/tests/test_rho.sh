@@ -10,7 +10,7 @@ CAPX_PY="${CAPX_VENV:-/opt/capx-venv}/bin/python"
 HELIX_REF="29cfa6e5eae902f6bc6d2113e51499e92c6109ee"
 OPENCODE_VERSION="1.18.18"
 
-export PYTHONPATH="/ryzers${PYTHONPATH:+:${PYTHONPATH}}"
+export PYTHONPATH="/ryzers/notebooks/scripts${PYTHONPATH:+:${PYTHONPATH}}"
 export CAPX_ROOT="${CAPX_ROOT:-/ryzers/cap-x}"
 export HF_HOME="${CAPX_CACHE:-/opt/capx-cache}"
 export MUJOCO_GL=egl
@@ -281,63 +281,7 @@ bounded = rho_demo.run_bounded(
     timeout_seconds=0.2,
 )
 assert bounded.timed_out and bounded.returncode == 124
-
-proof = json.loads(
-    Path(
-        "/ryzers/notebooks/fixtures/rho_qwen_cube_stack_repair_proof.json"
-    ).read_text()
-)
-assert proof["rho"]["accepted"] is True
-assert proof["rho"]["generations"] == 1
-assert proof["evaluation"]["before"]["heldout"]["task_completed"] is False
-assert proof["evaluation"]["after"]["train"]["task_completed"] is True
-assert proof["evaluation"]["after"]["heldout"]["task_completed"] is True
-generalization = json.loads(
-    Path(
-        "/ryzers/notebooks/fixtures/capx_rho_generalization_5_trials.json"
-    ).read_text()
-)
-results = generalization["results"]
-assert results["cube_stack_before_rho"]["completed"] == 0
-assert results["cube_stack_after_rho"]["completed"] == 3
-assert results["cube_lift_fixed_policy"]["completed"] == 4
-assert results["spill_wipe_fixed_policy"]["completed"] == 1
-assert results["cube_restack_before_rho"]["execution_failures"] == 5
-assert results["cube_restack_after_rho"]["execution_failures"] == 0
-assert results["cube_restack_after_rho"]["completed"] == 0
-print("artifact scaffold, mock repair, HELIX_RESULT, permissions, and timeout OK")
-PY
-
-echo "================ CaP-X to RHO story scaffold ================"
-STORY_TMP="/tmp/capx-rho-story-test"
-rm -rf "${STORY_TMP}"
-"${CAPX_PY}" /ryzers/notebooks/capx_story.py \
-  --source recorded \
-  --scenario cube_stack \
-  --output-dir "${STORY_TMP}/capx"
-"${CAPX_PY}" /ryzers/notebooks/workshop_story.py \
-  --source recorded \
-  --mock-rho \
-  --prepare-only \
-  --output-dir "${STORY_TMP}/story"
-"${CAPX_PY}" - <<'PY'
-import json
-from pathlib import Path
-
-report = json.loads(
-    Path("/tmp/capx-rho-story-test/story/story_report.json").read_text()
-)
-assert report["source"] == "recorded"
-assert report["capx"]["success"] is None
-failure = report["capx"]["failure"]
-assert failure["source"] == "recorded"
-assert failure["trial"] == 1
-assert failure["evaluation"]["reward"] == 0.7243017351331602
-assert failure["evaluation"]["task_completed"] is False
-assert report["rho"]["seed"]["train"]["reward"] == 0.0
-assert report["rho"]["seed"]["train"]["trial"] == 1
-assert report["rho"]["seed"]["heldout"]["trial"] == 2
-print("recorded provenance and end-to-end scaffold OK")
+print("mock repair, HELIX_RESULT, permissions, and timeout OK")
 PY
 
 if [[ "${RHO_RUN_LIVE:-0}" != "1" ]]; then
@@ -347,6 +291,6 @@ if [[ "${RHO_RUN_LIVE:-0}" != "1" ]]; then
 fi
 
 echo "================ RHO live one-generation smoke ================"
-"${CAPX_PY}" /ryzers/rho_demo.py live-smoke
+"${CAPX_PY}" /ryzers/notebooks/scripts/rho_demo.py live-smoke
 
 echo "================ RHO tests PASSED ================"

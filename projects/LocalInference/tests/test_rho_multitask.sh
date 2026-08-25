@@ -4,7 +4,7 @@
 set -euo pipefail
 
 CAPX_PY="${CAPX_VENV:-/opt/capx-venv}/bin/python"
-export PYTHONPATH="/ryzers:/ryzers/notebooks${PYTHONPATH:+:${PYTHONPATH}}"
+export PYTHONPATH="/ryzers/notebooks/scripts${PYTHONPATH:+:${PYTHONPATH}}"
 
 echo "================ Multi-task RHO static harness ================"
 RHO_MULTITASK_MOCK=1 "${CAPX_PY}" - <<'PY'
@@ -41,24 +41,44 @@ assert override.stdout.strip() == "rho-model-override"
 with tempfile.TemporaryDirectory(prefix="rho-multitask-", dir="/tmp") as temporary:
     root = demo.prepare_workshop(Path(temporary) / "candidate")
     manifest = json.loads((root / "scenarios.json").read_text())
+    assert manifest["schema_version"] == "rho-multitask-scenarios/v2"
     assert manifest["splits"] == {
         "train": ["stack_train", "wipe_train"],
-        "val": ["stack_val", "wipe_val", "lift_guard_val"],
+        "val": ["stack_val", "wipe_val"],
     }
+    assert set(manifest["scenarios"]) == {
+        "stack_train",
+        "wipe_train",
+        "stack_val",
+        "wipe_val",
+    }
+    assert {scenario["task"] for scenario in manifest["scenarios"].values()} == {
+        "cube_stack",
+        "spill_wipe",
+    }
+    assert {
+        path.name for path in (root / "solver" / "tasks").glob("*.py")
+    } == {"__init__.py", "cube_stack.py", "spill_wipe.py"}
+    assert 'os.environ.get("RHO_SUPPORT_ROOT", "/ryzers/notebooks/scripts")' in (
+        root / "probe.py"
+    ).read_text()
+    assert '"RHO_SUPPORT_ROOT"' in (root / "helix.toml").read_text()
     os.environ["RHO_TRIAL_ID"] = "2"
     try:
         assert rho_demo._trial_id(root, "val", "stack_val") == 2
     finally:
         os.environ.pop("RHO_TRIAL_ID")
     provenance = json.loads((root / "provenance.json").read_text())
+    assert provenance["schema_version"] == "rho-multitask-fixtures/v2"
     assert provenance["seed_model"] == "Gemma-4-E4B-it-GGUF"
+    assert set(provenance["policies"]) == {"cube_stack", "spill_wipe"}
     for policy in provenance["policies"].values():
         assert len(policy["source_policy_sha256"]) == 64
         assert policy["source_prompt"]
         assert policy["source_trial"] == 1
         assert policy["source_git_commit"]
     assert demo.resolve_scenarios(root, "train", ["0", "1"])[0][0] == "stack_train"
-    assert demo.resolve_scenarios(root, "val", ["2"])[0][0] == "lift_guard_val"
+    assert demo.resolve_scenarios(root, "val", ["1"])[0][0] == "wipe_val"
     for invalid_id in ("stack_val", "-1", "2"):
         try:
             demo.resolve_scenarios(root, "train", [invalid_id])
@@ -72,7 +92,7 @@ with tempfile.TemporaryDirectory(prefix="rho-multitask-", dir="/tmp") as tempora
 
     config = load_config(root / "helix.toml")
     assert config.dataset.train_size == 2
-    assert config.dataset.val_size == 3
+    assert config.dataset.val_size == 2
     assert config.evolution.max_generations == 2
     assert config.evolution.perfect_score_threshold == 1.1
     assert config.evolution.minibatch_size == 1
@@ -81,7 +101,7 @@ with tempfile.TemporaryDirectory(prefix="rho-multitask-", dir="/tmp") as tempora
     assert config.evolution.merge_enabled is True
     assert config.evolution.max_merge_invocations == 2
     assert config.evolution.merge_val_overlap_floor == 1
-    assert config.evolution.merge_subsample_size == 3
+    assert config.evolution.merge_subsample_size == 2
     assert config.evolution.frontier_type == "instance"
     assert config.evolution.acceptance_criterion == "strict_improvement"
 
@@ -145,24 +165,36 @@ with tempfile.TemporaryDirectory(prefix="rho-multitask-", dir="/tmp") as tempora
         for scenario_id, scenario in demo.resolve_scenarios(root, "train", ["0", "1"])
     ]
     assert [result["reward"] for result in train_results] == [1.0, 1.0]
-    _, lift = demo.resolve_scenarios(root, "val", ["2"])[0]
-    assert demo.score_scenario(root, "val", "lift_guard_val", lift)["reward"] == 1.0
+    try:
+        demo.score_scenario(
+            root,
+            "val",
+            "unknown_val",
+            {
+                "task": "unknown_task",
+                "trial": 2,
+                "policy_path": "solver/tasks/cube_stack.py",
+                "config_path": "unused.yaml",
+            },
+        )
+    except ValueError as exc:
+        assert "unsupported mock task" in str(exc)
+    else:
+        raise AssertionError("unsupported mock task was accepted")
 
     root = demo.prepare_workshop(root)
     mocked = demo.materialize_mock_evolution(root)
     assert demo.MOCK_LABEL in mocked.stdout
     summary = demo.frontier_summary(root)
     assert summary["generation"] == 2
-    assert summary["candidates"]["g1-s1"]["wins"] == [
-        "stack_val",
-        "lift_guard_val",
-    ]
-    assert summary["candidates"]["g1-s2"]["wins"] == [
-        "wipe_val",
-        "lift_guard_val",
-    ]
-    assert summary["candidates"]["g0-s0"]["frontier"] is True
+    assert summary["candidates"]["g1-s1"]["wins"] == ["stack_val"]
+    assert summary["candidates"]["g1-s2"]["wins"] == ["wipe_val"]
+    assert summary["candidates"]["g0-s0"]["frontier"] is False
     assert summary["candidates"]["g2-m1"]["frontier"] is True
+    assert all(
+        set(candidate["scores"]) == {"stack_val", "wipe_val"}
+        for candidate in summary["candidates"].values()
+    )
     assert summary["merge_counter"] == 1
     lesson = demo.evolution_lesson(summary)
     assert lesson["multi_key_frontier"] is True
@@ -236,17 +268,16 @@ with tempfile.TemporaryDirectory(prefix="rho-multitask-", dir="/tmp") as tempora
             trials={
                 "cube_stack": [100, 101, 102, 103, 104],
                 "spill_wipe": [200, 201, 202, 203, 204],
-                "cube_lift": [300, 301, 302, 303, 304],
             },
             capture=True,
         )
     finally:
         demo.score_scenario = original_score_scenario
-    assert len(hidden) == 15
-    assert len(hidden_calls) == 15
+    assert len(hidden) == 10
+    assert len(hidden_calls) == 10
     assert all(call[3] is True for call in hidden_calls)
     assert hidden_calls[0][:3] == ("hidden_cube_stack_100", "cube_stack", 100)
-    assert hidden_calls[-1][:3] == ("hidden_cube_lift_304", "cube_lift", 304)
+    assert hidden_calls[-1][:3] == ("hidden_spill_wipe_204", "spill_wipe", 204)
 
     def rollout(task, trial, reward, completed):
         return {
@@ -263,42 +294,104 @@ with tempfile.TemporaryDirectory(prefix="rho-multitask-", dir="/tmp") as tempora
     before_rollouts = [
         *[rollout("cube_stack", trial, 0.0, False) for trial in range(100, 105)],
         *[rollout("spill_wipe", trial, 1.0, True) for trial in range(200, 205)],
-        *[rollout("cube_lift", trial, 1.0, True) for trial in range(300, 305)],
     ]
     after_rollouts = [
         rollout("cube_stack", 100, 1.0, True),
         *[rollout("cube_stack", trial, 0.0, False) for trial in range(101, 105)],
         *[rollout("spill_wipe", trial, 1.0, True) for trial in range(200, 205)],
-        *[rollout("cube_lift", trial, 1.0, True) for trial in range(300, 304)],
-        rollout("cube_lift", 304, 0.5, False),
     ]
     before_summary = demo.summarize_rollouts(before_rollouts)
     after_summary = demo.summarize_rollouts(after_rollouts)
-    assert before_summary["cube_lift"]["rollouts"] == 5
-    assert after_summary["cube_lift"]["completion_rate"] == 0.8
-    criterion = demo.hidden_success_criterion(
-        before_summary,
-        after_summary,
-        lift_policy_unchanged=True,
-    )
-    assert criterion["hard_task_completed_before"] == 5
-    assert criterion["hard_task_completed_after"] == 6
-    assert criterion["hard_task_improved"] is True
-    assert criterion["lift_guard_preserved"] is True
+    assert set(before_summary) == {"cube_stack", "spill_wipe"}
+    assert not hasattr(demo, "hidden_success_criterion")
+    criterion = demo.deployment_success_criterion(before_summary, after_summary)
+    assert criterion["required_tasks"] == ["cube_stack", "spill_wipe"]
+    assert criterion["rollouts"] == 10
+    assert criterion["completed_before"] == 5
+    assert criterion["completed_after"] == 6
+    assert criterion["completion_improved"] is True
+    assert criterion["reward_improved"] is False
+    assert criterion["deployment_improved"] is True
     assert criterion["met"] is True
 
     noisy_rollouts = [
         *[rollout("cube_stack", trial, 0.001, False) for trial in range(100, 105)],
         *[rollout("spill_wipe", trial, 1.0, True) for trial in range(200, 205)],
-        *[rollout("cube_lift", trial, 1.0, True) for trial in range(300, 305)],
     ]
-    noisy_criterion = demo.hidden_success_criterion(
+    noisy_criterion = demo.deployment_success_criterion(
         before_summary,
         demo.summarize_rollouts(noisy_rollouts),
-        lift_policy_unchanged=True,
     )
-    assert noisy_criterion["hard_task_improved"] is False
+    assert noisy_criterion["completion_improved"] is False
+    assert noisy_criterion["reward_improved"] is False
     assert noisy_criterion["met"] is False
+
+    reward_gain_rollouts = [
+        *[rollout("cube_stack", trial, 0.2, False) for trial in range(100, 105)],
+        *[rollout("spill_wipe", trial, 1.0, True) for trial in range(200, 205)],
+    ]
+    reward_criterion = demo.deployment_success_criterion(
+        before_summary,
+        demo.summarize_rollouts(reward_gain_rollouts),
+    )
+    assert reward_criterion["completed_before"] == reward_criterion["completed_after"]
+    assert reward_criterion["mean_reward_after"] == 0.6
+    assert reward_criterion["completion_improved"] is False
+    assert reward_criterion["reward_improved"] is True
+    assert reward_criterion["met"] is True
+
+    neutral_before = {
+        "pick": {"rollouts": 2, "completed": 1, "mean_reward": 0.25},
+        "place": {"rollouts": 2, "completed": 1, "mean_reward": 0.25},
+    }
+    neutral_after = {
+        "pick": {"rollouts": 2, "completed": 1, "mean_reward": 0.35},
+        "place": {"rollouts": 2, "completed": 1, "mean_reward": 0.35},
+    }
+    neutral_criterion = demo.deployment_success_criterion(
+        neutral_before,
+        neutral_after,
+        required_tasks=("pick", "place"),
+    )
+    assert neutral_criterion["required_tasks"] == ["pick", "place"]
+    assert neutral_criterion["reward_improved"] is True
+
+    invalid_criteria = [
+        (
+            before_summary,
+            {"cube_stack": after_summary["cube_stack"]},
+            {},
+        ),
+        (
+            before_summary,
+            after_summary,
+            {"required_tasks": ("cube_stack", "cube_stack")},
+        ),
+        (
+            before_summary,
+            after_summary,
+            {"minimum_hard_reward_gain": -0.01},
+        ),
+        (
+            before_summary,
+            {
+                **after_summary,
+                "cube_stack": {**after_summary["cube_stack"], "rollouts": 4},
+            },
+            {},
+        ),
+    ]
+    for invalid_before, invalid_after, kwargs in invalid_criteria:
+        try:
+            demo.deployment_success_criterion(
+                invalid_before,
+                invalid_after,
+                **kwargs,
+            )
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("invalid deployment summaries were accepted")
 
 print("multi-task manifest, evaluator, frontier, and merge plumbing OK")
 PY

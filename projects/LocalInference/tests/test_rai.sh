@@ -59,9 +59,9 @@ assert Path('/ryzers/rai/examples/manipulation-demo-streamlit.py').is_file()
 print('RAI perception imports and preloaded weights available!')
 "
 /usr/bin/python3 -c "import jupyter_server_proxy"
-test -x /ryzers/lemonade_env.sh
-test -x /ryzers/manipulation_demo_headless.sh
-test -f /ryzers/manipulation_demo_streamlit.py
+test -x /ryzers/notebooks/scripts/lemonade_env.sh
+test -x /ryzers/notebooks/scripts/manipulation_demo_headless.sh
+test -f /ryzers/notebooks/scripts/manipulation_demo_streamlit.py
 echo "RAI demo scripts and Jupyter port proxy available!"
 
 # Check ROS 2 tools

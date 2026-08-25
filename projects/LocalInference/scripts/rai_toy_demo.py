@@ -167,7 +167,7 @@ import os
 import sys
 
 sys.path.insert(
-    0, os.environ.get("RAI_TOY_SUPPORT_DIR", "/ryzers/notebooks")
+    0, os.environ.get("RAI_TOY_SUPPORT_DIR", "/ryzers/notebooks/scripts")
 )
 from rai_toy_demo import evaluate_cli
 
@@ -330,7 +330,7 @@ passthrough_env = [
 [env]
 RAI_TOY_MODEL = "{model}"
 RAI_TOY_MODEL_ENDPOINT = "{endpoint}"
-RAI_TOY_SUPPORT_DIR = "/ryzers/notebooks"
+RAI_TOY_SUPPORT_DIR = "/ryzers/notebooks/scripts"
 
 [evaluator]
 command = "/opt/rai-venv/bin/python probe.py"

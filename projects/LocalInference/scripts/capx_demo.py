@@ -8,6 +8,7 @@ import os
 os.environ.setdefault("MUJOCO_GL", "egl")
 os.environ.setdefault("PYOPENGL_PLATFORM", "egl")
 
+import ast  # noqa: E402
 import base64  # noqa: E402
 import re  # noqa: E402
 import subprocess  # noqa: E402
@@ -37,16 +38,39 @@ except ModuleNotFoundError as exc:
 LEMONADE_PORT = 13305
 DEFAULT_MODEL = "Gemma-4-E2B-it-GGUF"
 
-LEMONADE_ENV = Path(os.environ.get("LEMONADE_ENV", "/ryzers/lemonade_env.sh"))
+LEMONADE_ENV = Path(
+    os.environ.get(
+        "LEMONADE_ENV",
+        "/ryzers/notebooks/scripts/lemonade_env.sh",
+    )
+)
 
 LEMONADE_CACHE = os.environ.get("LEMONADE_CACHE", "/opt/lemonade-cache/lemonade")
 LEMONADE_HF_HOME = os.environ.get("LEMONADE_HF_HOME", "/opt/lemonade-cache/huggingface")
 LLAMA_METRICS_URL = os.environ.get("LLAMA_METRICS_URL", "http://127.0.0.1:8001/metrics")
 SERVICE_LOG = Path(os.environ.get("CAPX_SERVICE_LOG", "/tmp/capx-services.log"))
 
-WORK = Path("/tmp/capx_notebook")
+WORK = Path(os.environ.get("CAPX_WORK", "/tmp/capx_notebook"))
 
 TRIAL_DIR = re.compile(r"trial_(\d+)_sandboxrc_(\d+)_reward_([\d.]+)_taskcompleted_(\d)")
+
+PRIMITIVES = (
+    "get_object_pose",
+    "sample_grasp_pose",
+    "goto_pose",
+    "open_gripper",
+    "close_gripper",
+    "home_pose",
+)
+
+SCENARIOS = {
+    "cube stack": "env_configs/cube_stack/franka_robosuite_cube_stack.yaml",
+    "cube restack": "env_configs/cube_restack/franka_robosuite_cube_restack.yaml",
+    "cube lift": "env_configs/cube_lifting/franka_robosuite_cube_lifting.yaml",
+    "nut assembly": "env_configs/nut_assembly/franka_robosuite_nut_assembly.yaml",
+    "spill wipe": "env_configs/spill_wipe/franka_robosuite_spill_wipe.yaml",
+    "two arm handover": "env_configs/two_arm_handover/two_arm_handover.yaml",
+}
 
 
 def lemonade_alive(timeout: float = 2.0) -> bool:
@@ -183,7 +207,7 @@ def _scaled(video: Path, dest: Path, width: int) -> Path:
 
 
 def _show_video_grid(
-    entries: list[tuple[int, float, bool, Path | None]],
+    entries: list[tuple[str | int, float, bool, Path | None]],
     width: int,
     progress,
 ) -> None:
@@ -195,7 +219,7 @@ def _show_video_grid(
     figures = []
     embedded = 0
     for trial, reward, solved, video in entries:
-        caption = f"seed {trial} · reward {reward:.3f}"
+        caption = f"{trial} · reward {reward:.3f}"
         caption += " · solved" if solved else ""
         if video is None:
             figures.append(
@@ -206,7 +230,8 @@ def _show_video_grid(
             )
             continue
 
-        source = _scaled(video, thumbs / f"trial_{trial}.mp4", width)
+        safe_trial = re.sub(r"[^0-9A-Za-z_-]+", "_", str(trial))
+        source = _scaled(video, thumbs / f"trial_{safe_trial}.mp4", width)
         if source is video:
             progress(f"  could not scale {video.name}, embedding it as it is")
 
@@ -234,8 +259,13 @@ def show_trial_grid(trials: list[dict], width: int = 240, progress=print) -> Non
     """Display CaP-X trial videos with rewards."""
     entries = []
     for trial in trials:
-        video = next(iter(sorted(trial["dir"].glob("video_combined*.mp4"))), None)
-        entries.append((trial["trial"], trial["reward"], trial["solved"], video))
+        trial_dir = trial.get("dir")
+        video = (
+            next(iter(sorted(trial_dir.glob("video_combined*.mp4"))), None)
+            if trial_dir is not None
+            else None
+        )
+        entries.append((f"seed {trial['trial']}", trial["reward"], trial["solved"], video))
     _show_video_grid(entries, width, progress)
 
 
@@ -249,13 +279,115 @@ def show_rollout_grid(rollouts: list[dict], width: int = 240, progress=print) ->
             video = None
         entries.append(
             (
-                int(rollout["trial"]),
+                f"{rollout.get('task', 'rollout')} seed {int(rollout['trial'])}",
                 float(rollout.get("reward") or 0.0),
                 bool(rollout.get("task_completed")),
                 video,
             )
         )
     _show_video_grid(entries, width, progress)
+
+
+def show_paired_rollout_grid(
+    before: list[dict],
+    after: list[dict],
+    width: int = 220,
+    progress=print,
+) -> None:
+    """Display matched before/after rollout videos in adjacent pairs."""
+    indexed_after = {
+        (str(item.get("task", "")), int(item["trial"])): item for item in after
+    }
+    entries = []
+    for baseline in before:
+        key = (str(baseline.get("task", "")), int(baseline["trial"]))
+        evolved = indexed_after.get(key)
+        for phase, rollout in (("before", baseline), ("after", evolved)):
+            raw_video = rollout.get("video") if rollout else None
+            video = Path(raw_video) if raw_video else None
+            if video is not None and not video.is_file():
+                video = None
+            entries.append(
+                (
+                    f"{key[0]} seed {key[1]} {phase}",
+                    float(rollout.get("reward") or 0.0) if rollout else 0.0,
+                    bool(rollout.get("task_completed")) if rollout else False,
+                    video,
+                )
+            )
+    _show_video_grid(entries, width, progress)
+
+
+def analyze_program(program: str) -> dict:
+    """Summarize how generated code uses CaP-X's grounded robot primitives."""
+    calls = {name: 0 for name in PRIMITIVES}
+    syntax_error = None
+    try:
+        tree = ast.parse(program)
+    except SyntaxError as exc:
+        tree = None
+        syntax_error = f"{exc.msg} (line {exc.lineno})"
+    if tree is not None:
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                if node.func.id in calls:
+                    calls[node.func.id] += 1
+
+    compact = "".join(program.split())
+    return {
+        "syntax_error": syntax_error,
+        "primitive_calls": calls,
+        "perception_calls": calls["get_object_pose"] + calls["sample_grasp_pose"],
+        "planner_calls": calls["goto_pose"] + calls["home_pose"],
+        "uses_bbox_extent": "return_bbox_extent=True" in compact,
+        "uses_approach_offset": "z_approach=" in compact,
+        "nested_pose_indexing": bool(
+            re.search(r"[A-Za-z_][A-Za-z0-9_]*_pose\[0\]\[[012]\]", compact)
+        ),
+        "line_count": len(program.splitlines()),
+    }
+
+
+def trial_program(trial: dict) -> str:
+    """Read the generated program retained in a CaP-X trial artifact."""
+    trial_dir = trial.get("dir")
+    if trial_dir is None:
+        return ""
+    code_path = Path(trial_dir) / "code.py"
+    return code_path.read_text() if code_path.is_file() else ""
+
+
+def trial_introspection(trials: list[dict]) -> list[dict]:
+    """Return compact code and failure evidence for a set of CaP-X trials."""
+    rows = []
+    for trial in trials:
+        program = trial_program(trial)
+        analysis = analyze_program(program)
+        reward = float(trial.get("reward") or 0.0)
+        if trial.get("solved"):
+            outcome = "completed"
+        elif trial.get("error"):
+            outcome = "execution failure"
+        elif reward > 0:
+            outcome = "partial reward"
+        else:
+            outcome = "no progress"
+        rows.append(
+            {
+                "trial": int(trial.get("trial", 0)),
+                "outcome": outcome,
+                "reward": reward,
+                "primitive_calls": sum(analysis["primitive_calls"].values()),
+                "perception_calls": analysis["perception_calls"],
+                "planner_calls": analysis["planner_calls"],
+                "bbox_extent": analysis["uses_bbox_extent"],
+                "approach_offset": analysis["uses_approach_offset"],
+                "nested_pose_indexing": analysis["nested_pose_indexing"],
+                "syntax_error": analysis["syntax_error"],
+                "program": program,
+            }
+        )
+    return rows
 
 
 def benchmark(
@@ -292,7 +424,7 @@ def benchmark(
         str(out_dir),
     ]
     if oracle:
-        cmd.append("--use-oracle-code")
+        cmd.extend(["--use-oracle-code", "True"])
     progress(f"Running {trials} CaP-X trial{'s' if trials != 1 else ''}...")
 
     started = time.monotonic()
@@ -333,19 +465,21 @@ def read_results(out_dir: Path, model: str, *, verbose: bool = False, progress=p
     if verbose and summary.exists():
         progress("\n" + summary.read_text())
 
-    trials = []
+    by_trial = {}
     for d in sorted(root.glob("trial_*")):
         m = TRIAL_DIR.match(d.name)
         if m:
-            trials.append(
-                {
-                    "trial": int(m[1]),
-                    "error": m[2] != "0",
-                    "reward": float(m[3]),
-                    "solved": m[4] == "1",
-                    "dir": d,
-                }
-            )
+            entry = {
+                "trial": int(m[1]),
+                "error": m[2] != "0",
+                "reward": float(m[3]),
+                "solved": m[4] == "1",
+                "dir": d,
+            }
+            current = by_trial.get(entry["trial"])
+            if current is None or d.stat().st_mtime > current["dir"].stat().st_mtime:
+                by_trial[entry["trial"]] = entry
+    trials = [by_trial[trial] for trial in sorted(by_trial)]
 
     progress(f"{'trial':>5} {'sandbox':>8} {'reward':>7} {'solved':>7}")
     for t in trials:
@@ -355,3 +489,100 @@ def read_results(out_dir: Path, model: str, *, verbose: bool = False, progress=p
         mean = np.mean([t["reward"] for t in trials])
         progress(f"\nsuccess rate: {solved}/{len(trials)}   mean reward: {mean:.3f}")
     return trials
+
+
+def benchmark_scenarios(
+    model: str,
+    server_url: str,
+    scenarios: dict | None = None,
+    temperature: float = 0.2,
+    max_tokens: int = 16384,
+    trials: int = 1,
+    oracle: bool = False,
+    verbose: bool = False,
+    progress=print,
+) -> list[dict]:
+    """Run one or more episodes of several different tasks, side by side."""
+    if trials < 1:
+        raise ValueError("trials must be at least 1")
+
+    scenarios = scenarios or SCENARIOS
+    results = []
+    for label, config_path in scenarios.items():
+        progress(f"\n===== {label}: {config_path} =====")
+        out_dir = WORK / "scenarios" / re.sub(r"[^0-9A-Za-z]+", "_", label)
+        cmd = [
+            sys.executable,
+            "capx/envs/launch.py",
+            "--config-path",
+            config_path,
+            "--model",
+            model,
+            "--server-url",
+            server_url,
+            "--temperature",
+            str(temperature),
+            "--max-tokens",
+            str(max_tokens),
+            "--total-trials",
+            str(trials),
+            "--num-workers",
+            "1",
+            "--output-dir",
+            str(out_dir),
+        ]
+        if oracle:
+            cmd.extend(["--use-oracle-code", "True"])
+
+        started = time.monotonic()
+        proc = subprocess.Popen(
+            cmd,
+            cwd=str(CAPX_ROOT),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+        output: list[str] = []
+        for line in proc.stdout:
+            output.append(line)
+            if verbose:
+                progress(line.rstrip())
+        proc.wait()
+        elapsed = time.monotonic() - started
+        if proc.returncode != 0:
+            tail = "".join(output[-40:]).strip()
+            progress(f"{label} failed (exit {proc.returncode}):\n{tail}")
+
+        got = read_results(
+            out_dir,
+            model,
+            verbose=False,
+            progress=lambda *args, **kwargs: None,
+        )
+        if not got:
+            got = [
+                {
+                    "trial": 0,
+                    "reward": 0.0,
+                    "solved": False,
+                    "error": True,
+                    "dir": None,
+                }
+            ]
+        per_trial_elapsed = elapsed / len(got)
+        for entry in got:
+            entry["label"] = label
+            entry["elapsed_seconds"] = per_trial_elapsed
+            results.append(entry)
+
+    progress(f"\n{'scenario':<14}{'trial':>7}{'sandbox':>9}{'reward':>8}{'solved':>8}")
+    for result in results:
+        progress(
+            f"{result['label']:<14}{result.get('trial', 0):>7}"
+            f"{'error' if result.get('error') else 'ok':>9}"
+            f"{result['reward']:>8.3f}{str(result['solved']):>8}"
+        )
+    solved = sum(result["solved"] for result in results)
+    progress(f"\nsolved {solved}/{len(results)} scenarios")
+    return results

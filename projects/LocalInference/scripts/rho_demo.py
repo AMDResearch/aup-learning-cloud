@@ -35,6 +35,7 @@ HELIX = Path(os.environ.get("HELIX_BIN", "/opt/capx-venv/bin/helix"))
 CAPX_MODEL = "Gemma-4-E4B-it-GGUF"
 DEFAULT_RHO_MODEL = "Gemma-4-E2B-it-GGUF"
 MODEL = os.environ.get("RHO_MODEL", DEFAULT_RHO_MODEL)
+MODEL_API_ID = MODEL.removeprefix("user.")
 CONFIG_PATH = os.environ.get(
     "RHO_CONFIG_PATH",
     "env_configs/cube_stack/franka_robosuite_cube_stack.yaml",
@@ -153,8 +154,8 @@ Only edit files below `solver/`.
 
 OPENCODE_CONFIG = {
     "$schema": "https://opencode.ai/config.json",
-    "model": f"lemonade/{MODEL}",
-    "small_model": f"lemonade/{MODEL}",
+    "model": f"lemonade/{MODEL_API_ID}",
+    "small_model": f"lemonade/{MODEL_API_ID}",
     "agent": {"build": {"temperature": 0.0, "steps": 8}},
     "experimental": {"primary_tools": ["read", "edit", "bash"]},
     "provider": {
@@ -166,8 +167,9 @@ OPENCODE_CONFIG = {
                 "apiKey": "lemonade",
             },
             "models": {
-                MODEL: {
-                    "name": MODEL,
+                MODEL_API_ID: {
+                    "name": MODEL_API_ID,
+                    "tool_call": True,
                     "limit": {"context": 32768, "output": 4096},
                 }
             },
@@ -199,9 +201,12 @@ OPENCODE_CONFIG = {
 }
 
 PROBE_SOURCE = """\
+import os
 import sys
 
-sys.path.insert(0, "/ryzers")
+sys.path.insert(
+    0, os.environ.get("RHO_SUPPORT_ROOT", "/ryzers/notebooks/scripts")
+)
 from rho_demo import evaluate_cli
 
 raise SystemExit(evaluate_cli())
@@ -254,6 +259,7 @@ passthrough_env = [
   "CAPX_ROOT",
   "RHO_CONFIG_PATH",
   "RHO_PROGRESS_FILE",
+  "RHO_SUPPORT_ROOT",
   "XDG_RUNTIME_DIR",
   "RHO_MOCK_EVAL",
 ]
@@ -294,7 +300,7 @@ frontier_type = "instance"
 
 [agent]
 backend = "opencode"
-model = "lemonade/{MODEL}"
+model = "lemonade/{MODEL_API_ID}"
 max_turns = 8
 background = """{background}"""
 

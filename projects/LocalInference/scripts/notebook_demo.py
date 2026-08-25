@@ -58,7 +58,7 @@ from rai_sim.o3de.o3de_bridge import (  # noqa: E402
 from rai_sim.simulation_bridge import SceneConfig  # noqa: E402
 
 RAI_DIR = Path("/ryzers/rai")
-DEMO_SCRIPT = "/ryzers/manipulation_demo_headless.sh"
+DEMO_SCRIPT = "/ryzers/notebooks/scripts/manipulation_demo_headless.sh"
 O3DE_CONFIG = "src/rai_bench/rai_bench/manipulation_o3de/predefined/configs/o3de_config.yaml"
 CAMERA_TOPIC = "/color_image5"
 VIDEO_PORT = 8080
