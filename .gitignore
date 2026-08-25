@@ -387,8 +387,8 @@ vite.config.ts.timestamp-*
 
 # Project specific
 dockerfiles/Courses/DL/data/FashionMNIST/raw/
-projects/LocalInference/experiment_results/
 *.vsix
+projects/LocalInference/sweep_results/
 
 # Local config overrides
 runtime/values.local.yaml
