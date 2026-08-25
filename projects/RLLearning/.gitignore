@@ -6,4 +6,5 @@ __pycache__/
 
 # Notebook outputs
 trajectory.npz
+panda_pick_cube*.npz
 *.mp4
