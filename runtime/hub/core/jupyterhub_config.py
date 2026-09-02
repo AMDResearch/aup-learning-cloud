@@ -149,9 +149,9 @@ c.JupyterHub.tornado_settings = {
     "xsrf_cookie_kwargs": _xsrf_cookie_kwargs,
 }
 
-# Inject platform identity into every Jinja template context so that
-# {{ powered_by }} is available in all Hub-rendered pages.
-c.JupyterHub.template_vars["powered_by"] = "AUP Learning Cloud"
+# Follows the cluster-suffixed platform_name that setup_hub() already set;
+# a plain default here would shadow it in the footer.
+c.JupyterHub.template_vars["powered_by"] = c.JupyterHub.template_vars.get("platform_name") or "AUP Learning Cloud"
 
 # Database configuration
 db_type = z2jh.get_config("hub.db.type")

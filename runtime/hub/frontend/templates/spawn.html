@@ -19,7 +19,7 @@ SOFTWARE.
 -->
 
 {% extends "page.html" %}
-{% block title %}Spawn Server{% endblock %}
+{%- block title -%}Spawn Server - {{ platform_name or 'AUP Learning Cloud' }}{%- endblock title -%}
 
 {% block stylesheet %}
 {{ super() }}
