@@ -72,12 +72,17 @@ class CustomMultiAuthenticator(MultiAuthenticator):
             return True
         return await authenticator.refresh_user(user, handler)
 
-    def add_user(self, user):
-        from core.authenticators.github_app import GITHUB_USERNAME_PREFIX
+    async def add_user(self, user):
+        """Delegate to the sub-authenticator that owns the user.
 
+        Children may be coroutines (they sync groups at login), so route the
+        call through maybe_future.
+        """
         authenticator = self._find_authenticator_for_user(user)
-        if user.name.startswith(GITHUB_USERNAME_PREFIX) and authenticator is not None:
-            authenticator.add_user(user)
+        if authenticator is not None:
+            from jupyterhub.utils import maybe_future
+
+            await maybe_future(authenticator.add_user(user))
         return super().add_user(user)
 
     def delete_user(self, user):

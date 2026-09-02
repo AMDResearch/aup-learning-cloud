@@ -1,4 +1,5 @@
 import importlib.util
+import inspect
 import sys
 import types
 from collections.abc import Iterator
@@ -150,6 +151,23 @@ def loaded_authenticators(monkeypatch: pytest.MonkeyPatch) -> Iterator[types.Sim
         multiauthenticator.MultiAuthenticator = MultiAuthenticator
         multiauthenticator_module = types.ModuleType("multiauthenticator.multiauthenticator")
         multiauthenticator_module.PREFIX_SEPARATOR = ":"
+        groups_module = types.ModuleType("core.groups")
+        membership_calls: list[str] = []
+
+        async def ensure_user_group_membership(user, _db, *, refresh_github_teams=False):
+            membership_calls.append(user.name)
+
+        groups_module.ensure_user_group_membership = ensure_user_group_membership
+
+        jupyterhub_utils = types.ModuleType("jupyterhub.utils")
+
+        async def maybe_future(obj):
+            if inspect.isawaitable(obj):
+                return await obj
+            return obj
+
+        jupyterhub_utils.maybe_future = maybe_future
+
         modules = {
             "core": core,
             "core.authenticators": authenticators,
@@ -159,6 +177,8 @@ def loaded_authenticators(monkeypatch: pytest.MonkeyPatch) -> Iterator[types.Sim
             "oauthenticator.oauth2": oauth2,
             "multiauthenticator": multiauthenticator,
             "multiauthenticator.multiauthenticator": multiauthenticator_module,
+            "core.groups": groups_module,
+            "jupyterhub.utils": jupyterhub_utils,
         }
         for name, module in modules.items():
             module_patch.setitem(sys.modules, name, module)
@@ -175,4 +195,4 @@ def loaded_authenticators(monkeypatch: pytest.MonkeyPatch) -> Iterator[types.Sim
         module_patch.setitem(sys.modules, "core.authenticators.multi", multi_module)
         multi_spec.loader.exec_module(multi_module)
 
-        yield types.SimpleNamespace(github=github_module, multi=multi_module)
+        yield types.SimpleNamespace(github=github_module, multi=multi_module, membership_calls=membership_calls)

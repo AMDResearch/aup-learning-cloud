@@ -104,8 +104,19 @@ class CustomGitHubOAuthenticator(GitHubOAuthenticator):
         auth_model = await super().run_post_auth_hook(handler, auth_model)
         return self._with_github_username_prefix(auth_model)
 
-    def add_user(self, user):
-        return super().add_user(SimpleNamespace(name=user.name.removeprefix(self.prefix)))
+    async def add_user(self, user):
+        """Assign group memberships at login so Home shows resources immediately.
+
+        The parent tracks allowed_users by raw GitHub login, so it is handed
+        the unprefixed name; group sync uses the prefixed local identity.
+        """
+        super().add_user(SimpleNamespace(name=user.name.removeprefix(self.prefix)))
+        try:
+            from core.groups import ensure_user_group_membership
+
+            await ensure_user_group_membership(user, user.db)
+        except Exception:
+            self.log.warning("Failed to ensure group membership for %s at login", user.name, exc_info=True)
 
     def delete_user(self, user):
         return super().delete_user(SimpleNamespace(name=user.name.removeprefix(self.prefix)))

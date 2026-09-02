@@ -115,10 +115,7 @@ def setup_hub(c: Any) -> None:
         c: JupyterHub configuration object (from get_config())
     """
     from core import z2jh
-    from core.authenticators import (
-        GITHUB_USERNAME_PREFIX,
-        configure_authenticator,
-    )
+    from core.authenticators import configure_authenticator
     from core.config import HubConfig
     from core.database import create_all_tables, init_database
     from core.handlers import configure_handlers, get_handlers
@@ -128,17 +125,6 @@ def setup_hub(c: Any) -> None:
     # Get the initialized config singleton
     config = HubConfig.get()
     auth = config.auth
-    github_app_id = ""
-    github_app_installation_id = ""
-    github_app_private_key = ""
-    github_app_private_key_file = ""
-    github_team_sync_ttl_seconds = 3600
-    if auth.github:
-        github_app_id = z2jh.get_config("hub.config.GitHubOAuthenticator.app_id", "")
-        github_app_installation_id = z2jh.get_config("hub.config.GitHubOAuthenticator.installation_id", "")
-        github_app_private_key = z2jh.get_config("hub.config.GitHubOAuthenticator.private_key", "")
-        github_app_private_key_file = z2jh.get_config("hub.config.GitHubOAuthenticator.private_key_file", "")
-        github_team_sync_ttl_seconds = z2jh.get_config("hub.config.GitHubOAuthenticator.team_sync_ttl_seconds", 3600)
 
     # =========================================================================
     # Configure Spawner
@@ -179,56 +165,15 @@ def setup_hub(c: Any) -> None:
     c.Authenticator.auth_refresh_age = 3600  # check token refresh every hour
 
     async def auth_state_hook(spawner, auth_state):
-        if auth_state is None:
-            spawner.github_access_token = None
-            # Still assign native users to their default group
-            if auth.native and not spawner.user.name.startswith(GITHUB_USERNAME_PREFIX):
-                try:
-                    from core.groups import assign_user_to_group
+        # Groups are assigned at login (Authenticator.add_user). At spawn we only
+        # propagate the GitHub token and refresh team membership (TTL-cached).
+        spawner.github_access_token = auth_state.get("access_token") if auth_state else None
+        try:
+            from core.groups import ensure_user_group_membership
 
-                    assign_user_to_group(spawner.user, "native-users", spawner.user.db)
-                except Exception as e:
-                    print(f"[GROUPS] Warning: Failed to assign native user group for {spawner.user.name}: {e}")
-            return
-        spawner.github_access_token = auth_state.get("access_token")
-
-        if auth.github and spawner.user.name.startswith(GITHUB_USERNAME_PREFIX):
-            try:
-                from core.groups import sync_github_teams_for_user
-
-                synced = await sync_github_teams_for_user(
-                    spawner.user,
-                    github_app_id,
-                    github_app_installation_id,
-                    github_app_private_key,
-                    github_app_private_key_file,
-                    config.github_org_name,
-                    set(config.teams.mapping.keys()),
-                    spawner.user.db,
-                    team_sync_ttl_seconds=github_team_sync_ttl_seconds,
-                )
-                if not synced:
-                    print(
-                        f"[GROUPS] GitHub team sync unavailable for {spawner.user.name}; keeping existing team groups"
-                    )
-            except Exception as e:
-                print(f"[GROUPS] Warning: Failed to sync GitHub teams for {spawner.user.name}: {e}")
-
-            # Assign all GitHub users to default group (fallback for users without teams)
-            try:
-                from core.groups import assign_user_to_group
-
-                assign_user_to_group(spawner.user, "github-users", spawner.user.db)
-            except Exception as e:
-                print(f"[GROUPS] Warning: Failed to assign github-users group for {spawner.user.name}: {e}")
-        elif auth.native and not spawner.user.name.startswith(GITHUB_USERNAME_PREFIX):
-            # Native user with auth_state but no GitHub teams
-            try:
-                from core.groups import assign_user_to_group
-
-                assign_user_to_group(spawner.user, "native-users", spawner.user.db)
-            except Exception as e:
-                print(f"[GROUPS] Warning: Failed to assign native user group for {spawner.user.name}: {e}")
+            await ensure_user_group_membership(spawner.user, spawner.user.db, refresh_github_teams=True)
+        except Exception as e:
+            print(f"[GROUPS] Warning: Failed to ensure group membership for {spawner.user.name}: {e}")
 
     c.Spawner.auth_state_hook = auth_state_hook
 
