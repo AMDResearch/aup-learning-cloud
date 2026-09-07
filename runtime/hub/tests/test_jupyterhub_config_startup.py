@@ -164,7 +164,8 @@ def test_startup_preserves_setup_and_deployment_template_vars(monkeypatch: pytes
 
     assert dict(config.JupyterHub.template_vars) == {
         **setup_template_vars,
-        "powered_by": "AUP Learning Cloud",
+        # powered_by follows platform_name so the footer shows the cluster name.
+        "powered_by": "Test Platform",
         **deployment_template_vars,
     }
     headers = config.JupyterHub.tornado_settings["headers"]
