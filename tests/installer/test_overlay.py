@@ -253,6 +253,25 @@ def test_phx_emits_hsa_override_env() -> None:
     assert env["HSA_OVERRIDE_GFX_VERSION"] == "11.0.0"
 
 
+def test_uncurated_gfx1153_injects_accelerator_and_image_tag() -> None:
+    cfg = GpuConfig()
+    cfg.append(
+        SkuEntry(
+            accel_key="gfx1153",
+            product_name="AMD_Radeon_840M_Graphics",
+            gpu_target="gfx1153",
+            accel_env="",
+            quota_rate=2,
+            display_name="AMD Radeon 840M",
+        )
+    )
+    _, parsed = _render(cfg, courses=CourseSelection.default())
+    accel = parsed["custom"]["accelerators"]["gfx1153"]
+    assert accel["description"] == "Auto-detected (gfx1153)"
+    gpu = parsed["custom"]["resources"]["metadata"]["gpu"]
+    assert gpu["acceleratorOverrides"]["gfx1153"]["image"] == ("ghcr.io/amdresearch/auplc-base:v1.0-gfx1153")
+
+
 def test_fallback_path_skips_accelerator_stanza_for_curated_sku() -> None:
     cfg = GpuConfig()
     cfg.append(

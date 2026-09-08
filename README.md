@@ -60,7 +60,7 @@ sudo apt install build-essential
 sudo apt install python3-questionary python3-prompt-toolkit
 ```
 
-> **Kernel note** (Ryzen AI APU only): The OEM kernel package follows AMD ROCm's Ryzen APU installation guidance for Ubuntu 24.04. See the [ROCm 7.13.0 preview installation guide for Ryzen APUs](https://rocm.docs.amd.com/en/7.13.0-preview/install/rocm.html?fam=ryzen&w=compute&os=ubuntu&ubuntu-ver=24.04&i=pkgman&gpu=max-pro-395&gfx=gfx1151) for details. Radeon dGPU systems typically use the stock Ubuntu kernel—check ROCm docs for your GPU.
+> **Kernel note** (Ryzen AI APU only): The OEM kernel package follows AMD ROCm's Ryzen APU installation guidance for Ubuntu 24.04. See the [ROCm 10.0.0 installation guide for Ryzen APUs](https://rocm.docs.amd.com/en/latest/install/rocm.html?fam=ryzen&w=compute&os=ubuntu&ubuntu-ver=24.04.4&i=pkgman&gpu=amd-ryzen-ai-max-pro-395&gfx=gfx1151) for details. Radeon dGPU systems typically use the stock Ubuntu kernel—check ROCm docs for your GPU.
 >
 > **Docker note**: See [Docker Post-installation Steps](https://docs.docker.com/engine/install/linux-postinstall/) and [Install Docker Engine on Ubuntu](https://docs.docker.com/engine/install/ubuntu/) for details.
 >

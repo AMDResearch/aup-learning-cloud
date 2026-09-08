@@ -154,6 +154,11 @@ def test_resolve_gpu_config_known_gfx_alias() -> None:
     assert (accel_key, gpu_target) == ("strix-halo", "gfx1151")
 
 
+def test_resolve_gpu_config_gfx1152_and_gfx1153_image_targets() -> None:
+    assert resolve_gpu_config("gfx1152")[:2] == ("gfx1152", "gfx1152")
+    assert resolve_gpu_config("gfx1153")[:2] == ("gfx1153", "gfx1153")
+
+
 def test_resolve_gpu_config_hyphenated_gfx_alias() -> None:
     accel_key, gpu_target, _, _, _ = resolve_gpu_config("gfx-1150")
     assert (accel_key, gpu_target) == ("strix", "gfx1150")
