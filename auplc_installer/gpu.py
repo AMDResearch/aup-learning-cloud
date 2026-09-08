@@ -76,6 +76,8 @@ _GFX_FALLBACK: dict[str, SkuRow] = {
     "gfx1150": ("strix", "gfx1150", "", 2, ""),
     "strix-halo": ("strix-halo", "gfx1151", "", 3, ""),
     "gfx1151": ("strix-halo", "gfx1151", "", 3, ""),
+    "gfx1152": ("gfx1152", "gfx1152", "", 2, ""),
+    "gfx1153": ("gfx1153", "gfx1153", "", 2, ""),
     "rdna4": ("r9700", "gfx120x", "", 4, ""),
     "dgpu": ("r9700", "gfx120x", "", 4, ""),
     "gfx1200": ("r9700", "gfx120x", "", 4, ""),
@@ -106,6 +108,7 @@ def resolve_gpu_config(input_key: str) -> SkuRow:
         raise InstallerError(
             f"Unsupported GPU type: {input_key}\n"
             "  Supported: phx (gfx1100-1103), strix (gfx1150), strix-halo (gfx1151), "
+            "gfx1152, gfx1153, "
             "RDNA4 SKUs (9070xt | r9700 | 9600gre | dgpu fallback)"
         )
     return row

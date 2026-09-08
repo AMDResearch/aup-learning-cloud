@@ -226,10 +226,9 @@ custom:
       nodeSelector:
         amd.com/gpu.product-name: "AMD_Radeon_780M_Graphics"
       env:
-        # Phoenix hw (gfx1100/1101/1102/1103) shares a single gfx110x ROCm
-        # build — we do not ship dedicated images for gfx1102/gfx1103 — so
-        # force every Phoenix GPU to report as gfx1100 at runtime so it
-        # accepts the shared kernels.
+        # Phoenix hw (gfx1103) shares the gfx110x image, which now ships
+        # per-ISA ROCm 10 kernels (gfx1100/1101/1102/1103). Keep Phoenix on
+        # the gfx1100 kernel path until the native gfx1103 route is validated.
         HSA_OVERRIDE_GFX_VERSION: "11.0.0"
       quotaRate: 2
     strix:
