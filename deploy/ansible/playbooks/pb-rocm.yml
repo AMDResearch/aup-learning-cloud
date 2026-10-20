@@ -17,7 +17,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-- name: Install AMD GPU driver for ROCm 7.13.0
+- name: Prepare Ubuntu inbox GPU support for ROCm containers
   hosts: all
   any_errors_fatal: true
   become: yes
@@ -36,7 +36,7 @@
     - role: rocm
       when: _auplc_gpu_access_enabled_resolved
   tasks:
-    - name: Apply GPU access after ROCm installation
+    - name: Apply GPU access after inbox driver validation
       ansible.builtin.include_role:
         name: gpu_access
         tasks_from: apply

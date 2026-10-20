@@ -29,8 +29,8 @@ the playbook commands in the [deployment guide](../README.md). Every server and
 agent host entry defaults to unquoted `auplc_gpu_access_enabled: auto`. On each
 host, `auto` uses Python 3 to scan `/sys/bus/pci/devices` for vendor `0x1002`
 and PCI class `0x03*`; it has no `lspci` or `pciutils` dependency. A match
-enables ROCm and the GPU access package, while a successful empty scan skips
-both. A scan failure aborts before mutation, and `any_errors_fatal` stops the
+enables inbox GPU preparation and the GPU access package, while a successful
+empty scan skips both. A scan failure aborts before mutation, and `any_errors_fatal` stops the
 play. Unquoted `true` and `false` force enablement or disablement and bypass
 detection.
 
@@ -55,6 +55,15 @@ Device-plugin allocation is a separate layer and remains the visibility
 boundary for Pods requesting `amd.com/gpu`; it does not change host inode
 permissions. AUPLC Hub adds no GPU supplemental group. No GPU group was needed
 for the tested ROCm compute path.
+
+## Client GPU driver policy
+
+Ryzen APU and Radeon dGPU hosts use Ubuntu inbox amdgpu and Ubuntu firmware.
+The rocm role validates the running stack and installs linux-firmware; it does
+not install AMD DKMS or ROCm user-space. Existing AMD DKMS driver/firmware
+packages require a planned migration before rerunning the playbook. See
+[SSH client GPU driver](../README.md#ssh-client-gpu-driver) for prerequisites,
+migration, reboot requirements and container validation.
 
 ## Prerequisites
 
