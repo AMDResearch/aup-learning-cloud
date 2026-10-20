@@ -18,38 +18,23 @@
 # SOFTWARE.
 
 ---
-- name: Update apt cache
-  apt:
-    update_cache: yes
+# ROCm user-space is supplied by workload images. Client hosts use the
+# Ubuntu kernel's amdgpu module; they do not need the AMD installer or DKMS.
+- name: Validate the client GPU stack before installing prerequisites
+  ansible.builtin.import_tasks: preflight.yml
 
-- name: Install kernel headers and modules
-  apt:
-    name:
-      - "linux-headers-{{ ansible_kernel }}"
-      - "linux-modules-extra-{{ ansible_kernel }}"
+- name: Ensure Ubuntu firmware is installed
+  ansible.builtin.apt:
+    name: linux-firmware
     state: present
+    update_cache: true
+    cache_valid_time: 3600
+  register: _auplc_ubuntu_firmware
 
-- name: Install Python setuptools and wheel
-  apt:
-    name:
-      - python3-setuptools
-      - python3-wheel
-    state: present
-
-- name: Download AMDGPU installer
-  get_url:
-    url: https://repo.radeon.com/amdgpu-install/31.30/ubuntu/noble/amdgpu-install_31.30.313000-1_all.deb
-    dest: /tmp/amdgpu-install_31.30.313000-1_all.deb
-
-- name: Install AMDGPU installer
-  apt:
-    deb: /tmp/amdgpu-install_31.30.313000-1_all.deb
-
-- name: Update apt cache again
-  apt:
-    update_cache: yes
-
-- name: Install AMD GPU DKMS driver
-  apt:
-    name: amdgpu-dkms
-    state: present
+- name: Report firmware activation requirements
+  ansible.builtin.debug:
+    msg: >-
+      Ubuntu firmware packages changed. Reboot this node in a maintenance
+      window before accepting GPU workloads, then rerun pb-rocm.yml and
+      validate ROCm compute inside the workload container.
+  when: _auplc_ubuntu_firmware.changed
