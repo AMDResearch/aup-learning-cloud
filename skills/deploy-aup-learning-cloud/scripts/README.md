@@ -54,6 +54,8 @@ python3 "$DEPLOY_SCRIPTS/validate.py" --repo "$REPO_ROOT" --topology ssh-preinst
   --values "$REPO_ROOT/runtime/values-basic-example.yaml"
 ```
 
+Prepare the [Ubuntu inbox GPU stack](../../../deploy/README.md#ssh-client-gpu-driver)
+first; nodes with legacy AMD DKMS packages require migration and a reboot.
 After validation passes, run Ansible, check the infrastructure-owned GPU
 components, and install the chart with the generated overlay:
 

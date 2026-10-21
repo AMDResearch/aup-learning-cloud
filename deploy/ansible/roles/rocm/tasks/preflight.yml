@@ -1,0 +1,116 @@
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+---
+- name: Require Ubuntu 24.04 for client GPU provisioning
+  ansible.builtin.assert:
+    that:
+      - ansible_distribution == 'Ubuntu'
+      - ansible_distribution_version == '24.04'
+    fail_msg: Client GPU provisioning requires Ubuntu 24.04 and a validated Ubuntu kernel.
+
+- name: Gather installed packages before changing GPU prerequisites
+  ansible.builtin.package_facts:
+    manager: apt
+
+- name: Reject AMD DKMS driver and firmware packages
+  ansible.builtin.assert:
+    that:
+      - "'amdgpu-dkms' not in ansible_facts.packages"
+      - "'amdgpu-dkms-firmware' not in ansible_facts.packages"
+      - "'rock-dkms' not in ansible_facts.packages"
+      - "'rock-dkms-firmware' not in ansible_facts.packages"
+    fail_msg: >-
+      Client GPUs use Ubuntu's inbox amdgpu and Ubuntu firmware.
+      Remove legacy AMD DKMS driver/firmware in a maintenance window, update
+      initramfs, reboot, then rerun this playbook. See the SSH client GPU driver
+      section in deploy/README.md. This playbook does not uninstall live drivers.
+
+- name: Locate amdgpu for the running kernel
+  ansible.builtin.command:
+    argv: [modinfo, -n, amdgpu]
+  register: _auplc_amdgpu_path
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Read amdgpu in-tree metadata
+  ansible.builtin.command:
+    argv: [modinfo, -F, intree, amdgpu]
+  register: _auplc_amdgpu_intree
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Require the Ubuntu inbox amdgpu module
+  ansible.builtin.assert:
+    that:
+      - _auplc_amdgpu_path.rc == 0
+      - "'/kernel/drivers/gpu/drm/amd/amdgpu/' in _auplc_amdgpu_path.stdout"
+      - _auplc_amdgpu_intree.rc == 0
+      - _auplc_amdgpu_intree.stdout | trim == 'Y'
+    fail_msg: >-
+      No inbox amdgpu module was found for {{ ansible_kernel }}.
+      Prepare a validated Ubuntu OEM/HWE kernel and its matching modules
+      packages, then reboot before rerunning. Do not install AMD DKMS as a
+      fallback. modinfo reported: {{ _auplc_amdgpu_path.stdout | default('') }}
+      {{ _auplc_amdgpu_path.stderr | default('') }}
+
+# modinfo reads disk metadata; separately reject a still-loaded DKMS module.
+- name: Inspect the loaded GPU driver and compute devices
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -c
+      - |
+        import json
+        from pathlib import Path
+
+        module = Path('/sys/module/amdgpu')
+        taint = module / 'taint'
+        renders = []
+        for node in sorted(Path('/dev/dri').glob('renderD*')):
+            device = Path('/sys/class/drm') / node.name / 'device'
+            vendor = device / 'vendor'
+            if (node.is_char_device() and vendor.exists()
+                    and vendor.read_text().strip() == '0x1002'
+                    and (device / 'driver').resolve().name == 'amdgpu'):
+                renders.append(str(node))
+        print(json.dumps({
+            'loaded': module.exists(),
+            'taint': taint.read_text().strip() if taint.exists() else '',
+            'kfd': Path('/dev/kfd').is_char_device(),
+            'render_nodes': renders,
+        }))
+  register: _auplc_amdgpu_runtime
+  changed_when: false
+  check_mode: false
+
+- name: Require an active inbox driver and AMD compute devices
+  ansible.builtin.assert:
+    that:
+      - (_auplc_amdgpu_runtime.stdout | from_json).loaded
+      - "'O' not in (_auplc_amdgpu_runtime.stdout | from_json).taint"
+      - (_auplc_amdgpu_runtime.stdout | from_json).kfd
+      - (_auplc_amdgpu_runtime.stdout | from_json).render_nodes | length > 0
+    fail_msg: >-
+      The running GPU stack is not ready: {{ _auplc_amdgpu_runtime.stdout }}.
+      Check kernel logs, Ubuntu firmware and the actual booted kernel/initramfs.
+      If AMD DKMS was removed, reboot first. This playbook neither reloads a
+      live GPU driver nor automatically reboots cluster nodes.
