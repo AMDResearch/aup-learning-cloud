@@ -40,7 +40,7 @@ ifneq ($(MIRROR_NPM),)
   BUILD_ARGS += --build-arg NPM_REGISTRY=$(MIRROR_NPM)
 endif
 
-.PHONY: all base base-cpu base-rocm base-gfx1151 hub code code-cpu code-gpu courses cv dl llm physim verify-resource-contracts
+.PHONY: all base base-cpu base-rocm base-gfx1151 hub code code-cpu code-gpu courses cv dl llm physim hip-tutorial verify-resource-contracts
 
 # Build all images
 all: base hub code courses
@@ -155,6 +155,14 @@ physim:
 	cd Courses/PhySim && BASE_IMAGE=$(GPU_BASE_IMAGE) bash ./build.sh
 	docker tag ghcr.io/amdresearch/auplc-physim:latest ghcr.io/amdresearch/auplc-physim:latest-$(GPU_TARGET)
 	$(MAKE) save-image IMAGE=ghcr.io/amdresearch/auplc-physim:latest
+
+hip-tutorial:
+	@echo "-------------------------------------------"; \
+		echo "Building HIP Tutorial Image..."; \
+		echo "-------------------------------------------";
+
+	cd Courses/HIP-Tutorial && BASE_IMAGE=$(GPU_BASE_IMAGE) bash ./build.sh
+	$(MAKE) save-image IMAGE=ghcr.io/amdresearch/auplc-hip-tutorial:latest
 
 # --- Export Images ---
 save-image:
