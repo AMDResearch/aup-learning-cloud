@@ -72,13 +72,14 @@ k3s token, and other site settings. Keep the human template default,
 `auplc_gpu_access_enabled: auto`, unquoted on each host. `auto` runs Python 3 on
 that host to scan `/sys/bus/pci/devices` for vendor `0x1002` devices whose PCI
 class starts with `0x03`. It does not use `lspci` or require `pciutils`. A match
-enables ROCm and the AMD GPU access package; a successful scan with no match
-skips both. If a scan fails, the play aborts before either is changed, and
+enables inbox GPU validation, Ubuntu firmware installation and the AMD GPU
+access package; a successful scan with no match skips GPU preparation and
+access configuration. If a scan fails, the play aborts before either is changed, and
 `any_errors_fatal` stops the play for all hosts.
 
 Set an unquoted YAML boolean `true` or `false` only when you need to override
-detection. `true` forces ROCm and package installation, while `false` forces
-both to be skipped. Either boolean bypasses the scan. Don't quote any of these
+detection. `true` forces GPU preparation and access package installation, while
+`false` forces both to be skipped. Either boolean bypasses the scan. Don't quote any of these
 values or use alternatives such as `yes` and `no`.
 
 For example:
@@ -154,6 +155,60 @@ inaccessible at mode `0660`. The reported agents were `gfx1151` and `gfx1200`.
 
 `singleuser.fsGid: 100` controls shared notebook storage ownership only. It is
 not part of GPU access and must not be treated as a GPU group setting.
+
+##### SSH client GPU driver
+
+SSH-preinstalled Ryzen APU and Radeon dGPU nodes use Ubuntu's inbox
+`amdgpu` module and Ubuntu firmware, matching the single-node and PXE driver
+policy. ROCm user-space comes from workload images. `pb-rocm.yml` keeps its
+existing name, but no longer installs `amdgpu-install`, `amdgpu-dkms`,
+kernel headers, or Python build helpers.
+
+Before running it, boot a validated Ubuntu 24.04 OEM/HWE kernel with its
+matching modules and firmware installed. A kernel's `-oem` or `-generic`
+suffix alone does not establish ROCm compatibility. If `modinfo amdgpu`
+fails, install the matching Ubuntu modules package(s), including
+`linux-modules-extra-$(uname -r)` only where provided/needed; OEM kernels
+do not require that extra package.
+
+The playbook rejects installed AMD/legacy ROCK DKMS driver or firmware
+packages before changing GPU prerequisites. It checks the selected module's
+path and in-tree metadata, rejects a loaded out-of-tree amdgpu module, and
+requires `/dev/kfd` and an AMD amdgpu render device. These checks establish
+basic readiness, not full driver/firmware compatibility. The role ensures
+`linux-firmware` is installed; prepare firmware before deployment if GPU
+initialization currently fails. A firmware package change requires a planned
+reboot before workload validation. No automatic reboot or live module reload
+is performed.
+
+For nodes provisioned by the old SSH playbook, drain GPU workloads and migrate
+in a maintenance window:
+
+1. Confirm the intended Ubuntu kernel, inbox module and Ubuntu firmware are
+   available. Record `uname -r`, `modinfo -n amdgpu`, `dkms status`, and
+   installed `amdgpu-dkms*` / `rock-dkms*` package versions.
+2. Review an APT removal simulation, then remove the installed AMD/ROCK DKMS
+   driver **and firmware** packages. Remove the obsolete `amdgpu-install`
+   package and review its remaining repository configuration if no longer
+   needed. Do not use a broad autoremove during this migration.
+3. Inspect `/lib/firmware/updates/`, any `firmware_class.path` override,
+   and DKMS module directories for unmanaged leftovers. The playbook's package
+   checks do not identify every manually installed firmware override.
+4. Run `sudo depmod -a` and `sudo update-initramfs -u -k all`, confirm the
+   intended kernel/initramfs will boot, and reboot the node.
+5. Rerun `pb-rocm.yml`, inspect
+   `/sys/kernel/debug/dri/*/amdgpu_firmware_info`, and test `rocminfo` or
+   `hipinfo` plus an actual course workload inside its ROCm container before
+   making the node available again.
+
+`modinfo` describes the module currently on disk; after a package change it
+does not alone prove which module is already loaded. Removing only the DKMS
+driver can leave AMD firmware overriding Ubuntu firmware.
+
+AMD's [ROCm 7.13 Ryzen installation guidance](https://rocm.docs.amd.com/en/7.13.0-preview/install/rocm.html)
+explicitly uses the inbox driver. Using inbox drivers for Radeon clients is
+the AUPLC deployment policy and still requires validation of each GPU,
+kernel, firmware and container combination.
 
 #### PXE-diskless
 
