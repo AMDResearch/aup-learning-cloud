@@ -43,6 +43,7 @@ import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import urlparse
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError, field_validator
@@ -352,6 +353,26 @@ def _parse_auth_capabilities(raw_config: dict[str, Any]) -> tuple[AuthCapabiliti
     return AuthCapabilities(True, False, False, False), None
 
 
+def _parse_request_access_url(value: Any) -> str:
+    """Return the login page request-account URL, or "" when unset or invalid.
+
+    Only absolute http(s) URLs are accepted so the link cannot carry
+    javascript:, data:, or other non-web schemes into the login page.
+    Invalid values hide the button instead of failing Hub startup.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        url = value.strip()
+        if not url:
+            return ""
+        parsed = urlparse(url)
+        if parsed.scheme in ("http", "https") and parsed.netloc:
+            return url
+    print(f"[CONFIG] Warning: ignoring requestAccessUrl {value!r}; expected an absolute http(s) URL")
+    return ""
+
+
 # =============================================================================
 # Hub Configuration Singleton
 # =============================================================================
@@ -424,7 +445,7 @@ class HubConfig:
             )
         instance.github_org_name = raw_config.get("githubOrgName", "")
         instance.cluster_name = raw_config.get("clusterName", "")
-        instance.request_access_url = raw_config.get("requestAccessUrl", "")
+        instance.request_access_url = _parse_request_access_url(raw_config.get("requestAccessUrl"))
         admin_user = raw_config.get("adminUser", {})
         if isinstance(admin_user, dict):
             instance.admin_username = admin_user.get("username", "admin")

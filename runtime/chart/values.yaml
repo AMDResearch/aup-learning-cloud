@@ -44,7 +44,7 @@ custom:
   # Example: "City/University" → "AUP Learning Cloud City/University"
   clusterName: ""
 
-  # URL for the "Request access" button on the login page.
+  # URL for the "Request an account" button on the login page.
   # Leave empty to hide the button.
   requestAccessUrl: ""
 

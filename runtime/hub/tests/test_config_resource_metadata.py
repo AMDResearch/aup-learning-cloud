@@ -349,3 +349,42 @@ def test_failed_initializations_preserve_or_recover_singleton_state(tmp_path: Pa
         config.HubConfig.init(write_hub_config(tmp_path, "auth:\n  github: true\nquota: invalid\n"))
     assert config.HubConfig.get() is valid
     assert valid.auth.native is True
+
+
+@pytest.mark.parametrize(
+    ("contents", "expected_url"),
+    [
+        ("resources: {}\n", ""),
+        ("requestAccessUrl: null\n", ""),
+        ('requestAccessUrl: ""\n', ""),
+        ('requestAccessUrl: "   "\n', ""),
+        ('requestAccessUrl: "https://example.com/signup"\n', "https://example.com/signup"),
+        ('requestAccessUrl: "  http://example.com  "\n', "http://example.com"),
+    ],
+)
+def test_request_access_url_accepts_empty_or_http_urls(tmp_path: Path, contents: str, expected_url: str):
+    hub_config = config.HubConfig.init(write_hub_config(tmp_path, contents))
+
+    assert hub_config.request_access_url == expected_url
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        '"javascript:alert(1)"',
+        '"data:text/html,hi"',
+        '"ftp://example.com"',
+        '"example.com/signup"',
+        '"/hub/signup"',
+        '"https://"',
+        "42",
+        "[https://example.com]",
+    ],
+)
+def test_request_access_url_ignores_invalid_values_with_warning(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], value: str
+):
+    hub_config = config.HubConfig.init(write_hub_config(tmp_path, f"requestAccessUrl: {value}\n"))
+
+    assert hub_config.request_access_url == ""
+    assert "ignoring requestAccessUrl" in capsys.readouterr().out
