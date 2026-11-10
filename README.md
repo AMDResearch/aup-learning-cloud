@@ -21,8 +21,11 @@ SOFTWARE.
 
 # AUP Learning Cloud
 
-> **✨ New UI is coming!** 🚀 Try it now on [https://tpe.aupcloud.io/](https://tpe.aupcloud.io/) 👀
+> [!TIP]
+> Try it now on by requesting an account on [AUP Learning Cloud](https://www.amd.com/en/corporate/university-program/learning-cloud.html)
 
+> [!IMPORTANT]
+> Read more on our blogpost [AUP Learning Cloud: Streamlining AI Education on AMD](https://rocm.blogs.amd.com/ecosystems-and-partners/rocm-aup-learning/README.html)
 
 AUP Learning Cloud is a tailored JupyterHub deployment designed to provide an intuitive and hands-on AI learning experience. It features a comprehensive suite of AI toolkits running on AMD hardware acceleration, enabling users to learn and experiment with ease.
 
