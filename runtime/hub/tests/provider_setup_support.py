@@ -20,4 +20,5 @@ def make_config(auth: object) -> types.SimpleNamespace:
         github_org_name="example-org",
         platform_display_name="AUP Learning Cloud",
         cluster_name="",
+        request_access_url="",
     )

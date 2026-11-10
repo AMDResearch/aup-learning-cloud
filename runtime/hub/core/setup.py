@@ -355,6 +355,7 @@ def setup_hub(c: Any) -> None:
     c.JupyterHub.template_vars.update(_build_auth_template_vars(auth))
     c.JupyterHub.template_vars["cluster_name"] = config.cluster_name  # type: ignore[assignment]
     c.JupyterHub.template_vars["platform_name"] = config.platform_display_name  # type: ignore[assignment]
+    c.JupyterHub.template_vars["request_access_url"] = config.request_access_url  # type: ignore[assignment]
 
     print(
         "[SETUP] Hub setup complete: auth="

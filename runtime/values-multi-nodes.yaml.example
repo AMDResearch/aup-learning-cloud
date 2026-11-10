@@ -63,6 +63,10 @@ custom:
   # Example: "City/University" → "AUP Learning Cloud City/University"
   clusterName: ""
 
+  # URL for the "Apply for access" link on the login page.
+  # Remove or set to "" to hide the button.
+  requestAccessUrl: "https://www.amd.com/en/corporate/university-program/learning-cloud.html"
+
   # GitHub organization name for team-based resource access
   githubOrgName: "<YOUR-ORG-NAME>"
 

@@ -193,6 +193,18 @@ SOFTWARE.
                 {% endif %}
 
             </div>
+            {% set access_url = request_access_url|default("", true)|trim %}
+            {% if access_url %}
+            <p class="login-request-access-prompt text-center text-base mt-6">
+                Don't have an account?
+                <a class="login-request-access font-semibold whitespace-nowrap"
+                   href="{{ access_url }}"
+                   target="_blank"
+                   rel="noopener noreferrer">
+                    Apply for access<span class="sr-only"> (opens in a new tab)</span>
+                </a>
+            </p>
+            {% endif %}
             {% endblock login_container %}
         </div>
     </div>
