@@ -282,3 +282,121 @@ def test_start_rejects_auto_result_that_is_not_an_authorized_concrete_accelerato
         kubernetes.asyncio.run(spawner.start())
 
     assert auto_calls == [["gpu-a", "gpu-unconfigured"]]
+
+
+class RecordingQuotaManager:
+    def __init__(self) -> None:
+        self.events: list[tuple] = []
+
+    def start_usage_session(self, *args: str) -> int:
+        self.events.append(("start", *args))
+        return 42
+
+    def fail_usage_session(self, session_id: int) -> bool:
+        self.events.append(("fail", session_id))
+        return True
+
+    def end_usage_session(self, session_id: int, _quota_rates: dict | None = None) -> tuple[int, int]:
+        self.events.append(("end", session_id))
+        return (0, 0)
+
+    def get_active_session(self, username: str) -> dict:
+        self.events.append(("get_active", username))
+        return {"session_id": 7}
+
+
+def make_cpu_spawner(user_options: dict) -> RemoteLabKubeSpawner:
+    spawner = object.__new__(RemoteLabKubeSpawner)
+    spawner.user = types.SimpleNamespace(name="student")
+    spawner.user_options = user_options
+    spawner.resource_images = {"cpu": "cpu-image"}
+    spawner.quota_enabled = False
+    spawner.runtime_limit_enabled = False
+    spawner.environment = {}
+    spawner.extra_pod_config = {}
+    spawner.notebook_allowed_origins = []
+    spawner._hub_config = None
+    spawner.log = types.SimpleNamespace(debug=lambda _message: None)
+    spawner._resolve_user_resources = lambda: ["cpu"]
+    spawner._resolve_accelerator_selection = lambda _resource_type, _selection: None
+    spawner._configure_spawner = lambda _resource_type, _selection: None
+    spawner._launches_code_server = lambda _resource_type: False
+    return spawner
+
+
+def test_options_from_form_matches_spawn_options_schema() -> None:
+    spawner = make_cpu_spawner({})
+    spawner._resolve_repo_persist_option = lambda _formdata: False
+
+    options = spawner.options_from_form(
+        {
+            "runtime": ["30"],
+            "resource_type": ["cpu"],
+            "repo_url": ["https://github.com/org/repo"],
+            "repo_branch": ["main"],
+        }
+    )
+
+    assert set(options) == set(kubernetes.SpawnOptions.model_fields)
+
+
+def test_start_rejects_invalid_options_before_creating_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    quota_manager = RecordingQuotaManager()
+    quota_module = types.ModuleType("core.quota")
+    quota_module.get_quota_manager = lambda: quota_manager
+    monkeypatch.setitem(sys.modules, "core.quota", quota_module)
+
+    spawner = make_cpu_spawner({"profile": "list-options"})
+
+    with pytest.raises(kubernetes.web.HTTPError, match="profile"):
+        kubernetes.asyncio.run(spawner.start())
+
+    assert quota_manager.events == []
+
+
+@pytest.mark.parametrize("error", [RuntimeError("start failed"), kubernetes.asyncio.CancelledError()])
+def test_failed_start_marks_session_failed(monkeypatch: pytest.MonkeyPatch, error: BaseException) -> None:
+    quota_manager = RecordingQuotaManager()
+    quota_module = types.ModuleType("core.quota")
+    quota_module.get_quota_manager = lambda: quota_manager
+    monkeypatch.setitem(sys.modules, "core.quota", quota_module)
+
+    async def base_start(_spawner: object) -> str:
+        raise error
+
+    monkeypatch.setattr(kubernetes.KubeSpawner, "start", base_start, raising=False)
+    spawner = make_cpu_spawner({"resource_type": "cpu"})
+
+    with pytest.raises(type(error)):
+        kubernetes.asyncio.run(spawner.start())
+
+    assert quota_manager.events == [("start", "student", "cpu", "cpu"), ("fail", 42)]
+    assert spawner.usage_session_id == 42
+
+
+def test_stop_after_failed_start_does_not_close_other_active_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    quota_manager = RecordingQuotaManager()
+    quota_module = types.ModuleType("core.quota")
+    quota_module.get_quota_manager = lambda: quota_manager
+    monkeypatch.setitem(sys.modules, "core.quota", quota_module)
+
+    async def base_start(_spawner: object) -> str:
+        raise RuntimeError("start failed")
+
+    async def base_stop(_spawner: object, now: bool = False) -> None:
+        return None
+
+    async def cleanup_git_token_secrets() -> None:
+        return None
+
+    monkeypatch.setattr(kubernetes.KubeSpawner, "start", base_start, raising=False)
+    monkeypatch.setattr(kubernetes.KubeSpawner, "stop", base_stop, raising=False)
+    spawner = make_cpu_spawner({"resource_type": "cpu"})
+    spawner._cleanup_git_token_secrets = cleanup_git_token_secrets
+
+    with pytest.raises(RuntimeError):
+        kubernetes.asyncio.run(spawner.start())
+    kubernetes.asyncio.run(spawner.stop(True))
+
+    assert quota_manager.events == [("start", "student", "cpu", "cpu"), ("fail", 42), ("end", 42)]
+    assert spawner.usage_session_id is None

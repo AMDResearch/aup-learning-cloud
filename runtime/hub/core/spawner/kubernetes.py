@@ -38,6 +38,7 @@ from urllib.parse import quote, urlparse
 
 from jupyterhub.user import User as JupyterHubUser
 from kubespawner import KubeSpawner
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from tornado import web
 
 from core.metrics import (
@@ -69,6 +70,28 @@ LEGACY_CODE_SERVER_RESOURCES = {"code-cpu", "code-gpu"}
 DEFAULT_LAUNCH_MODE = "jupyterlab"
 CODE_SERVER_LAUNCH_MODE = "code-server"
 DEFAULT_TARGET_PATH = "/home/jovyan"
+
+
+class SpawnOptions(BaseModel):
+    """Schema for user_options, shared by the spawn form and JSON spawn API requests."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    runtime_minutes: int = Field(default=20, gt=0)
+    resource_type: str = "cpu"
+    gpu_selection: str | None = None
+    repo_url: str = ""
+    repo_branch: str = ""
+    repo_persist: bool = True
+
+    @classmethod
+    def parse(cls, options: dict[str, Any]) -> SpawnOptions:
+        """Validate options, raising ValueError with a concise, user-facing message."""
+        try:
+            return cls.model_validate(options)
+        except ValidationError as e:
+            details = "; ".join(f"{'.'.join(map(str, err['loc']))}: {err['msg']}" for err in e.errors())
+            raise ValueError(f"Invalid spawn options: {details}") from None
 
 
 class RemoteLabKubeSpawner(KubeSpawner):
@@ -354,7 +377,7 @@ class RemoteLabKubeSpawner(KubeSpawner):
         if repo_branch:
             options["repo_branch"] = repo_branch
 
-        return options
+        return SpawnOptions.parse(options).model_dump(exclude_unset=True)
 
     def _resolve_repo_persist_option(self, formdata) -> bool:
         git_config = self._hub_config.git_clone if self._hub_config else None
@@ -993,18 +1016,34 @@ class RemoteLabKubeSpawner(KubeSpawner):
 
             self.cmd = ["/bin/bash", "-l", "-c", "jupyterhub-singleuser", "--allow-root"]
 
+    def _fail_usage_session(self, quota_manager, session_id: int) -> None:
+        """Mark a usage session as failed after its server did not start.
+
+        usage_session_id is kept so a follow-up stop() targets this session
+        instead of falling back to another active session for the user.
+        """
+        try:
+            if quota_manager.fail_usage_session(session_id):
+                print(f"[USAGE] Session {session_id} for {self.user.name} marked failed: server did not start")
+        except Exception as e:
+            print(f"[USAGE] Error marking session {session_id} failed for {self.user.name}: {e}")
+
     async def start(self):
         """Start the spawner and schedule automatic shutdown."""
-        runtime_minutes = self.user_options.get("runtime_minutes", 20)
-        resource_type = self.user_options.get("resource_type", "cpu")
+        try:
+            options = SpawnOptions.parse(self.user_options)
+        except ValueError as e:
+            with contextlib.suppress(Exception):
+                spawn_failed_total.labels(reason="invalid_options").inc()
+            raise web.HTTPError(400, str(e)) from None
+
+        runtime_minutes = options.runtime_minutes
+        resource_type = options.resource_type
         if resource_type not in self.resource_images:
             raise RuntimeError(f"Unknown Resource: {resource_type}")
         if resource_type not in self._resolve_user_resources():
             raise RuntimeError(f"Resource '{resource_type}' is not authorized for this user")
-        gpu_selection = self._resolve_accelerator_selection(
-            resource_type,
-            self.user_options.get("gpu_selection"),
-        )
+        gpu_selection = self._resolve_accelerator_selection(resource_type, options.gpu_selection)
         self.user_options["gpu_selection"] = gpu_selection
 
         # Ensure pod fails immediately (not retried) when an init container fails.
@@ -1039,9 +1078,6 @@ class RemoteLabKubeSpawner(KubeSpawner):
 
         quota_manager = get_quota_manager()
 
-        # Always start a usage session for tracking, regardless of quota state
-        self.usage_session_id = quota_manager.start_usage_session(username, resource_type, accelerator_type)
-
         # Quota check (if enabled)
         if self.quota_enabled:
             # Check if user has unlimited quota
@@ -1069,9 +1105,7 @@ class RemoteLabKubeSpawner(KubeSpawner):
                     )
 
                 self._has_unlimited_quota = False
-                print(
-                    f"[QUOTA] Session {self.usage_session_id} started for {username} ({accelerator_type}), estimated cost: {estimated_cost}"
-                )
+                print(f"[QUOTA] Start approved for {username} ({accelerator_type}), estimated cost: {estimated_cost}")
         else:
             self._has_unlimited_quota = True
 
@@ -1135,7 +1169,6 @@ class RemoteLabKubeSpawner(KubeSpawner):
             pass
 
         # Check if the selected resource permits git cloning
-        resource_type = self.user_options.get("resource_type", "")
         resource_metadata = self._hub_config.get_resource_metadata(resource_type) if self._hub_config else None
         allow_git_clone = resource_metadata.allowGitClone if resource_metadata else False
 
@@ -1201,19 +1234,26 @@ class RemoteLabKubeSpawner(KubeSpawner):
         target_path = self._resolve_target_path(resource_type, custom_repo_path)
         self._apply_target_path_mapping(resource_type, target_path)
 
-        if getattr(self, "_has_git_init_container", False):
-            ref_key = f"{self.namespace}/{self.pod_name}"
-            start_task = asyncio.ensure_future(super().start())
-            monitor_task = asyncio.ensure_future(self._monitor_pod_failure(ref_key))
-            try:
-                done, pending = await asyncio.wait(
-                    {start_task, monitor_task},
-                    return_when=asyncio.FIRST_COMPLETED,
-                )
-                for task in pending:
-                    task.cancel()
-                    with contextlib.suppress(asyncio.CancelledError, Exception):
-                        await task
+        # Always start a usage session for tracking, regardless of quota state
+        usage_session_id = quota_manager.start_usage_session(username, resource_type, accelerator_type)
+        self.usage_session_id = usage_session_id
+        has_git_init_container = getattr(self, "_has_git_init_container", False)
+        try:
+            if has_git_init_container:
+                ref_key = f"{self.namespace}/{self.pod_name}"
+                start_task = asyncio.ensure_future(super().start())
+                monitor_task = asyncio.ensure_future(self._monitor_pod_failure(ref_key))
+                try:
+                    done, _pending = await asyncio.wait(
+                        {start_task, monitor_task},
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                finally:
+                    for task in (start_task, monitor_task):
+                        if not task.done():
+                            task.cancel()
+                            with contextlib.suppress(asyncio.CancelledError, Exception):
+                                await task
                 if monitor_task in done and not monitor_task.cancelled():
                     monitor_task.result()  # re-raises failure RuntimeError
                 start_result = start_task.result()
@@ -1226,12 +1266,14 @@ class RemoteLabKubeSpawner(KubeSpawner):
                         # active session count is derived from quota manager, not inc/dec
                 except Exception:
                     pass
-            except Exception:
+            else:
+                start_result = await super().start()
+        except BaseException as e:
+            self._fail_usage_session(quota_manager, usage_session_id)
+            if has_git_init_container and isinstance(e, Exception):
                 with contextlib.suppress(Exception):
                     await self.stop(True)
-                raise
-        else:
-            start_result = await super().start()
+            raise
 
         # Store for internal use
         self.start_time = start_time
