@@ -410,14 +410,28 @@ class QuotaManager:
 
             return (duration_minutes, quota_consumed)
 
+    def fail_usage_session(self, session_id: int) -> bool:
+        """Mark an active session as failed without charging quota."""
+        with session_scope() as session:
+            usage_session = session.query(UsageSession).filter(UsageSession.id == session_id).first()
+            if not usage_session or usage_session.status != "active":
+                return False
+
+            usage_session.end_time = datetime.now()
+            usage_session.duration_minutes = 0
+            usage_session.quota_consumed = 0
+            usage_session.status = "failed"
+            return True
+
     def get_active_session(self, username: str) -> dict | None:
-        """Get user's active session if any."""
+        """Get user's most recent active session if any."""
         username = username.lower()
         session = get_session()
         try:
             usage_session = (
                 session.query(UsageSession)
                 .filter(UsageSession.username == username, UsageSession.status == "active")
+                .order_by(UsageSession.start_time.desc(), UsageSession.id.desc())
                 .first()
             )
             if not usage_session:
