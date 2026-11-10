@@ -354,7 +354,7 @@ def _parse_auth_capabilities(raw_config: dict[str, Any]) -> tuple[AuthCapabiliti
 
 
 def _parse_request_access_url(value: Any) -> str:
-    """Return the login page request-account URL, or "" when unset or invalid.
+    """Return the login page "Apply for access" URL, or "" when unset or invalid.
 
     Only absolute http(s) URLs are accepted so the link cannot carry
     javascript:, data:, or other non-web schemes into the login page.

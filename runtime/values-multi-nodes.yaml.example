@@ -63,7 +63,7 @@ custom:
   # Example: "City/University" → "AUP Learning Cloud City/University"
   clusterName: ""
 
-  # URL for the "Request an account" button on the login page.
+  # URL for the "Apply for access" link on the login page.
   # Remove or set to "" to hide the button.
   requestAccessUrl: "https://www.amd.com/en/corporate/university-program/learning-cloud.html"
 

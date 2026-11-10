@@ -22,7 +22,7 @@ SOFTWARE.
 # AUP Learning Cloud
 
 > [!TIP]
-> Try it now by requesting an account on [AUP Learning Cloud](https://www.amd.com/en/corporate/university-program/learning-cloud.html)
+> Try it now by applying for access to [AUP Learning Cloud](https://www.amd.com/en/corporate/university-program/learning-cloud.html)
 
 > [!IMPORTANT]
 > Read more on our blogpost [AUP Learning Cloud: Streamlining AI Education on AMD](https://rocm.blogs.amd.com/ecosystems-and-partners/rocm-aup-learning/README.html)
