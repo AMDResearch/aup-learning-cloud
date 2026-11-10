@@ -70,6 +70,9 @@ LEGACY_CODE_SERVER_RESOURCES = {"code-cpu", "code-gpu"}
 DEFAULT_LAUNCH_MODE = "jupyterlab"
 CODE_SERVER_LAUNCH_MODE = "code-server"
 DEFAULT_TARGET_PATH = "/home/jovyan"
+# Runtime bounds; keep in sync with the spawn UI (frontend/apps/spawn/src/App.tsx)
+MIN_RUNTIME_MINUTES = 10
+MAX_RUNTIME_MINUTES = 240
 
 
 class SpawnOptions(BaseModel):
@@ -77,7 +80,7 @@ class SpawnOptions(BaseModel):
 
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    runtime_minutes: int = Field(default=20, gt=0)
+    runtime_minutes: int = Field(default=20, ge=MIN_RUNTIME_MINUTES, le=MAX_RUNTIME_MINUTES)
     resource_type: str = "cpu"
     gpu_selection: str | None = None
     repo_url: str = ""

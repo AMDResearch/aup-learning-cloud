@@ -340,6 +340,19 @@ def test_options_from_form_matches_spawn_options_schema() -> None:
     assert set(options) == set(kubernetes.SpawnOptions.model_fields)
 
 
+@pytest.mark.parametrize("runtime_minutes", [kubernetes.MIN_RUNTIME_MINUTES, kubernetes.MAX_RUNTIME_MINUTES])
+def test_spawn_options_accepts_runtime_within_bounds(runtime_minutes: int) -> None:
+    assert kubernetes.SpawnOptions.parse({"runtime_minutes": runtime_minutes}).runtime_minutes == runtime_minutes
+
+
+@pytest.mark.parametrize(
+    "runtime_minutes", [0, kubernetes.MIN_RUNTIME_MINUTES - 1, kubernetes.MAX_RUNTIME_MINUTES + 1, 100_000]
+)
+def test_spawn_options_rejects_runtime_out_of_bounds(runtime_minutes: int) -> None:
+    with pytest.raises(ValueError, match="runtime_minutes"):
+        kubernetes.SpawnOptions.parse({"runtime_minutes": runtime_minutes})
+
+
 def test_start_rejects_invalid_options_before_creating_session(monkeypatch: pytest.MonkeyPatch) -> None:
     quota_manager = RecordingQuotaManager()
     quota_module = types.ModuleType("core.quota")
