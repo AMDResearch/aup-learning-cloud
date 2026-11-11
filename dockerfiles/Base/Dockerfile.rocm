@@ -74,26 +74,32 @@ ARG NB_GID=100
 
 # GPU target and ROCm baseline
 #
+# GPU_TARGET is the public image-tag bucket (latest-<GPU_TARGET>). ROCm 10
+# no longer ships gfx110x / gfx120x apt or wheel buckets, so those names are
+# expanded to concrete ISAs below. CI passes the expanded lists via
+# ROCM_SDK_TARGET and PYTORCH_DEVICES (see .github/build-config.json).
+#
 # Supported GPU_TARGET values:
-#   gfx110x       RDNA 3   — gfx1100/1101/1102/1103 (dGPU)
+#   gfx110x       RDNA 3   — gfx1100/1101/1102/1103
 #   gfx1150       RDNA 3.5 — Radeon 890M (Strix Point iGPU)
 #   gfx1151       RDNA 3.5 — Radeon 8060S (Strix Halo iGPU)
 #   gfx1152       RDNA 3.5 — Ryzen AI 300-series iGPU
-#   gfx120x       RDNA 4   — Radeon 9x series (dGPU)
+#   gfx1153       RDNA 3.5 — Ryzen AI 300/400-series iGPU
+#   gfx120x       RDNA 4   — gfx1200/gfx1201 (Radeon 9x series)
 #
-# ROCm 7.13 ships TheRock Core SDK packages in the Ubuntu apt repo.
-# GPU_TARGET selects the image tag and PyTorch wheel bucket; ROCM_SDK_TARGET
-# selects the concrete apt SDK package for size-conscious installs.
+# ROCm 10.0 ships TheRock Core SDK packages from stable.repo.amd.com.
+# GPU_TARGET selects the image tag; ROCM_SDK_TARGET selects one or more
+# concrete apt SDK packages (space-separated) for size-conscious installs.
 ARG GPU_TARGET=gfx1151
-ARG ROCM_SDK_TARGET=gfx1151
-ARG ROCM_VERSION=7.13.0
-ARG PYTORCH_VERSION=2.9.1
-ARG TORCHVISION_VERSION=0.24.0
-ARG TORCHAUDIO_VERSION=2.9.0
-# PyTorch wheel target — only differs from GPU_TARGET for the generic
-# buckets (gfx110x → gfx110X-all, gfx120x → gfx120X-all). Specific targets
-# like gfx1150/gfx1151/gfx1152 use the same name in both apt and wheel repos.
-# See https://repo.amd.com/rocm/whl/ for available targets.
+ARG ROCM_SDK_TARGET=
+ARG ROCM_VERSION=10.0.0
+ARG PYTORCH_VERSION=2.13.0
+ARG TORCHVISION_VERSION=0.28.0
+ARG TORCHAUDIO_VERSION=2.11.0.2
+# Space-separated concrete ISAs for torch[device-*] extras. Empty means
+# derive from GPU_TARGET (gfx110x / gfx120x expand to their ISA lists).
+# PYTORCH_WHL_TARGET is kept as a legacy alias for PYTORCH_DEVICES.
+ARG PYTORCH_DEVICES=
 ARG PYTORCH_WHL_TARGET=
 ARG PYTORCH_INDEX_URL=
 
@@ -135,19 +141,44 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Download and install GPG key for AMD ROCm repo
 RUN mkdir -p /etc/apt/keyrings && \
-    wget -q https://repo.amd.com/rocm/packages/gpg/rocm.gpg -O - | \
+    wget -q https://stable.repo.amd.com/rocm/gpg/packages.gpg -O - | \
     gpg --dearmor -o /etc/apt/keyrings/amdrocm.gpg
 
 # Add AMD ROCm apt repository (Ubuntu 24.04)
-RUN echo 'deb [arch=amd64 signed-by=/etc/apt/keyrings/amdrocm.gpg] https://repo.amd.com/rocm/packages/ubuntu2404 stable main' \
-    > /etc/apt/sources.list.d/rocm.list
+RUN printf '%s\n' \
+    'Types: deb' \
+    'URIs: https://stable.repo.amd.com/rocm/core/packages/ubuntu2404/' \
+    'Suites: stable' \
+    'Components: main' \
+    'Architectures: amd64' \
+    'Signed-By: /etc/apt/keyrings/amdrocm.gpg' \
+    > /etc/apt/sources.list.d/amdrocm-stable.sources
 
-# Install ROCm from apt.
-# After install, create standard /opt/rocm/{bin,lib,include} symlinks — the amdrocm
-# packages install into /opt/rocm/core-<ver>/ without the standard top-level layout,
-# so hipcc and device bitcode are not found via PATH / LD_LIBRARY_PATH otherwise.
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends amdrocm-core-sdk${ROCM_VERSION%.*}-${ROCM_SDK_TARGET} && \
+# After install, create standard /opt/rocm/{bin,lib,include} symlinks — the
+# amdrocm packages install into /opt/rocm/core-<ver>/ without the standard
+# top-level layout, so hipcc and device bitcode are not found via PATH /
+# LD_LIBRARY_PATH otherwise.
+# Expand family buckets (gfx110x / gfx120x) to the concrete ISAs ROCm 10
+# packages actually ship. Concrete names (gfx1151, gfx1201, …) pass through.
+# Also accept the ROCm 7.x wheel aliases gfx110X-all / gfx120X-all.
+RUN expand_rocm_isas() { \
+        for tok in $1; do \
+            case "${tok}" in \
+                gfx110x|gfx110X-all) echo gfx1100 gfx1101 gfx1102 gfx1103 ;; \
+                gfx120x|gfx120X-all) echo gfx1200 gfx1201 ;; \
+                *) echo "${tok}" ;; \
+            esac; \
+        done; \
+    }; \
+    SDK_ISAS=$(expand_rocm_isas "${ROCM_SDK_TARGET:-${GPU_TARGET}}"); \
+    SDK_VER="${ROCM_VERSION%.*}"; \
+    PKGS=""; \
+    for isa in ${SDK_ISAS}; do \
+        PKGS="${PKGS} amdrocm-core-sdk${SDK_VER}-${isa}"; \
+    done; \
+    echo "Installing ROCm Core SDK packages:${PKGS}"; \
+    apt-get update && \
+    apt-get install -y --no-install-recommends ${PKGS} && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* && \
     CORE_BASE=$(ls -d /opt/rocm/core-[0-9]*.[0-9]* 2>/dev/null | sort -V | tail -1) && \
@@ -159,34 +190,41 @@ RUN apt-get update && \
         done; \
     fi
 
-# Install ROCm PyTorch.
+# Install ROCm PyTorch from the ROCm 10 multi-arch extra index.
 #
-# The SDK apt packages accept the same generic RDNA bucket names as GPU_TARGET,
-# such as `gfx110x` and `gfx120x`. The pip wheel index at
-# https://repo.amd.com/rocm/whl/ uses the "long" `gfx110X-all` /
-# `gfx120X-all` paths for those buckets (the short lowercase paths return 403),
-# so image targets still map to wheel targets below.
+# Wheels are selected with extras such as torch[device-gfx1151], not the
+# older per-arch https://repo.amd.com/rocm/whl/<arch>/ paths. Generic image
+# buckets install every ISA in the family so one tag still covers the SKUs
+# that previously used gfx110X-all / gfx120X-all.
 #
-# CI passes PYTORCH_WHL_TARGET explicitly via .github/build-config.json. For
-# local builds driven by dockerfiles/Makefile or auplc-installer — which only
-# set GPU_TARGET — we derive the wheel target here so ad-hoc
+# CI passes PYTORCH_DEVICES explicitly via .github/build-config.json. For
+# local builds driven by dockerfiles/Makefile or auplc-installer — which
+# only set GPU_TARGET — we derive the extras here so ad-hoc
 # `docker build --build-arg GPU_TARGET=gfx120x` and `make base-rocm
 # GPU_TARGET=gfx120x` both Just Work.
-RUN WHL_TARGET="${PYTORCH_WHL_TARGET}" && \
-    if [ -z "${WHL_TARGET}" ]; then \
-        case "${GPU_TARGET}" in \
-            gfx110x) WHL_TARGET="gfx110X-all" ;; \
-            gfx120x) WHL_TARGET="gfx120X-all" ;; \
-            *)       WHL_TARGET="${GPU_TARGET}" ;; \
-        esac; \
-    fi && \
-    INDEX_URL="${PYTORCH_INDEX_URL:-https://repo.amd.com/rocm/whl/${WHL_TARGET}/}" && \
-    TORCH_SUFFIX="+rocm${ROCM_VERSION}" && \
-    echo "Installing ROCm PyTorch from ${INDEX_URL} (GPU_TARGET=${GPU_TARGET}, WHL_TARGET=${WHL_TARGET})" && \
+RUN expand_rocm_isas() { \
+        for tok in $1; do \
+            case "${tok}" in \
+                gfx110x|gfx110X-all) echo gfx1100 gfx1101 gfx1102 gfx1103 ;; \
+                gfx120x|gfx120X-all) echo gfx1200 gfx1201 ;; \
+                *) echo "${tok}" ;; \
+            esac; \
+        done; \
+    }; \
+    DEVICE_ISAS=$(expand_rocm_isas "${PYTORCH_DEVICES:-${PYTORCH_WHL_TARGET:-${GPU_TARGET}}}"); \
+    EXTRAS=""; \
+    for isa in ${DEVICE_ISAS}; do \
+        EXTRAS="${EXTRAS},device-${isa}"; \
+    done; \
+    EXTRAS="${EXTRAS#,}"; \
+    INDEX_URL="${PYTORCH_INDEX_URL:-https://stable.repo.amd.com/rocm/whl-next/}"; \
+    TORCH_SUFFIX="+rocm${ROCM_VERSION}"; \
+    echo "Installing ROCm PyTorch from ${INDEX_URL} (GPU_TARGET=${GPU_TARGET}, extras=${EXTRAS})"; \
     python3 -m pip install --no-cache-dir \
     --index-url "${INDEX_URL}" \
-    "torch==${PYTORCH_VERSION}${TORCH_SUFFIX}" \
-    "torchvision==${TORCHVISION_VERSION}${TORCH_SUFFIX}" \
+    --extra-index-url https://pypi.org/simple \
+    "torch[${EXTRAS}]==${PYTORCH_VERSION}${TORCH_SUFFIX}" \
+    "torchvision[${EXTRAS}]==${TORCHVISION_VERSION}${TORCH_SUFFIX}" \
     "torchaudio==${TORCHAUDIO_VERSION}${TORCH_SUFFIX}" && \
     SDK_INC=$(python3 -c "import _rocm_sdk_core, os; print(os.path.join(os.path.dirname(_rocm_sdk_core.__file__), 'include'))" 2>/dev/null) && \
     if [ -n "$SDK_INC" ] && [ ! -e /opt/rocm/include/hip ]; then \

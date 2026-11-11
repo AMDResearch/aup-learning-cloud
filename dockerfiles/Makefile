@@ -16,9 +16,9 @@ MIRROR_PREFIX ?=
 MIRROR_PIP ?=
 MIRROR_NPM ?=
 
-# GPU target architecture (short AMD apt-repo name; e.g. gfx110x, gfx1150,
-# gfx1151, gfx1152, gfx120x). Dockerfile.rocm maps this to the corresponding pip
-# wheel path (gfx110X-all / gfx120X-all for the RDNA 3 / RDNA 4 buckets).
+# GPU target architecture (image-tag bucket; e.g. gfx110x, gfx1150, gfx1151,
+# gfx1152, gfx1153, gfx120x). Dockerfile.rocm expands gfx110x / gfx120x to the
+# concrete ROCm 10 ISAs (gfx1100..1103 and gfx1200/gfx1201).
 GPU_TARGET ?= gfx1151
 
 ROCM_SDK_TARGET ?= $(GPU_TARGET)
