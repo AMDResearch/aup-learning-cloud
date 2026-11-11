@@ -84,3 +84,5 @@ ignore: |
   runtime/chart/templates/
   # Generated files
   *.generated.yaml
+  # Git submodule (aup-teaching-labs); not linted here
+  projects/aup-teaching-labs/

@@ -36,9 +36,12 @@ Thank you for your interest in contributing to AUP Learning Cloud! This document
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/AMDResearch/aup-learning-cloud.git
+   git clone --recurse-submodules https://github.com/AMDResearch/aup-learning-cloud.git
    cd aup-learning-cloud
    ```
+   Course content from [aup-teaching-labs](https://github.com/AMDResearch/aup-teaching-labs)
+   is included as a Git submodule at `projects/aup-teaching-labs`. If you already
+   cloned without `--recurse-submodules`, run `git submodule update --init`.
 
 2. **Install Python dependencies**
    ```bash
