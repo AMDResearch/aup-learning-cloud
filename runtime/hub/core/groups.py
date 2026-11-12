@@ -737,9 +737,9 @@ def get_resources_for_user(
 ) -> list[str]:
     """Get available resources for a user based on their JupyterHub group memberships.
 
-    Iterates over the user's groups and looks up each group name in the
-    ``team_resource_mapping``. If a group maps to ``"official"``, the full
-    official resource list is returned immediately (short-circuit).
+    Explicitly mapped course groups take precedence over the automatic
+    native-users/github-users defaults. Multiple explicit groups grant the
+    union of their resources, including an intentionally empty resource list.
 
     Args:
         user: JupyterHub User object.
@@ -750,10 +750,13 @@ def get_resources_for_user(
     """
     assert user.orm_user is not None  # populated by JupyterHub on init
     user_group_names = {g.name for g in user.orm_user.groups}
+    mapped_groups = user_group_names.intersection(team_resource_mapping)
+    explicit_groups = mapped_groups - SYSTEM_GROUP_NAMES
+    effective_groups = explicit_groups if explicit_groups else mapped_groups
     available_resources: list[str] = []
 
-    for group_name in user_group_names:
-        if group_name not in team_resource_mapping:
+    for group_name in team_resource_mapping:
+        if group_name not in effective_groups:
             continue
         available_resources.extend(team_resource_mapping[group_name])
 
@@ -769,7 +772,10 @@ def resolve_resources_for_user(
     username = user.name.strip()
 
     available_resources = get_resources_for_user(user, team_resource_mapping)
-    if available_resources:
+    # A mapped empty group is an explicit denial, not a reason to grant defaults.
+    assert user.orm_user is not None
+    has_mapped_group = any(g.name in team_resource_mapping for g in user.orm_user.groups)
+    if available_resources or has_mapped_group:
         return available_resources
     if not username.startswith(GITHUB_USERNAME_PREFIX):
         return team_resource_mapping.get("native-users", team_resource_mapping.get("official", []))
