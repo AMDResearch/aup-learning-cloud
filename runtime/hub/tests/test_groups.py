@@ -21,6 +21,7 @@ import asyncio
 import sys
 import types
 
+import pytest
 from groups_test_support import DummyGroup, DummyUser, load_groups_module
 
 groups = load_groups_module()
@@ -386,3 +387,34 @@ def test_ensure_group_membership_refresh_forces_sync_even_with_team_groups(monke
 
     assert synced == [True]
     assert assigned == ["github-users"]
+
+
+@pytest.mark.parametrize("name,default_group", [("workshop-user", "native-users"), ("github:test", "github-users")])
+def test_workshop_access_stays_restricted_after_default_group_assignment(name, default_group):
+    user = DummyUser([DummyGroup("Workshop", source="admin")], name=name)
+    mapping = {"Workshop": ["course-a", "course-b", "course-c"], default_group: ["course-a", "other-course"]}
+
+    assert resolve_resources_for_user(user, mapping) == mapping["Workshop"]
+    user.orm_user.groups.append(DummyGroup(default_group, source="system"))
+    assert resolve_resources_for_user(user, mapping) == mapping["Workshop"]
+
+
+@pytest.mark.parametrize("memberships", [["Workshop"], ["Workshop", "native-users"], ["native-users"]])
+def test_empty_mapped_group_does_not_fall_back_to_full_access(memberships):
+    user = DummyUser([DummyGroup(name) for name in memberships], name="workshop-user")
+
+    assert resolve_resources_for_user(user, {"Workshop": [], "native-users": [], "official": ["other-course"]}) == []
+
+
+def test_multiple_explicit_groups_merge_without_default_resources():
+    user = DummyUser([DummyGroup(name) for name in ["Workshop", "Extra", "native-users"]], name="workshop-user")
+    mapping = {"Workshop": ["course-a"], "Extra": ["course-a", "course-b"], "native-users": ["other-course"]}
+
+    assert resolve_resources_for_user(user, mapping) == ["course-a", "course-b"]
+
+
+@pytest.mark.parametrize("default_group", ["native-users", "github-users"])
+def test_default_group_still_grants_resources_without_explicit_mapping(default_group):
+    user = DummyUser([DummyGroup(default_group), DummyGroup("unmapped")])
+
+    assert resolve_resources_for_user(user, {default_group: ["cpu"]}) == ["cpu"]
