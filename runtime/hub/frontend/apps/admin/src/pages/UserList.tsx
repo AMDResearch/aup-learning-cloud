@@ -157,7 +157,14 @@ const UserRow = memo(function UserRow({
           />
         </td>
         <td>
-          {user.name}
+          <button
+            type="button"
+            className="btn btn-link p-0 border-0 align-baseline tw:text-indigo-600 tw:font-medium tw:no-underline tw:hover:underline"
+            onClick={() => onViewUsage(user.name)}
+            title="View activity"
+          >
+            <i className="bi bi-person me-1" />{user.name}
+          </button>
           {isGitHubUser(user.name) && (
             <Badge bg="info" className="ms-2">GitHub</Badge>
           )}
