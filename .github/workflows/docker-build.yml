@@ -33,7 +33,7 @@ on:
       - '.github/workflows/docker-build.yml'
       - '.github/build-config.json'
   pull_request:
-    branches: [main, develop]
+    branches: [main, develop, feature/course-migration]
     paths:
       - 'dockerfiles/**'
       - 'runtime/hub/**'
