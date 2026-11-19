@@ -357,6 +357,24 @@ jobs:
             type=ref,event=branch
             type=ref,event=pr
 
+      - name: Determine base image tag
+        id: base
+        env:
+          BASE_RESULT: ${{ needs.build-base-cpu.result }}
+        run: |
+          # Use the base this run built for the same ref; fall back to latest
+          # when the base job was skipped or the base was not pushed (PRs).
+          if [[ "$GITHUB_EVENT_NAME" == pull_request || "$BASE_RESULT" != success ]]; then
+            REF="latest"
+          elif [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            REF="${GITHUB_REF##*/}"
+          elif [[ "$GITHUB_REF" == refs/heads/main ]]; then
+            REF="latest"
+          else
+            REF=$(echo "${GITHUB_REF##refs/heads/}" | tr '/' '-')
+          fi
+          echo "tag=${REF}" >> "$GITHUB_OUTPUT"
+
       - name: Build and push Code CPU image
         uses: docker/build-push-action@v6
         with:
@@ -366,7 +384,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            BASE_IMAGE=${{ needs.changes.outputs.base-cpu-image }}:latest
+            BASE_IMAGE=${{ needs.changes.outputs.base-cpu-image }}:${{ steps.base.outputs.tag }}
             IMAGE_FLAVOR=cpu
           cache-from: type=gha,scope=code-cpu
           cache-to: type=gha,mode=max,scope=code-cpu
@@ -566,6 +584,24 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Determine base image tag
+        id: base
+        env:
+          BASE_RESULT: ${{ needs.build-base-gpu.result }}
+        run: |
+          # Use the base this run built for the same ref; fall back to latest
+          # when the base job was skipped or the base was not pushed (PRs).
+          if [[ "$GITHUB_EVENT_NAME" == pull_request || "$BASE_RESULT" != success ]]; then
+            REF="latest"
+          elif [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            REF="${GITHUB_REF##*/}"
+          elif [[ "$GITHUB_REF" == refs/heads/main ]]; then
+            REF="latest"
+          else
+            REF=$(echo "${GITHUB_REF##refs/heads/}" | tr '/' '-')
+          fi
+          echo "tag=${REF}-${{ matrix.gpu_target }}" >> "$GITHUB_OUTPUT"
+
       - name: Build and push Code GPU image
         uses: docker/build-push-action@v6
         with:
@@ -575,7 +611,7 @@ jobs:
           tags: ${{ steps.tags.outputs.tags }}
           labels: ${{ steps.meta-suffixed.outputs.labels }}
           build-args: |
-            BASE_IMAGE=${{ needs.changes.outputs.base-gpu-image }}:latest-${{ matrix.gpu_target }}
+            BASE_IMAGE=${{ needs.changes.outputs.base-gpu-image }}:${{ steps.base.outputs.tag }}
             IMAGE_FLAVOR=gpu
           cache-from: type=gha,scope=code-gpu-${{ matrix.gpu_target }}
           cache-to: type=gha,mode=max,scope=code-gpu-${{ matrix.gpu_target }}
