@@ -105,7 +105,9 @@ jobs:
       gpu-targets: ${{ steps.config.outputs.targets }}
       gpu-map: ${{ steps.config.outputs.gpu-map }}
       default-gpu-target: ${{ steps.config.outputs.default }}
-      course-list: ${{ steps.config.outputs.courses }}
+      course-list: ${{ steps.courses.outputs.list }}
+      course-gpu-targets: ${{ steps.courses.outputs.targets }}
+      course-default-gpu-target: ${{ steps.courses.outputs.default }}
       image-name-suffix: ${{ steps.names.outputs.suffix }}
       hub-image: ${{ steps.names.outputs.hub }}
       code-cpu-image: ${{ steps.names.outputs.code-cpu }}
@@ -114,6 +116,8 @@ jobs:
       base-gpu-image: ${{ steps.names.outputs.base-gpu }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: true
 
       - name: Set registry prefix
         id: registry
@@ -152,7 +156,6 @@ jobs:
           CONFIG='.github/build-config.json'
           ALL_NAMES=$(jq -c '[.gpu_targets[].name]' "$CONFIG")
           DEFAULT=$(jq -r '.default_gpu_target' "$CONFIG")
-          COURSES=$(jq -c '.courses' "$CONFIG")
           GPU_MAP=$(jq -c '.gpu_targets' "$CONFIG")
 
           INPUT="${{ github.event.inputs.gpu_target }}"
@@ -162,7 +165,6 @@ jobs:
             echo "targets=${ALL_NAMES}" >> "$GITHUB_OUTPUT"
           fi
           echo "default=${DEFAULT}" >> "$GITHUB_OUTPUT"
-          echo "courses=${COURSES}" >> "$GITHUB_OUTPUT"
           echo "gpu-map=${GPU_MAP}" >> "$GITHUB_OUTPUT"
 
       - uses: dorny/paths-filter@v3
@@ -178,9 +180,12 @@ jobs:
               - 'runtime/code-server/**'
               - 'runtime/shared/**'
             courses:
-              - 'dockerfiles/Courses/**'
-              - 'dockerfiles/Base/**'
-              - 'projects/**'
+              - 'projects/aup-teaching-labs'
+              - '.github/workflows/docker-build.yml'
+            course-submodule:
+              - 'projects/aup-teaching-labs'
+            course-workflow:
+              - '.github/workflows/docker-build.yml'
             base-cpu:
               - 'dockerfiles/Base/Dockerfile.cpu'
               - 'runtime/notebook/**'
@@ -200,6 +205,57 @@ jobs:
               - 'runtime/pnpm-workspace.yaml'
               - 'runtime/hub/frontend/tsconfig.base.json'
               - '.github/build-config.json'
+
+      # Course list, contexts and targets come from the teaching-labs submodule.
+      # A submodule bump rebuilds only courses whose context changed between the
+      # old and new submodule commits; manual runs, tags and workflow edits select all.
+      - name: Select course builds
+        id: courses
+        env:
+          TL_PATH: projects/aup-teaching-labs
+          EVENT_NAME: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          SUBMODULE_CHANGED: ${{ steps.filter.outputs.course-submodule }}
+          WORKFLOW_CHANGED: ${{ steps.filter.outputs.course-workflow }}
+          OLD_REV: ${{ github.event.pull_request.base.sha || github.event.before }}
+          GPU_INPUT: ${{ github.event.inputs.gpu_target }}
+        run: |
+          CONFIG="$TL_PATH/.github/build-config.json"
+          if [[ ! -f "$CONFIG" ]] || ! jq -e '.courses[0] | type == "object"' "$CONFIG" > /dev/null; then
+            echo "::warning file=$TL_PATH::Submodule has no course build config; skipping course images"
+            { echo "list=[]"; echo "targets=[]"; echo "default="; } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          CHANGED=null
+          if [[ "$EVENT_NAME" == workflow_dispatch || "$REF_TYPE" == tag || "$WORKFLOW_CHANGED" == true ]]; then
+            :
+          elif [[ "$SUBMODULE_CHANGED" != true ]]; then
+            CHANGED='[]'
+          else
+            OLD=""
+            if [[ -n "$OLD_REV" && ! "$OLD_REV" =~ ^0+$ ]] && git fetch -q --depth=1 origin "$OLD_REV"; then
+              OLD=$(git ls-tree "$OLD_REV" "$TL_PATH" | awk '$2 == "commit" { print $3 }')
+            fi
+            if [[ -n "$OLD" ]] && git -C "$TL_PATH" fetch -q --depth=1 origin "$OLD"; then
+              CHANGED=$(git -C "$TL_PATH" diff --no-renames --name-only "$OLD" HEAD | jq -Rsc 'split("\n") | map(select(. != ""))')
+            else
+              echo "::notice::Previous submodule commit unavailable; building all courses"
+            fi
+          fi
+
+          LIST=$(jq -c --arg p "$TL_PATH/" --argjson changed "$CHANGED" '
+            [.courses[]
+              | (.context | rtrimstr("/")) as $c
+              | select($changed == null or any($changed[]; startswith($c + "/")))
+              | .context = $p + $c]' "$CONFIG")
+          TARGETS=$(jq -c --arg t "$GPU_INPUT" '[.gpu_targets[].name | select($t == "" or $t == "all" or . == $t)]' "$CONFIG")
+          {
+            echo "list=${LIST}"
+            echo "targets=${TARGETS}"
+            echo "default=$(jq -r '.default_gpu_target' "$CONFIG")"
+          } >> "$GITHUB_OUTPUT"
+          echo "Course builds: \`${LIST}\`" >> "$GITHUB_STEP_SUMMARY"
 
   # ──────────────────────────────────────────────
   # Hub Image (CPU only, runs on GitHub Actions)
@@ -711,40 +767,34 @@ jobs:
         run: echo "image=$(echo '${{ steps.tags.outputs.tags }}' | head -1)" >> "$GITHUB_OUTPUT"
 
   # ──────────────────────────────────────────────
-  # Course Images (CV, DL, LLM, PhySim)
+  # Course Images (from the aup-teaching-labs submodule)
   #
-  # These images use `FROM ghcr.io/amdresearch/auplc-base:latest`
-  # which is pre-built and pushed to GHCR. The build itself only copies
-  # files and installs pip packages — no GPU required.
-  #
-  # BASE_IMAGE build-arg overrides the default so course images
-  # can track the latest GPU base image version from CI.
-  #
-  # Each course is built for every configured GPU target (course × gpu_target matrix).
+  # Each course pins its base in <context>/base-version.txt and builds on that
+  # released auplc-base digest — never on the base built in this run.
+  # PRs build without pushing; other branches publish dev tags.
+  # main and release tags promote tested digests instead (promote-courses).
   # ──────────────────────────────────────────────
   build-courses:
-    name: "Build Course: ${{ matrix.course }} (${{ matrix.gpu_target }})"
-    needs: [changes, build-base-gpu]
+    name: "Build Course: ${{ matrix.course.name }} (${{ matrix.gpu_target }})"
+    needs: changes
     if: |
-      always() &&
-      needs.changes.result == 'success' &&
-      (needs.build-base-gpu.result == 'success' || needs.build-base-gpu.result == 'skipped') &&
-      (
-        needs.changes.outputs.is-tag == 'true' ||
-        (github.event_name != 'workflow_dispatch' && needs.changes.outputs.courses == 'true') ||
-        (github.event_name == 'workflow_dispatch' && (github.event.inputs.images == 'all' || github.event.inputs.images == 'courses' || github.event.inputs.images == 'base-gpu'))
-      )
+      needs.changes.outputs.course-list != '[]' &&
+      github.ref != 'refs/heads/main' && github.ref_type != 'tag' &&
+      (github.event_name != 'workflow_dispatch' || github.event.inputs.images == 'all' || github.event.inputs.images == 'courses')
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         course: ${{ fromJSON(needs.changes.outputs.course-list) }}
-        gpu_target: ${{ fromJSON(needs.changes.outputs.gpu-targets) }}
+        gpu_target: ${{ fromJSON(needs.changes.outputs.course-gpu-targets) }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          submodules: true
 
       - name: Free disk space
+        if: matrix.course.disk_cleanup == true
         uses: jlumbroso/free-disk-space@main
         with:
           tool-cache: true
@@ -758,107 +808,104 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Resolve base image
+        id: base
+        env:
+          VERSION_FILE: ${{ matrix.course.context }}/base-version.txt
+          GPU_TARGET: ${{ matrix.gpu_target }}
+        run: |
+          version=$(sed -e 's/#.*//' -e 's/[[:space:]]//g' "$VERSION_FILE" | grep -v '^$' || true)
+          if [[ ! "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error file=$VERSION_FILE::Set one released AUP Learning Cloud version (vX.Y.Z)"
+            exit 1
+          fi
+          if [[ "$GPU_TARGET" == cpu ]]; then
+            ref="ghcr.io/amdresearch/auplc-default:$version"
+          else
+            ref="ghcr.io/amdresearch/auplc-base:$version-$GPU_TARGET"
+          fi
+          # Build on the digest so a re-pushed tag cannot change the base mid-run.
+          if ! digest=$(docker buildx imagetools inspect "$ref" --format '{{json .Manifest}}' | jq -er .digest); then
+            echo "::error file=$VERSION_FILE::Base image $ref is not published"
+            exit 1
+          fi
+          echo "image=$ref@$digest" >> "$GITHUB_OUTPUT"
+          echo "Base image: \`$ref@$digest\`" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Login to GitHub Container Registry
+        if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Prepare build context
-        run: cp -r projects/${{ matrix.course }} dockerfiles/Courses/${{ matrix.course }}/course_data
-
-      - name: Derive image name and tag suffix
-        id: meta-inputs
-        env:
-          NAME_SUFFIX: ${{ needs.changes.outputs.image-name-suffix }}
-        run: |
-          COURSE_LC=$(echo '${{ matrix.course }}' | tr '[:upper:]' '[:lower:]')
-          echo "image_name=auplc-${COURSE_LC}${NAME_SUFFIX}" >> "$GITHUB_OUTPUT"
-          echo "tag_suffix=${{ matrix.gpu_target }}" >> "$GITHUB_OUTPUT"
-
-      - name: Determine base image tag
-        if: github.event_name != 'pull_request'
-        id: base
-        run: |
-          SUFFIX="${{ steps.meta-inputs.outputs.tag_suffix }}"
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            BRANCH="${GITHUB_REF##*/}"
-          elif [[ "$GITHUB_REF" == refs/heads/main ]]; then
-            BRANCH="latest"
-          else
-            BRANCH=$(echo "${GITHUB_REF##refs/heads/}" | tr '/' '-')
-          fi
-          # Pull the base image from THIS repo's package (auplc-base or auplc-base-dev)
-          # at the tag built by this same workflow run for the current branch —
-          # never fall back to upstream auplc-base.
-          echo "image=${{ needs.changes.outputs.base-gpu-image }}:${BRANCH}-${SUFFIX}" >> "$GITHUB_OUTPUT"
-
       - name: Docker metadata (target-suffixed tags)
         id: meta-suffixed
         uses: docker/metadata-action@v5
         with:
-          images: ${{ needs.changes.outputs.registry }}/${{ steps.meta-inputs.outputs.image_name }}
+          images: ${{ needs.changes.outputs.registry }}/${{ matrix.course.image }}${{ needs.changes.outputs.image-name-suffix }}
           flavor: |
-            suffix=-${{ steps.meta-inputs.outputs.tag_suffix }}
+            latest=false
+            suffix=-${{ matrix.gpu_target }}
           tags: |
-            type=semver,pattern=v{{version}}
-            type=semver,pattern=v{{major}}.{{minor}}
-            type=semver,pattern=v{{major}}
-            type=raw,value=latest,enable={{is_default_branch}}
             type=raw,value=${{ github.event.inputs.version }},enable=${{ github.event.inputs.version != '' }}
             type=sha,prefix=sha-
             type=ref,event=branch
-            type=ref,event=tag
             type=ref,event=pr
 
       - name: Docker metadata (unsuffixed tags — default target only)
-        if: matrix.gpu_target == needs.changes.outputs.default-gpu-target
+        if: matrix.gpu_target == needs.changes.outputs.course-default-gpu-target
         id: meta-default
         uses: docker/metadata-action@v5
         with:
-          images: ${{ needs.changes.outputs.registry }}/${{ steps.meta-inputs.outputs.image_name }}
+          images: ${{ needs.changes.outputs.registry }}/${{ matrix.course.image }}${{ needs.changes.outputs.image-name-suffix }}
+          flavor: latest=false
           tags: |
-            type=semver,pattern=v{{version}}
-            type=semver,pattern=v{{major}}.{{minor}}
-            type=semver,pattern=v{{major}}
-            type=raw,value=latest,enable={{is_default_branch}}
             type=raw,value=${{ github.event.inputs.version }},enable=${{ github.event.inputs.version != '' }}
             type=sha,prefix=sha-
             type=ref,event=branch
-            type=ref,event=tag
             type=ref,event=pr
 
       - name: Merge tags
         id: tags
+        env:
+          SUFFIXED_TAGS: ${{ steps.meta-suffixed.outputs.tags }}
+          DEFAULT_TAGS: ${{ steps.meta-default.outputs.tags }}
         run: |
-          TAGS="${{ steps.meta-suffixed.outputs.tags }}"
-          if [ -n "${{ steps.meta-default.outputs.tags }}" ]; then
-            TAGS="${TAGS}
-          ${{ steps.meta-default.outputs.tags }}"
-          fi
-          # Deduplicate
-          TAGS=$(echo "$TAGS" | sort -u)
           {
-            echo "tags<<EOF"
-            echo "$TAGS"
-            echo "EOF"
+            echo 'tags<<EOF'
+            printf '%s\n' "$SUFFIXED_TAGS" "$DEFAULT_TAGS" | sed '/^$/d' | sort -u
+            echo EOF
           } >> "$GITHUB_OUTPUT"
 
-      - name: Build and push ${{ matrix.course }} (${{ matrix.gpu_target }}) image
+      - name: Build and push ${{ matrix.course.name }} (${{ matrix.gpu_target }}) image
         uses: docker/build-push-action@v6
         with:
-          context: dockerfiles/Courses/${{ matrix.course }}
-          file: dockerfiles/Courses/${{ matrix.course }}/Dockerfile
+          context: ${{ matrix.course.context }}
+          file: ${{ matrix.course.context }}/Dockerfile
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.tags.outputs.tags }}
-          labels: ${{ steps.meta-suffixed.outputs.labels }}
+          labels: |
+            ${{ steps.meta-suffixed.outputs.labels }}
+            org.opencontainers.image.base.name=${{ steps.base.outputs.image }}
           build-args: |
-            ${{ steps.base.outputs.image && format('BASE_IMAGE={0}', steps.base.outputs.image) || '' }}
-          cache-from: type=gha,scope=course-${{ matrix.course }}-${{ matrix.gpu_target }}
-          cache-to: type=gha,mode=max,scope=course-${{ matrix.course }}-${{ matrix.gpu_target }}
+            BASE_IMAGE=${{ steps.base.outputs.image }}
+          cache-from: type=gha,scope=course-${{ matrix.course.image }}-${{ matrix.gpu_target }}
+          cache-to: type=gha,mode=max,scope=course-${{ matrix.course.image }}-${{ matrix.gpu_target }}
           provenance: false
 
-      - name: Clean course build context
-        if: always()
-        run: rm -rf dockerfiles/Courses/${{ matrix.course }}/course_data
+  # TODO(RFC 0001): promote the develop-tested digests on main and release tags
+  # with `docker buildx imagetools create` (latest / vX.Y.Z, -<gfx> and default
+  # unsuffixed aliases) instead of rebuilding. Until then no course images are
+  # published from main or tags.
+  promote-courses:
+    name: Promote Course Images
+    needs: changes
+    if: |
+      needs.changes.outputs.course-list != '[]' &&
+      (github.ref == 'refs/heads/main' || github.ref_type == 'tag')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Promotion not implemented
+        run: echo "::warning::Course image promotion is not implemented yet; nothing published for ${GITHUB_REF}"
