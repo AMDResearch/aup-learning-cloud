@@ -58,6 +58,7 @@ exclude = [
     "node_modules",
     "*.egg-info",
     "projects/CV/DL08_Diffusion_Model_new.ipynb",  # Work in progress with syntax errors
+    "projects/aup-teaching-labs",  # Git submodule (aup-teaching-labs); not linted here
 ]
 
 [tool.ruff.lint]

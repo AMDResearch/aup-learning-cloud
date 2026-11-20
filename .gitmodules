@@ -1,0 +1,3 @@
+[submodule "projects/aup-teaching-labs"]
+	path = projects/aup-teaching-labs
+	url = https://github.com/AMDResearch/aup-teaching-labs.git

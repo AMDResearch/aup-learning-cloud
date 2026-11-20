@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: MIT
 
 .git
+# Course submodule; not used by root-context image builds
+projects/aup-teaching-labs
 .worktrees
 .sisyphus
 
