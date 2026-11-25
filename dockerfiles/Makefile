@@ -135,7 +135,7 @@ define build-course
 		echo "$(TEACHING_LABS)/$(3)/Dockerfile not found; run: git submodule update --init projects/aup-teaching-labs" >&2; \
 		exit 1; \
 	fi
-	docker build --build-arg BASE_IMAGE=$(GPU_BASE_IMAGE) \
+	docker build --build-arg BASE_IMAGE=$(GPU_BASE_IMAGE) --build-arg COURSE_NAME=$(notdir $(3)) \
 		-t ghcr.io/amdresearch/$(2):latest $(TEACHING_LABS)/$(3)
 	docker tag ghcr.io/amdresearch/$(2):latest ghcr.io/amdresearch/$(2):latest-$(GPU_TARGET)
 	$(MAKE) save-image IMAGE=ghcr.io/amdresearch/$(2):latest

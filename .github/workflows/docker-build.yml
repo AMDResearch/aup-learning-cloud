@@ -903,6 +903,16 @@ jobs:
             echo EOF
           } >> "$GITHUB_OUTPUT"
 
+      - name: Resolve course name
+        id: course
+        env:
+          CONTEXT: ${{ matrix.course.context }}
+        run: |
+          # Course templates install under /opt/workspace/<COURSE_NAME>; the
+          # teaching-labs build scripts name the course after its directory.
+          dir=${CONTEXT%/}
+          echo "name=${dir##*/}" >> "$GITHUB_OUTPUT"
+
       - name: Build and push ${{ matrix.course.name }} (${{ matrix.gpu_target }}) image
         uses: docker/build-push-action@v6
         with:
@@ -915,6 +925,7 @@ jobs:
             org.opencontainers.image.base.name=${{ steps.base.outputs.image }}
           build-args: |
             BASE_IMAGE=${{ steps.base.outputs.image }}
+            COURSE_NAME=${{ steps.course.outputs.name }}
           cache-from: type=gha,scope=course-${{ matrix.course.image }}-${{ matrix.gpu_target }}
           cache-to: type=gha,mode=max,scope=course-${{ matrix.course.image }}-${{ matrix.gpu_target }}
           provenance: false
