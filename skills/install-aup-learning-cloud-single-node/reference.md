@@ -49,7 +49,7 @@ sudo apt install python3-questionary python3-prompt-toolkit
 | --- | --- | --- |
 | `--gpu=TYPE` | `auto` (default), `phx`, `strix`, `strix-halo`, `9070xt`, `r9700`, `9600gre`, `rdna4`/`dgpu`, `gfxNNNN` | Auto-detect via rocminfo/KFD. Env `GPU_TYPE`. |
 | `--courses=SPEC` | `all` (default), `basic`, `none`, or `cpu,gpu,Course-CV,...` | Restricts image build/pull **and** hides unselected courses in the spawn UI. Env `AUPLC_COURSES`. |
-| `--image-source=SRC` | `pull` (default) or `build` | `pull` = registry; `build` = local from `dockerfiles/`. |
+| `--image-source=SRC` | `pull` (default) or `build` | `pull` = registry; `build` = local from `dockerfiles/` (course images also need the `projects/aup-teaching-labs` submodule). |
 | `--image-registry=PREFIX` | default `ghcr.io/amdresearch` | Env `IMAGE_REGISTRY`. |
 | `--image-tag=TAG` | default `latest` | GPU suffix appended automatically. Env `IMAGE_TAG`. Use `develop` for the preview UI. |
 | `--runtime=MODE` | `docker` (default) or `containerd` | `docker` makes images visible to k3s immediately; `containerd` exports for offline. |

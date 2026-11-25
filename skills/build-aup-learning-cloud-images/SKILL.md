@@ -29,6 +29,9 @@ and (if asked) push. Target list, tag scheme, and the push flow are in
 
 - A checkout of `aup-learning-cloud`; Docker with enough disk (GPU images are
   large) and, for course images, network access to base layers.
+- For course images (`cv`, `dl`, `llm`, `physim`): the
+  `projects/aup-teaching-labs` submodule (`git submodule update --init`). The
+  course build contexts live there.
 - For pushing: `docker login` to the target registry (default
   `ghcr.io/amdresearch`).
 - Know the **GPU target** for GPU images (`phx`, `strix`, `strix-halo`,

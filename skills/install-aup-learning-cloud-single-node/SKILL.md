@@ -47,7 +47,8 @@ table, offline flow, and troubleshooting are in **[reference.md](reference.md)**
 2. **Courses**: `all` (default), `basic` (cpu/gpu + code-server), `none`
    (Hub only), or an explicit list (`cpu,gpu,Course-CV`).
 3. **Image source**: `pull` (default, from `ghcr.io/amdresearch`) or `build`
-   (local from `dockerfiles/`). For a quick demo prefer `pull`.
+   (local from `dockerfiles/`; course images also need the
+   `projects/aup-teaching-labs` submodule). For a quick demo prefer `pull`.
 4. **Online or offline**: a normal machine with internet, or an air-gapped one
    that needs a `pack` bundle (see reference).
 5. **Access mode**: interactive and scripted installs default to the `personal`

@@ -118,43 +118,40 @@ code-gpu:
 	$(MAKE) save-image IMAGE=ghcr.io/amdresearch/auplc-code-gpu:latest
 
 # --- Course Images ---
+# Course images build from the aup-teaching-labs submodule, with the same
+# contexts as the build-courses job in .github/workflows/docker-build.yml
+# (listed in the submodule's .github/build-config.json).
+TEACHING_LABS := ../projects/aup-teaching-labs
+
 courses: cv dl llm physim
 
-cv:
+# $(1) display name, $(2) image name, $(3) context under $(TEACHING_LABS)
+define build-course
 	@echo "-------------------------------------------"; \
-		echo "Building CV Course Image..."; \
+		echo "Building $(1) Course Image..."; \
 		echo "-------------------------------------------";
 
-	cd Courses/CV && BASE_IMAGE=$(GPU_BASE_IMAGE) bash ./build.sh
-	docker tag ghcr.io/amdresearch/auplc-cv:latest ghcr.io/amdresearch/auplc-cv:latest-$(GPU_TARGET)
-	$(MAKE) save-image IMAGE=ghcr.io/amdresearch/auplc-cv:latest
+	@if [ ! -f "$(TEACHING_LABS)/$(3)/Dockerfile" ]; then \
+		echo "$(TEACHING_LABS)/$(3)/Dockerfile not found; run: git submodule update --init projects/aup-teaching-labs" >&2; \
+		exit 1; \
+	fi
+	docker build --build-arg BASE_IMAGE=$(GPU_BASE_IMAGE) \
+		-t ghcr.io/amdresearch/$(2):latest $(TEACHING_LABS)/$(3)
+	docker tag ghcr.io/amdresearch/$(2):latest ghcr.io/amdresearch/$(2):latest-$(GPU_TARGET)
+	$(MAKE) save-image IMAGE=ghcr.io/amdresearch/$(2):latest
+endef
+
+cv:
+	$(call build-course,CV,auplc-cv,projects/CV)
 
 dl:
-	@echo "-------------------------------------------"; \
-		echo "Building DL Course Image..."; \
-		echo "-------------------------------------------";
-
-	cd Courses/DL && BASE_IMAGE=$(GPU_BASE_IMAGE) bash ./build.sh
-	docker tag ghcr.io/amdresearch/auplc-dl:latest ghcr.io/amdresearch/auplc-dl:latest-$(GPU_TARGET)
-	$(MAKE) save-image IMAGE=ghcr.io/amdresearch/auplc-dl:latest
+	$(call build-course,DL,auplc-dl,projects/DL)
 
 llm:
-	@echo "-------------------------------------------"; \
-		echo "Building LLM Course Image..."; \
-		echo "-------------------------------------------";
-
-	cd Courses/LLM && BASE_IMAGE=$(GPU_BASE_IMAGE) bash ./build.sh
-	docker tag ghcr.io/amdresearch/auplc-llm:latest ghcr.io/amdresearch/auplc-llm:latest-$(GPU_TARGET)
-	$(MAKE) save-image IMAGE=ghcr.io/amdresearch/auplc-llm:latest
+	$(call build-course,LLM,auplc-llm,projects/LLM)
 
 physim:
-	@echo "-------------------------------------------"; \
-		echo "Building PhySim Course Image..."; \
-		echo "-------------------------------------------";
-
-	cd Courses/PhySim && BASE_IMAGE=$(GPU_BASE_IMAGE) bash ./build.sh
-	docker tag ghcr.io/amdresearch/auplc-physim:latest ghcr.io/amdresearch/auplc-physim:latest-$(GPU_TARGET)
-	$(MAKE) save-image IMAGE=ghcr.io/amdresearch/auplc-physim:latest
+	$(call build-course,PhySim,auplc-physim,projects/Physical-AI/Physical-Simulation/Genesis-Simulation)
 
 # --- Export Images ---
 save-image:

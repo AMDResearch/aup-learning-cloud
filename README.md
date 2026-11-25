@@ -184,22 +184,23 @@ For multi-node cluster installation or need more control over the deployment pro
 
 AUP Learning Cloud offers the following Learning Toolkits:
 
-- [**Computer Vision**](projects/CV) \
-Includes 10 hands-on labs covering common computer vision concepts and techniques.
+- [**Computer Vision**](https://github.com/AMDResearch/aup-teaching-labs/tree/main/projects/CV) \
+Includes 8 hands-on labs covering common computer vision concepts and techniques.
 
-- [**Deep Learning**](projects/DL) \
+- [**Deep Learning**](https://github.com/AMDResearch/aup-teaching-labs/tree/main/projects/DL) \
 Includes 12 hands-on labs covering common deep learning concepts and techniques.
 
-- [**Large Language Model from Scratch**](projects/LLM) \
-Includes 9 hands-on labs designed to teach LLM development from scratch.
+- [**Large Language Model from Scratch**](https://github.com/AMDResearch/aup-teaching-labs/tree/main/projects/LLM) \
+Includes 14 hands-on labs designed to teach LLM development from scratch.
 
-- [**Physical Simulation**](projects/PhySim) \
-Hands-on labs for physics simulation and robotics using Genesis.
+- [**Physical Simulation**](https://github.com/AMDResearch/aup-teaching-labs/tree/main/projects/Physical-AI/Physical-Simulation/Genesis-Simulation) \
+Includes 6 hands-on labs for physics simulation and robotics using Genesis.
 
-Course content is also maintained in [aup-teaching-labs](https://github.com/AMDResearch/aup-teaching-labs),
+Course content is maintained in [aup-teaching-labs](https://github.com/AMDResearch/aup-teaching-labs),
 included as a Git submodule at `projects/aup-teaching-labs`. To fetch it, clone with
 `git clone --recurse-submodules` or run `git submodule update --init` in an existing clone.
-The installer does not need the submodule.
+The installer needs the submodule only to build course images locally
+(`--image-source=build`); pulling images does not.
 
 ## Key Features
 
