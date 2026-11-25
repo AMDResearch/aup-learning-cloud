@@ -9,6 +9,8 @@ Target list, tag scheme, push/pull flows, and troubleshooting for
 - Repo README "Available Notebook and Coding Environments" + `./auplc-installer help`.
 - `auplc_installer/catalog.py` (course → image basename + make target).
 - `dockerfiles/` (the actual build context, incl. `dockerfiles/Code/extensions.txt`).
+- `projects/aup-teaching-labs` (submodule): the course build contexts; the
+  `dockerfiles/Makefile` course targets build from it.
 
 ## Target → image map
 

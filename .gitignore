@@ -386,7 +386,6 @@ vite.config.ts.timestamp-*
 .env
 
 # Project specific
-dockerfiles/Courses/DL/data/FashionMNIST/raw/
 *.vsix
 
 # Local config overrides
