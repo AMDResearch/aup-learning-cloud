@@ -181,9 +181,12 @@ jobs:
               - 'runtime/shared/**'
             courses:
               - 'projects/aup-teaching-labs'
+              - 'projects/course-base-version.txt'
               - '.github/workflows/docker-build.yml'
             course-submodule:
               - 'projects/aup-teaching-labs'
+            course-base:
+              - 'projects/course-base-version.txt'
             course-workflow:
               - '.github/workflows/docker-build.yml'
             base-cpu:
@@ -208,7 +211,9 @@ jobs:
 
       # Course list, contexts and targets come from the teaching-labs submodule.
       # A submodule bump rebuilds only courses whose context changed between the
-      # old and new submodule commits; manual runs, tags and workflow edits select all.
+      # old and new submodule commits; changing projects/course-base-version.txt
+      # rebuilds every course without a base-version.override.txt; manual runs,
+      # tags and workflow edits select all.
       - name: Select course builds
         id: courses
         env:
@@ -216,6 +221,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           REF_TYPE: ${{ github.ref_type }}
           SUBMODULE_CHANGED: ${{ steps.filter.outputs.course-submodule }}
+          BASE_CHANGED: ${{ steps.filter.outputs.course-base }}
           WORKFLOW_CHANGED: ${{ steps.filter.outputs.course-workflow }}
           OLD_REV: ${{ github.event.pull_request.base.sha || github.event.before }}
           GPU_INPUT: ${{ github.event.inputs.gpu_target }}
@@ -244,10 +250,16 @@ jobs:
             fi
           fi
 
-          LIST=$(jq -c --arg p "$TL_PATH/" --argjson changed "$CHANGED" '
+          OVERRIDDEN=$(jq -r '.courses[].context | rtrimstr("/")' "$CONFIG" | while read -r c; do
+            if [[ -f "$TL_PATH/$c/base-version.override.txt" ]]; then echo "$c"; fi
+          done | jq -Rsc 'split("\n") | map(select(. != ""))')
+
+          LIST=$(jq -c --arg p "$TL_PATH/" --argjson changed "$CHANGED" \
+            --argjson overridden "$OVERRIDDEN" --arg base_changed "$BASE_CHANGED" '
             [.courses[]
               | (.context | rtrimstr("/")) as $c
-              | select($changed == null or any($changed[]; startswith($c + "/")))
+              | select($changed == null or any($changed[]; startswith($c + "/"))
+                  or ($base_changed == "true" and ($overridden | index($c) | not)))
               | .context = $p + $c]' "$CONFIG")
           TARGETS=$(jq -c --arg t "$GPU_INPUT" '[.gpu_targets[].name | select($t == "" or $t == "all" or . == $t)]' "$CONFIG")
           {
@@ -407,6 +419,7 @@ jobs:
           tags: |
             type=semver,pattern=v{{version}}
             type=semver,pattern=v{{major}}.{{minor}}
+            type=semver,pattern=v{{major}}
             type=raw,value=latest,enable={{is_default_branch}}
             type=raw,value=${{ github.event.inputs.version }},enable=${{ github.event.inputs.version != '' }}
             type=sha,prefix=sha-
@@ -473,6 +486,7 @@ jobs:
           tags: |
             type=semver,pattern=v{{version}}
             type=semver,pattern=v{{major}}.{{minor}}
+            type=semver,pattern=v{{major}}
             type=raw,value=latest,enable={{is_default_branch}}
             type=sha,prefix=sha-
             type=ref,event=branch
@@ -769,8 +783,10 @@ jobs:
   # ──────────────────────────────────────────────
   # Course Images (from the aup-teaching-labs submodule)
   #
-  # Each course pins its base in <context>/base-version.txt and builds on that
-  # released auplc-base digest — never on the base built in this run.
+  # projects/course-base-version.txt selects one released base for every course;
+  # a course may hold another release in <context>/base-version.override.txt.
+  # Courses build on that release's auplc-base digest — never on the base built
+  # in this run.
   # PRs build without pushing; other branches publish dev tags.
   # main and release tags promote tested digests instead (promote-courses).
   # ──────────────────────────────────────────────
@@ -811,9 +827,17 @@ jobs:
       - name: Resolve base image
         id: base
         env:
-          VERSION_FILE: ${{ matrix.course.context }}/base-version.txt
+          COURSE_DIR: ${{ matrix.course.context }}
           GPU_TARGET: ${{ matrix.gpu_target }}
         run: |
+          VERSION_FILE=projects/course-base-version.txt
+          if [[ -f "$COURSE_DIR/base-version.override.txt" ]]; then
+            VERSION_FILE="$COURSE_DIR/base-version.override.txt"
+            echo "::warning file=$VERSION_FILE::Course overrides the base selected in projects/course-base-version.txt"
+          fi
+          if [[ -f "$COURSE_DIR/base-version.txt" ]]; then
+            echo "::warning file=$COURSE_DIR/base-version.txt::Ignored; LC selects the base in projects/course-base-version.txt"
+          fi
           version=$(sed -e 's/#.*//' -e 's/[[:space:]]//g' "$VERSION_FILE" | grep -v '^$' || true)
           if [[ ! "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
             echo "::error file=$VERSION_FILE::Set one released AUP Learning Cloud version (vX.Y.Z)"

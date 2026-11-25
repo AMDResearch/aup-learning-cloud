@@ -1,0 +1,4 @@
+# Base release for every course image built from projects/aup-teaching-labs.
+# One released version (vX.Y.Z); changing it rebuilds all courses without a
+# base-version.override.txt. See docker-build.yml (build-courses).
+v0.1.1
