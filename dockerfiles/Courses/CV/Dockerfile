@@ -21,8 +21,26 @@
 ARG BASE_IMAGE=ghcr.io/amdresearch/auplc-base:latest
 FROM ${BASE_IMAGE}
 
-# Copy related rocm notebooks into the docker
 USER root
+
+# OpenCV (pulled in by ultralytics) needs libGL / glib at import time
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1 libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Course dependencies: ultralytics + lap (CV03 detection, CV06 ByteTrack tracking),
+# segment-anything + pycocotools (CV05), kagglehub (CV04 CamVid download).
+# Pin the base image's torch stack so these packages cannot replace the ROCm wheels.
+RUN pip3 freeze | grep -iE '^(torch|torchvision|torchaudio|numpy)==' > /tmp/base-pins.txt && \
+    pip3 install --no-cache-dir -c /tmp/base-pins.txt \
+    ultralytics \
+    lap \
+    segment-anything \
+    pycocotools \
+    kagglehub \
+    && rm /tmp/base-pins.txt
+
+# Copy related rocm notebooks into the docker
 RUN mkdir -p /opt/workspace/CV
 COPY ./course_data /opt/workspace/CV
 

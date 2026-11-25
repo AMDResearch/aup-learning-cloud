@@ -28,6 +28,9 @@ COPY data/ /opt/workspace/DL/data
 
 USER root
 
+# imageio: DL11 assembles the GAN training progress GIF
+RUN pip3 install --no-cache-dir imageio
+
 RUN cd /opt/workspace/DL/data/FashionMNIST && bash ./download_data.sh
 
 
