@@ -10,9 +10,9 @@ description: >-
   mapping), and hand off to values wiring. Use when an educator wants to add a
   new course or lab set, create a toolkit like CV/DL/LLM/PhySim, turn a
   notebook folder into a spawnable course, or add a course key to the catalog.
-  Triggers include aup-teaching-labs, projects/aup-teaching-labs,
-  projects/Template, build-config.json courses, COURSE_CATALOG, "add a
-  course", "new toolkit". Do not use to only build an existing image
+  Triggers include projects/aup-teaching-labs,
+  projects/Template, build-config.json, COURSE_CATALOG, "add a
+  course". Do not use to only build an existing image
   (build-aup-learning-cloud-images), to only edit the values catalog for an
   existing image (configure-aup-learning-cloud-courses), or to clone a user's
   repo at runtime (configure-aup-learning-cloud-repos).
