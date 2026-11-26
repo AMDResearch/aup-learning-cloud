@@ -111,10 +111,15 @@ class CustomGitHubOAuthenticator(GitHubOAuthenticator):
         the unprefixed name; group sync uses the prefixed local identity.
         """
         super().add_user(SimpleNamespace(name=user.name.removeprefix(self.prefix)))
+        db = getattr(user, "db", None)
+        if db is None:
+            # At startup JupyterHub passes database rows (orm.User), which have no
+            # session. Groups are assigned when the user is created and at spawn.
+            return
         try:
             from core.groups import ensure_user_group_membership
 
-            await ensure_user_group_membership(user, user.db)
+            await ensure_user_group_membership(user, db)
         except Exception:
             self.log.warning("Failed to ensure group membership for %s at login", user.name, exc_info=True)
 

@@ -223,3 +223,18 @@ def test_github_add_user_survives_group_sync_failure(monkeypatch: pytest.MonkeyP
         anyio.run(authenticator.add_user, user)
 
         assert authenticator.child_add_names == ["octo"]
+
+
+def test_github_add_user_skips_group_sync_for_startup_rows(monkeypatch: pytest.MonkeyPatch) -> None:
+    """At startup JupyterHub passes orm.User rows, which have no db session."""
+    with loaded_authenticators(monkeypatch) as modules:
+        authenticator = modules.github.CustomGitHubOAuthenticator()
+        warnings: list[tuple[object, ...]] = []
+        monkeypatch.setattr(authenticator.log, "warning", lambda *args, **_kwargs: warnings.append(args))
+        user = SimpleNamespace(name="github:octo")
+
+        anyio.run(authenticator.add_user, user)
+
+        assert authenticator.child_add_names == ["octo"]
+        assert modules.membership_calls == []
+        assert warnings == []
