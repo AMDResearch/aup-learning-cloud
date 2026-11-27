@@ -83,6 +83,10 @@ def _loaded_firstuse_authenticator(monkeypatch: pytest.MonkeyPatch) -> Iterator[
         class FakeFirstUseAuthenticator:
             def __init__(self) -> None:
                 self.log = _FakeLog()
+                self.added_names = []
+
+            def add_user(self, user) -> None:
+                self.added_names.append(user.name)
 
         firstuseauthenticator = types.ModuleType("firstuseauthenticator")
         firstuseauthenticator.FirstUseAuthenticator = FakeFirstUseAuthenticator
@@ -290,3 +294,41 @@ def test_weak_first_use_password_rejects_without_password_storage(monkeypatch: p
 
         assert authenticated is None
         assert password_changes == []
+
+
+def _install_fake_groups(module_patch: pytest.MonkeyPatch) -> list:
+    calls = []
+    groups = types.ModuleType("core.groups")
+
+    async def ensure_user_group_membership(user, db, *, refresh_github_teams=False):
+        calls.append((user.name, db))
+
+    groups.ensure_user_group_membership = ensure_user_group_membership
+    module_patch.setitem(sys.modules, "core.groups", groups)
+    return calls
+
+
+def test_add_user_syncs_groups_with_the_user_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    with _loaded_firstuse_authenticator(monkeypatch) as authenticator_type:
+        calls = _install_fake_groups(monkeypatch)
+        authenticator = authenticator_type()
+        db = object()
+
+        asyncio.run(authenticator.add_user(types.SimpleNamespace(name="learner", db=db)))
+
+        assert authenticator.added_names == ["learner"]
+        assert calls == [("learner", db)]
+        assert authenticator.log.warnings == []
+
+
+def test_add_user_skips_group_sync_for_startup_rows(monkeypatch: pytest.MonkeyPatch) -> None:
+    """At startup JupyterHub passes orm.User rows, which have no db session."""
+    with _loaded_firstuse_authenticator(monkeypatch) as authenticator_type:
+        calls = _install_fake_groups(monkeypatch)
+        authenticator = authenticator_type()
+
+        asyncio.run(authenticator.add_user(types.SimpleNamespace(name="learner")))
+
+        assert authenticator.added_names == ["learner"]
+        assert calls == []
+        assert authenticator.log.warnings == []
