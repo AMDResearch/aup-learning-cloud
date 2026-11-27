@@ -65,19 +65,34 @@ def load_spawner(monkeypatch: pytest.MonkeyPatch, groups: types.ModuleType) -> t
     return module.RemoteLabKubeSpawner
 
 
-def test_spawner_uses_shared_group_mapping_without_auth_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("default_assigned", [False, True])
+def test_spawner_uses_shared_group_mapping_without_auth_mode(monkeypatch: pytest.MonkeyPatch, default_assigned) -> None:
     groups_test = load_groups_test_module(monkeypatch)
     spawner_type = load_spawner(monkeypatch, groups_test.groups)
     spawner = object.__new__(spawner_type)
     spawner.user = groups_test.DummyUser([groups_test.DummyGroup("team-gpu")], name="native-user")
+    if default_assigned:
+        spawner.user.orm_user.groups.append(groups_test.DummyGroup("native-users", source="system"))
     spawner.team_resource_mapping = {"team-gpu": ["gpu"], "native-users": ["cpu"]}
     spawner.resource_images = {"cpu": "cpu-image", "gpu": "gpu-image", "code-cpu": "code-image"}
     spawner.log = types.SimpleNamespace(debug=lambda _message: None)
 
     assert asyncio.run(spawner.get_user_resources()) == ["gpu"]
+    assert 'window.AVAILABLE_RESOURCES=["gpu"]' in asyncio.run(spawner.options_form(None))
+
+    # Both form submissions and direct spawn requests must reject other courses
+    # before accelerator selection, quota charging, or pod creation.
+    with pytest.raises(RuntimeError, match="not authorized"):
+        spawner.options_from_form({"resource_type": ["cpu"], "runtime": ["20"]})
+    spawner.user_options = {"resource_type": "cpu"}
+    with pytest.raises(RuntimeError, match="not authorized"):
+        asyncio.run(spawner.start())
 
 
-def test_resources_api_uses_shared_group_mapping_without_auth_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("default_assigned", [False, True])
+def test_resources_api_uses_shared_group_mapping_without_auth_mode(
+    monkeypatch: pytest.MonkeyPatch, default_assigned
+) -> None:
     groups_test = load_groups_test_module(monkeypatch)
     monkeypatch.delitem(sys.modules, "tornado", raising=False)
     monkeypatch.delitem(sys.modules, "tornado.web", raising=False)
@@ -101,6 +116,8 @@ def test_resources_api_uses_shared_group_mapping_without_auth_mode(monkeypatch: 
         loaded.handlers.configure_handlers(team_resource_mapping={"team-gpu": ["gpu"], "native-users": ["cpu"]})
         handler = object.__new__(loaded.handlers.ResourcesAPIHandler)
         handler.current_user = groups_test.DummyUser([groups_test.DummyGroup("team-gpu")], name="native-user")
+        if default_assigned:
+            handler.current_user.orm_user.groups.append(groups_test.DummyGroup("native-users", source="system"))
         response: dict[str, str] = {}
         handler.set_header = lambda _key, _value: None
         handler.finish = lambda body: response.setdefault("body", body)
