@@ -74,6 +74,7 @@ on:
           - gfx1150
           - gfx1151
           - gfx1152
+          - gfx1153
           - gfx120x
 
 # Build matrix is defined in .github/build-config.json
@@ -633,9 +634,19 @@ jobs:
         run: |
           echo "tag_suffix=${{ matrix.gpu_target }}" >> "$GITHUB_OUTPUT"
           # Look up target-specific build metadata; fall back to gpu_target if not found
-          WHL=$(echo '${{ needs.changes.outputs.gpu-map }}' | jq -r --arg t "${{ matrix.gpu_target }}" '.[] | select(.name == $t) | .pytorch_whl // .name')
-          SDK=$(echo '${{ needs.changes.outputs.gpu-map }}' | jq -r --arg t "${{ matrix.gpu_target }}" '.[] | select(.name == $t) | .rocm_sdk // .name')
-          echo "pytorch_whl=${WHL}" >> "$GITHUB_OUTPUT"
+          GPU_MAP='${{ needs.changes.outputs.gpu-map }}'
+          TARGET='${{ matrix.gpu_target }}'
+          WHL=$(echo "$GPU_MAP" | jq -r --arg t "$TARGET" '
+            .[] | select(.name == $t) |
+            (.pytorch_devices // .pytorch_whl // .name) |
+            if type == "array" then join(" ") else . end
+          ')
+          SDK=$(echo "$GPU_MAP" | jq -r --arg t "$TARGET" '
+            .[] | select(.name == $t) |
+            (.rocm_sdk // .name) |
+            if type == "array" then join(" ") else . end
+          ')
+          echo "pytorch_devices=${WHL}" >> "$GITHUB_OUTPUT"
           echo "rocm_sdk=${SDK}" >> "$GITHUB_OUTPUT"
 
       - name: Docker metadata (target-suffixed tags)
@@ -700,7 +711,7 @@ jobs:
           build-args: |
             GPU_TARGET=${{ matrix.gpu_target }}
             ROCM_SDK_TARGET=${{ steps.suffix.outputs.rocm_sdk }}
-            PYTORCH_WHL_TARGET=${{ steps.suffix.outputs.pytorch_whl }}
+            PYTORCH_DEVICES=${{ steps.suffix.outputs.pytorch_devices }}
           cache-from: type=gha,scope=base-gpu-${{ matrix.gpu_target }}
           cache-to: type=gha,mode=max,scope=base-gpu-${{ matrix.gpu_target }}
           provenance: false
